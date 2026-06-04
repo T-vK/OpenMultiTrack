@@ -1,0 +1,11 @@
+OpenMultiTrack records multichannel audio from Behringer X32/XR18 mixers over USB and supports virtual soundcheck playback with sample-accurate seeking.
+
+Features (roadmap):
+• Multichannel USB recording to WAV (24-bit / 48 kHz)
+• Playback to mixer USB returns for virtual soundchecks
+• OSC mixer snapshots for record ↔ soundcheck routing
+• On-device web remote (no cloud, no tracking)
+
+This build (0.1.0) implements USB device detection and channel probing as the first milestone.
+
+Requires USB host (OTG) and a compatible Android device. See project documentation for hardware verification.

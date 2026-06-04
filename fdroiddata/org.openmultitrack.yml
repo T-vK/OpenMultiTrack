@@ -1,0 +1,40 @@
+# Draft F-Droid recipe — copy to fdroiddata repo as metadata/org.openmultitrack.yml
+# https://gitlab.com/fdroid/fdroiddata
+
+Categories:
+  - Multimedia
+License: GPL-3.0-only
+SourceCode: https://github.com/T-vK/OpenMultiTrack
+IssueTracker: https://github.com/T-vK/OpenMultiTrack/issues
+
+AutoName: OpenMultiTrack
+Description: |-
+  Multitrack recorder and virtual soundcheck player for Behringer X32/XR18
+  USB mixers. Records all USB input channels and plays sessions back to mixer
+  returns with sample-aligned seeking. No Google Play Services or tracking.
+
+  Milestone 1: USB probe vertical slice.
+
+RepoType: git
+Repo: https://github.com/T-vK/OpenMultiTrack.git
+
+Builds:
+  - versionName: '0.1.0-m1'
+    versionCode: 1
+    commit: v0.1.0-m1
+    subdir: .
+    submodules: true
+    gradle:
+      - yes
+    scandelete:
+      - .gradle
+    prebuild:
+      - git submodule update --init --recursive
+    ndk: r26d
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: '0.1.0-m1'
+CurrentVersionCode: 1
+
+AntiFeatures: []
