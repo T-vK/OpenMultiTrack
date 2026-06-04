@@ -1,7 +1,16 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+}
+
+val versionProps = Properties().apply {
+    val file = rootProject.file("gradle/version.properties")
+    if (file.exists()) {
+        file.inputStream().use { load(it) }
+    }
 }
 
 android {
@@ -12,8 +21,8 @@ android {
         applicationId = "org.openmultitrack"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-m1"
+        versionCode = versionProps.getProperty("VERSION_CODE", "1").toInt()
+        versionName = versionProps.getProperty("VERSION_NAME", "0.0.0")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -56,6 +65,7 @@ dependencies {
     implementation(project(":usb-audio"))
     implementation(project(":audio-engine"))
     implementation(project(":mixer-behringer"))
+    implementation(project(":session-io"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

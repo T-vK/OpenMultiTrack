@@ -1,0 +1,136 @@
+name: Publish
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: publish-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  publish:
+    name: Version, build, F-Droid repo, Pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./.github/actions/android-setup
+
+      - name: Compute semantic version
+        id: semver
+        uses: PaulHatcher/semantic-version@v0.5.0
+        with:
+          tag_prefix: "v"
+          major_pattern: "(BREAKING CHANGE|!):"
+          minor_pattern: "feat:"
+          patch_pattern: "fix:"
+          version_format: "${major}.${minor}.${patch}"
+
+      - name: Apply version to Gradle
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/write-version-properties.sh "${{ steps.semver.outputs.version }}"
+          echo "Building OpenMultiTrack ${{ steps.semver.outputs.version }} (${{ steps.semver.outputs.tag }})"
+
+      - name: Run unit tests
+        run: ./gradlew :domain:test :mixer-behringer:test :usb-audio:testDebugUnitTest :session-io:test --no-daemon
+
+      - name: Assemble debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      - name: Stage versioned APK
+        run: |
+          mkdir -p dist site/fdroid/repo
+          cp app/build/outputs/apk/debug/app-debug.apk \
+            "dist/org.openmultitrack_${{ steps.semver.outputs.version }}-debug.apk"
+          cp "dist/org.openmultitrack_${{ steps.semver.outputs.version }}-debug.apk" \
+            site/fdroid/repo/
+
+      - name: Set up Python for fdroidserver
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install fdroidserver
+        run: pip install fdroidserver
+
+      - name: Restore F-Droid repo keystore
+        uses: actions/cache@v4
+        id: fdroid-keystore
+        with:
+          path: fdroid/keystore.p12
+          key: fdroid-repo-keystore-v1
+
+      - name: Generate repo keystore if missing
+        if: steps.fdroid-keystore.outputs.cache-hit != 'true'
+        env:
+          FDROID_KEYSTORE_PASS: ${{ secrets.FDROID_KEYSTORE_PASS || 'openmultitrack-ci' }}
+        run: |
+          keytool -genkeypair -v \
+            -keystore fdroid/keystore.p12 -storetype PKCS12 \
+            -storepass "$FDROID_KEYSTORE_PASS" \
+            -keypass "$FDROID_KEYSTORE_PASS" \
+            -alias fdroidrepo -keyalg RSA -keysize 4096 -validity 10000 \
+            -dname "CN=OpenMultiTrack Repo, OU=CI, O=OpenMultiTrack, C=DE"
+
+      - name: Update F-Droid repo index
+        env:
+          FDROID_KEYSTORE_PASS: ${{ secrets.FDROID_KEYSTORE_PASS || 'openmultitrack-ci' }}
+        run: |
+          export FDROID_UPDATE_AUTOKEY=1
+          cd fdroid
+          fdroid update --create-metadata --pretty
+          fdroid update --pretty
+          rsync -a --delete repo/ ../site/fdroid/repo/
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Commit version.properties bump
+        if: steps.semver.outputs.version_changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add gradle/version.properties
+          git diff --staged --quiet && exit 0
+          git commit -m "chore(release): v${{ steps.semver.outputs.version }} [skip ci]"
+          git push
+
+      - name: Push release tag
+        if: steps.semver.outputs.version_changed == 'true'
+        run: |
+          git tag -f "${{ steps.semver.outputs.tag }}"
+          git push origin "${{ steps.semver.outputs.tag }}" --force
+
+      - name: Create GitHub Release
+        if: steps.semver.outputs.version_changed == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.semver.outputs.tag }}
+          name: OpenMultiTrack ${{ steps.semver.outputs.version }}
+          generate_release_notes: true
+          files: dist/*.apk
+          prerelease: true

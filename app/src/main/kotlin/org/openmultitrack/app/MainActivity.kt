@@ -62,6 +62,10 @@ class MainActivity : ComponentActivity() {
                         onRefresh = viewModel::refreshDevices,
                         onRequestPermission = ::requestUsbPermission,
                         onProbe = viewModel::probeDevice,
+                        onStartRecord = viewModel::startRecording,
+                        onStopRecord = viewModel::stopRecording,
+                        onPlay = viewModel::playLastRecording,
+                        onStopPlayback = viewModel::stopPlayback,
                     )
                 }
             }

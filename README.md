@@ -2,12 +2,13 @@
 
 FOSS Android app for **live multitrack recording** and **virtual soundcheck** with Behringer **X32** / **XR18** (and other UAC2 mixers), designed for [F-Droid](https://f-droid.org/).
 
-## Status (milestone 1)
+## Status
 
 - [x] Architecture, risk assessment, mixer driver design docs
 - [x] Gradle multi-module skeleton (Kotlin, Compose, NDK, Oboe)
 - [x] USB device enumeration + Oboe channel-count probe UI
-- [ ] 2-channel WAV record (milestone 2)
+- [x] 2-channel WAV record + playback (milestone 2, initial)
+- [x] GitHub Actions CI + semantic versioning + Pages F-Droid repo
 - [ ] Multitrack playback + seek (milestone 3)
 - [ ] OSC snapshots (milestone 4)
 - [ ] Embedded web remote (milestone 5)
@@ -15,6 +16,12 @@ FOSS Android app for **live multitrack recording** and **virtual soundcheck** wi
 ## License
 
 **GPL-3.0-or-later** — see [LICENSE](LICENSE). Oboe is Apache-2.0 ([`third_party/oboe`](third_party/oboe)).
+
+## Install (CI builds)
+
+Add F-Droid repository: **`https://T-vK.github.io/OpenMultiTrack/fdroid/repo`**
+
+See [docs/ci-and-releases.md](docs/ci-and-releases.md) for versioning and workflow details.
 
 ## Build
 
@@ -49,4 +56,5 @@ Fastlane metadata: [`fastlane/metadata`](fastlane/metadata). Draft recipe: [`fdr
 - `domain` — session/mixer models
 - `usb-audio` — USB enumeration
 - `audio-engine` — Oboe native probe (recording engine next)
-- `mixer-behringer` — X32/XR18 OSC stubs
+- `mixer-behringer` — X32/XR18 OSC (UDP `/info` ping)
+- `session-io` — 24-bit WAV read/write

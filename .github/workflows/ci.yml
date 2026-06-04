@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - "release/**"
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Build & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: ./.github/actions/android-setup
+
+      - name: Resolve snapshot version
+        id: version
+        shell: bash
+        run: |
+          chmod +x scripts/*.sh
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            NAME="0.0.0-pr.${{ github.event.pull_request.number }}.${{ github.run_number }}"
+          else
+            NAME="0.0.0-dev.${{ github.run_number }}"
+          fi
+          ./scripts/write-version-properties.sh "$NAME"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Run JVM unit tests
+        run: ./gradlew :domain:test :mixer-behringer:test :session-io:test :usb-audio:testDebugUnitTest --no-daemon
+
+      - name: Assemble debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk-${{ steps.version.outputs.name }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Verify no Play Services on classpath
+        run: |
+          ./gradlew :app:dependencies --configuration debugRuntimeClasspath --no-daemon \
+            | tee /tmp/deps.txt
+          if grep -E 'com\.google\.android\.gms|firebase|play-services' /tmp/deps.txt; then
+            echo "Forbidden Google Play / Firebase dependency detected." >&2
+            exit 1
+          fi

@@ -5,4 +5,8 @@
     <string name="probe_channels">Probe channels</string>
     <string name="refresh_devices">Refresh USB devices</string>
     <string name="no_usb_devices">No USB devices detected. Connect a mixer via OTG.</string>
+    <string name="start_record">Record 2ch</string>
+    <string name="stop_record">Stop</string>
+    <string name="play_soundcheck">Play last</string>
+    <string name="stop_playback">Stop play</string>
 </resources>

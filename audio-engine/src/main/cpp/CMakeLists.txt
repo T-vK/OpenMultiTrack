@@ -13,6 +13,8 @@ add_subdirectory(${OBOE_DIR} ./oboe)
 
 add_library(openmultitrack_audio SHARED
     audio_probe.cpp
+    audio_recorder.cpp
+    audio_player.cpp
     jni_bridge.cpp
 )
 

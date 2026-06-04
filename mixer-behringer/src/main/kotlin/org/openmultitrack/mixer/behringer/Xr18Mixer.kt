@@ -26,7 +26,11 @@ class Xr18Mixer(
         if (config.port != DEFAULT_PORT) {
             return Result.failure(IllegalArgumentException("XR18 expects port $DEFAULT_PORT"))
         }
-        return Result.success(Unit)
+        return runCatching {
+            OscUdpClient(host, config.port).use { client ->
+                client.send(OscPath.info())
+            }
+        }
     }
 
     override suspend fun disconnect() = Unit

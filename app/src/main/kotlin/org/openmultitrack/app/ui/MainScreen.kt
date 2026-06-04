@@ -3,6 +3,7 @@ package org.openmultitrack.app.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -21,6 +22,7 @@ import org.openmultitrack.app.DeviceRow
 import org.openmultitrack.app.MainUiState
 import org.openmultitrack.app.R
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
+import org.openmultitrack.domain.session.TransportState
 
 @Composable
 fun MainScreen(
@@ -28,6 +30,10 @@ fun MainScreen(
     onRefresh: () -> Unit,
     onRequestPermission: (UsbAudioDeviceDescriptor) -> Unit,
     onProbe: (UsbAudioDeviceDescriptor) -> Unit,
+    onStartRecord: (UsbAudioDeviceDescriptor) -> Unit,
+    onStopRecord: () -> Unit,
+    onPlay: (UsbAudioDeviceDescriptor) -> Unit,
+    onStopPlayback: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -35,23 +41,17 @@ fun MainScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        Text(text = "OpenMultiTrack", style = MaterialTheme.typography.headlineMedium)
         Text(
-            text = "OpenMultiTrack",
-            style = MaterialTheme.typography.headlineMedium,
-        )
-        Text(
-            text = "Milestone 1: USB enumeration and Oboe channel probe",
+            text = "v${org.openmultitrack.app.BuildConfig.VERSION_NAME} — USB probe, 2ch record, playback",
             style = MaterialTheme.typography.bodyMedium,
         )
         Button(onClick = onRefresh, enabled = !state.isRefreshing) {
             Text(stringResource(R.string.refresh_devices))
         }
-        if (state.isRefreshing) {
-            CircularProgressIndicator()
-        }
-        state.statusMessage?.let { msg ->
-            Text(text = msg, color = MaterialTheme.colorScheme.error)
-        }
+        if (state.isRefreshing) CircularProgressIndicator()
+        state.statusMessage?.let { Text(text = it) }
+        state.lastRecordingPath?.let { Text("Last session: $it", style = MaterialTheme.typography.bodySmall) }
         if (state.devices.isEmpty() && !state.isRefreshing) {
             Text(stringResource(R.string.no_usb_devices))
         }
@@ -62,8 +62,13 @@ fun MainScreen(
             items(state.devices, key = { it.descriptor.deviceName }) { row ->
                 DeviceCard(
                     row = row,
+                    canPlay = state.lastRecordingPath != null && state.transportState != TransportState.PLAYING,
                     onRequestPermission = onRequestPermission,
                     onProbe = onProbe,
+                    onStartRecord = onStartRecord,
+                    onStopRecord = onStopRecord,
+                    onPlay = onPlay,
+                    onStopPlayback = onStopPlayback,
                 )
             }
         }
@@ -73,8 +78,13 @@ fun MainScreen(
 @Composable
 private fun DeviceCard(
     row: DeviceRow,
+    canPlay: Boolean,
     onRequestPermission: (UsbAudioDeviceDescriptor) -> Unit,
     onProbe: (UsbAudioDeviceDescriptor) -> Unit,
+    onStartRecord: (UsbAudioDeviceDescriptor) -> Unit,
+    onStopRecord: () -> Unit,
+    onPlay: (UsbAudioDeviceDescriptor) -> Unit,
+    onStopPlayback: () -> Unit,
 ) {
     val d = row.descriptor
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -89,23 +99,33 @@ private fun DeviceCard(
                     Text(stringResource(R.string.usb_permission_required))
                 }
             } else {
-                Button(
-                    onClick = { onProbe(d) },
-                    enabled = !row.probing,
-                ) {
-                    Text(stringResource(R.string.probe_channels))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { onProbe(d) }, enabled = !row.probing) {
+                        Text(stringResource(R.string.probe_channels))
+                    }
+                    if (row.isRecording) {
+                        Button(onClick = onStopRecord) {
+                            Text(stringResource(R.string.stop_record))
+                        }
+                    } else {
+                        Button(onClick = { onStartRecord(d) }) {
+                            Text(stringResource(R.string.start_record))
+                        }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { onPlay(d) }, enabled = canPlay) {
+                        Text(stringResource(R.string.play_soundcheck))
+                    }
+                    Button(onClick = onStopPlayback) {
+                        Text(stringResource(R.string.stop_playback))
+                    }
                 }
             }
-            if (row.probing) {
-                CircularProgressIndicator()
-            }
+            if (row.probing) CircularProgressIndicator()
             row.probe?.let { probe ->
-                probe.input?.let { inProbe ->
-                    ProbeLine("Input", inProbe.channelCount, inProbe.sampleRate, inProbe.errorMessage)
-                }
-                probe.output?.let { outProbe ->
-                    ProbeLine("Output", outProbe.channelCount, outProbe.sampleRate, outProbe.errorMessage)
-                }
+                probe.input?.let { ProbeLine("Input", it.channelCount, it.sampleRate, it.errorMessage) }
+                probe.output?.let { ProbeLine("Output", it.channelCount, it.sampleRate, it.errorMessage) }
             }
         }
     }

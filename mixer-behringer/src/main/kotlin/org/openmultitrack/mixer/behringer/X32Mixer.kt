@@ -26,8 +26,11 @@ class X32Mixer(
         if (config.port != DEFAULT_PORT) {
             return Result.failure(IllegalArgumentException("X32 expects port $DEFAULT_PORT"))
         }
-        // OSC socket wiring in milestone 4.
-        return Result.success(Unit)
+        return runCatching {
+            OscUdpClient(host, config.port).use { client ->
+                client.send(OscPath.info())
+            }
+        }
     }
 
     override suspend fun disconnect() = Unit
