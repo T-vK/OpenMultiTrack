@@ -158,10 +158,8 @@ object AudioEngineRouter {
             AudioBackend.UAC2 -> {
                 val stream = route.usbStream ?: return failed("missing usb stream")
                 val alt = route.uac2Alt ?: return failed("missing uac2 alt")
-                if (usbDevice != null) {
-                    stream.claimInterface(usbDevice, alt.interfaceNumber)
-                }
-                NativeUac2Engine.startCapture(stream.fd, alt)
+                val javaClaimed = claimUac2Interface(stream, usbDevice, alt.interfaceNumber)
+                NativeUac2Engine.startCapture(stream.fd, alt, javaClaimed)
             }
         }
     }
@@ -191,10 +189,8 @@ object AudioEngineRouter {
             AudioBackend.UAC2 -> {
                 val stream = route.usbStream ?: return failed("missing usb stream")
                 val alt = route.uac2Alt ?: return failed("missing uac2 alt")
-                if (usbDevice != null) {
-                    stream.claimInterface(usbDevice, alt.interfaceNumber)
-                }
-                NativeUac2Engine.startPlayback(stream.fd, alt)
+                val javaClaimed = claimUac2Interface(stream, usbDevice, alt.interfaceNumber)
+                NativeUac2Engine.startPlayback(stream.fd, alt, javaClaimed)
             }
         }
     }
@@ -215,6 +211,17 @@ object AudioEngineRouter {
             AudioBackend.OBOE -> NativeAudioEngine.playbackUnderrunFrames()
             AudioBackend.UAC2 -> NativeUac2Engine.playbackUnderrunFrames()
         }
+
+    private fun claimUac2Interface(
+        stream: UsbAudioStreamHandle,
+        usbDevice: android.hardware.usb.UsbDevice?,
+        interfaceNumber: Int,
+    ): Boolean {
+        if (usbDevice == null) return false
+        val ok = stream.claimInterface(usbDevice, interfaceNumber)
+        OmtLog.i("Router", "Java claimInterface $interfaceNumber → $ok")
+        return ok
+    }
 
     private fun failed(message: String): NativeEngineStatus =
         NativeEngineStatus(active = false, channelCount = 0, sampleRate = 0, errorMessage = message)

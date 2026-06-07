@@ -2,10 +2,12 @@
 
 #include "../spsc_ring_buffer.h"
 #include "uac2_types.h"
+#include "uac2_urb.h"
 
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -26,7 +28,7 @@ class Uac2Capture {
 public:
     static Uac2Capture& instance();
 
-    CaptureStatus open(int usb_fd, const Uac2AltSetting& alt);
+    CaptureStatus open(int usb_fd, const Uac2AltSetting& alt, bool java_interface_claimed = false);
     void close();
 
     size_t readFrames(float* dest, size_t max_frames);
@@ -36,7 +38,7 @@ private:
     Uac2Capture() = default;
     ~Uac2Capture() { close(); }
 
-    void workerLoop();
+    void workerLoop(std::promise<bool> init_promise);
 
     std::mutex mutex_;
     std::thread worker_;
@@ -44,9 +46,11 @@ private:
     std::atomic<uint64_t> dropped_frames_{0};
 
     int usb_fd_ = -1;
+    bool java_interface_claimed_ = false;
     Uac2AltSetting alt_{};
     int32_t channel_count_ = 0;
     int32_t sample_rate_ = 0;
+    IsoUrbLayout urb_layout_{};
 
     std::unique_ptr<openmultitrack::SpscRingBuffer> ring_;
 };

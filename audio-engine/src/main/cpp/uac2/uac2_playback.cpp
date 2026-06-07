@@ -5,9 +5,12 @@
 #include "android_usb_fs.h"
 #include "android_usb_io.h"
 #include "uac2_format.h"
+#include "uac2_urb.h"
 
+#include <chrono>
 #include <cerrno>
 #include <cstring>
+#include <future>
 #include <poll.h>
 #include <unistd.h>
 #include <vector>
@@ -18,19 +21,6 @@ namespace {
 
 constexpr int kNumUrbs = 8;
 
-struct UrbContext {
-    std::vector<uint8_t> storage;
-    usbdevfs_urb* urb = nullptr;
-};
-
-usbdevfs_urb* allocIsoUrb(size_t packet_size, UrbContext* ctx) {
-    const size_t total = sizeof(usbdevfs_urb) + sizeof(usbdevfs_iso_packet_desc);
-    ctx->storage.resize(total + packet_size);
-    ctx->urb = reinterpret_cast<usbdevfs_urb*>(ctx->storage.data());
-    ctx->urb->buffer = ctx->storage.data() + total;
-    return ctx->urb;
-}
-
 }  // namespace
 
 Uac2Playback& Uac2Playback::instance() {
@@ -38,7 +28,7 @@ Uac2Playback& Uac2Playback::instance() {
     return playback;
 }
 
-PlaybackStatus Uac2Playback::open(int usb_fd, const Uac2AltSetting& alt) {
+PlaybackStatus Uac2Playback::open(int usb_fd, const Uac2AltSetting& alt, bool java_interface_claimed) {
     std::lock_guard<std::mutex> lock(mutex_);
     close();
 
@@ -50,7 +40,10 @@ PlaybackStatus Uac2Playback::open(int usb_fd, const Uac2AltSetting& alt) {
         return status;
     }
 
-    const UsbIoStatus io = claimAndSetAlt(usb_fd, alt);
+    java_interface_claimed_ = java_interface_claimed;
+    const UsbIoStatus io = java_interface_claimed
+        ? setAltOnClaimedInterface(usb_fd, alt)
+        : claimAndSetAlt(usb_fd, alt);
     if (!io.ok) {
         PlaybackStatus status;
         status.error = io.error;
@@ -62,9 +55,24 @@ PlaybackStatus Uac2Playback::open(int usb_fd, const Uac2AltSetting& alt) {
     channel_count_ = alt.format.channels;
     sample_rate_ = static_cast<int32_t>(alt.format.sample_rate_hz);
     ring_ = std::make_unique<openmultitrack::SpscRingBuffer>(48'000, channel_count_);
+    urb_layout_ = layoutForAlt(alt, false);
 
+    std::promise<bool> init_promise;
+    std::future<bool> init_future = init_promise.get_future();
     running_.store(true);
-    worker_ = std::thread(&Uac2Playback::workerLoop, this);
+    worker_ = std::thread(&Uac2Playback::workerLoop, this, std::move(init_promise));
+
+    if (init_future.wait_for(std::chrono::seconds(2)) != std::future_status::ready ||
+        !init_future.get()) {
+        running_.store(false);
+        if (worker_.joinable()) {
+            worker_.join();
+        }
+        close();
+        PlaybackStatus status;
+        status.error = "isoch URB submit failed";
+        return status;
+    }
 
     OMT_LOGI("uac2 playback open %dch @ %dHz ep=0x%02x pkt=%u",
              channel_count_,
@@ -85,15 +93,17 @@ void Uac2Playback::close() {
         worker_.join();
     }
 
-    if (usb_fd_ >= 0 && alt_.format.valid) {
+    if (usb_fd_ >= 0 && alt_.format.valid && !java_interface_claimed_) {
         releaseInterface(usb_fd_, alt_.interface_number);
     }
 
     ring_.reset();
     usb_fd_ = -1;
+    java_interface_claimed_ = false;
     alt_ = {};
     channel_count_ = 0;
     sample_rate_ = 0;
+    urb_layout_ = {};
 }
 
 size_t Uac2Playback::writeFrames(const float* src, size_t frame_count) {
@@ -142,26 +152,29 @@ bool Uac2Playback::fillUrbBuffer(uint8_t* dest, size_t byte_capacity, size_t* fr
     return true;
 }
 
-void Uac2Playback::workerLoop() {
-    const size_t packet_size = alt_.max_packet_size;
+void Uac2Playback::workerLoop(std::promise<bool> init_promise) {
+    const IsoUrbLayout layout = urb_layout_;
 
     std::vector<UrbContext> contexts(kNumUrbs);
+    bool init_reported = false;
 
     for (int i = 0; i < kNumUrbs; ++i) {
-        usbdevfs_urb* urb = allocIsoUrb(packet_size, &contexts[static_cast<size_t>(i)]);
+        usbdevfs_urb* urb = allocIsoUrb(layout, &contexts[static_cast<size_t>(i)]);
         size_t frames = 0;
-        fillUrbBuffer(static_cast<uint8_t*>(urb->buffer), packet_size, &frames);
-        urb->type = USBDEVFS_URB_TYPE_ISO;
-        urb->endpoint = alt_.endpoint_address;
-        urb->flags = USBDEVFS_URB_ISO_ASAP;
-        urb->buffer_length = static_cast<int>(packet_size);
-        urb->number_of_packets = 1;
-        urb->iso_frame_desc[0].length = static_cast<unsigned int>(packet_size);
-        urb->usercontext = &contexts[static_cast<size_t>(i)];
+        fillUrbBuffer(static_cast<uint8_t*>(urb->buffer), static_cast<size_t>(layout.buffer_length), &frames);
+        initIsoUrb(urb, layout, alt_.endpoint_address, &contexts[static_cast<size_t>(i)]);
         if (ioctl(usb_fd_, USBDEVFS_SUBMITURB, urb) < 0) {
             OMT_LOGE("uac2 playback SUBMITURB init failed: %s", std::strerror(errno));
+            if (!init_reported) {
+                init_promise.set_value(false);
+                init_reported = true;
+            }
             running_.store(false);
             return;
+        }
+        if (!init_reported) {
+            init_promise.set_value(true);
+            init_reported = true;
         }
     }
 
@@ -188,13 +201,19 @@ void Uac2Playback::workerLoop() {
                       static_cast<size_t>(reaped->buffer_length),
                       &frames);
 
-        reaped->iso_frame_desc[0].actual_length = 0;
-        reaped->iso_frame_desc[0].status = 0;
+        for (int p = 0; p < reaped->number_of_packets; ++p) {
+            reaped->iso_frame_desc[p].actual_length = 0;
+            reaped->iso_frame_desc[p].status = 0;
+        }
         if (!running_.load()) break;
         if (ioctl(usb_fd_, USBDEVFS_SUBMITURB, reaped) < 0) {
             OMT_LOGE("uac2 playback resubmit failed: %s", std::strerror(errno));
             break;
         }
+    }
+
+    if (!init_reported) {
+        init_promise.set_value(false);
     }
 
     for (auto& ctx : contexts) {

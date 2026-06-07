@@ -6,8 +6,11 @@ object NativeUac2Engine {
         System.loadLibrary("openmultitrack_audio")
     }
 
-    fun startCapture(usbFd: Int, alt: NativeUac2AltSetting): NativeEngineStatus =
-        nativeStartCapture(usbFd, alt)
+    fun startCapture(
+        usbFd: Int,
+        alt: NativeUac2AltSetting,
+        javaInterfaceClaimed: Boolean = false,
+    ): NativeEngineStatus = nativeStartCapture(usbFd, alt, javaInterfaceClaimed)
 
     fun stopCapture() {
         nativeStopCapture()
@@ -18,8 +21,11 @@ object NativeUac2Engine {
 
     fun captureDroppedFrames(): Long = nativeCaptureDroppedFrames()
 
-    fun startPlayback(usbFd: Int, alt: NativeUac2AltSetting): NativeEngineStatus =
-        nativeStartPlayback(usbFd, alt)
+    fun startPlayback(
+        usbFd: Int,
+        alt: NativeUac2AltSetting,
+        javaInterfaceClaimed: Boolean = false,
+    ): NativeEngineStatus = nativeStartPlayback(usbFd, alt, javaInterfaceClaimed)
 
     fun stopPlayback() {
         nativeStopPlayback()
@@ -30,7 +36,11 @@ object NativeUac2Engine {
 
     fun playbackUnderrunFrames(): Long = nativePlaybackUnderrunFrames()
 
-    private external fun nativeStartCapture(usbFd: Int, alt: NativeUac2AltSetting): NativeEngineStatus
+    private external fun nativeStartCapture(
+        usbFd: Int,
+        alt: NativeUac2AltSetting,
+        javaInterfaceClaimed: Boolean,
+    ): NativeEngineStatus
 
     private external fun nativeStopCapture()
 
@@ -38,7 +48,11 @@ object NativeUac2Engine {
 
     private external fun nativeCaptureDroppedFrames(): Long
 
-    private external fun nativeStartPlayback(usbFd: Int, alt: NativeUac2AltSetting): NativeEngineStatus
+    private external fun nativeStartPlayback(
+        usbFd: Int,
+        alt: NativeUac2AltSetting,
+        javaInterfaceClaimed: Boolean,
+    ): NativeEngineStatus
 
     private external fun nativeStopPlayback()
 

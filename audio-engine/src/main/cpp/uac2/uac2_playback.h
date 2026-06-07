@@ -2,11 +2,13 @@
 
 #include "../spsc_ring_buffer.h"
 #include "uac2_types.h"
+#include "uac2_urb.h"
 
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <future>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -26,7 +28,7 @@ class Uac2Playback {
 public:
     static Uac2Playback& instance();
 
-    PlaybackStatus open(int usb_fd, const Uac2AltSetting& alt);
+    PlaybackStatus open(int usb_fd, const Uac2AltSetting& alt, bool java_interface_claimed = false);
     void close();
 
     size_t writeFrames(const float* src, size_t frame_count);
@@ -36,7 +38,7 @@ private:
     Uac2Playback() = default;
     ~Uac2Playback() { close(); }
 
-    void workerLoop();
+    void workerLoop(std::promise<bool> init_promise);
     bool fillUrbBuffer(uint8_t* dest, size_t byte_capacity, size_t* frames_written);
 
     std::mutex mutex_;
@@ -45,9 +47,11 @@ private:
     std::atomic<uint64_t> underrun_frames_{0};
 
     int usb_fd_ = -1;
+    bool java_interface_claimed_ = false;
     Uac2AltSetting alt_{};
     int32_t channel_count_ = 0;
     int32_t sample_rate_ = 0;
+    IsoUrbLayout urb_layout_{};
 
     std::unique_ptr<openmultitrack::SpscRingBuffer> ring_;
 };

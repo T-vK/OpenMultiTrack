@@ -64,6 +64,10 @@ object UsbInstrumentedPermission {
         }
 
         return try {
+            ui.wakeUp()
+            if (!ui.isScreenOn) {
+                ui.wakeUp()
+            }
             clickThread.start()
             activity.runOnUiThread {
                 OmtLog.i("UsbTestPerm", "requestPermission ${device.deviceName}")

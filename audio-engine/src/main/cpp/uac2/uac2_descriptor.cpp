@@ -185,8 +185,15 @@ Uac2AltSetting selectBestAlt(const std::vector<Uac2AltSetting>& alts,
             alt.format.sample_rate_hz != sample_rate_hz) {
             continue;
         }
+        const size_t bytes_per_frame =
+            static_cast<size_t>(alt.format.channels) * alt.format.subframe_bytes;
+        if (bytes_per_frame > 0 && alt.max_packet_size < bytes_per_frame) {
+            continue;
+        }
         // sample_rate_hz == 0 on alt means "any" (UAC2 implicit 48 kHz default).
-        if (best == nullptr || alt.format.channels > best->format.channels) {
+        if (best == nullptr || alt.format.channels > best->format.channels ||
+            (alt.format.channels == best->format.channels &&
+             alt.max_packet_size > best->max_packet_size)) {
             best = &alt;
         }
     }

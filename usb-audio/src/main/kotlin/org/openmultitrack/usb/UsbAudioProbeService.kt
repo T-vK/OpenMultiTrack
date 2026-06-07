@@ -40,38 +40,57 @@ class UsbAudioProbeService(
             )
         }
 
-        val input = runCatching {
-            NativeAudioProbe.probe(deviceId, AudioDirection.INPUT)
-        }.getOrElse { error ->
-            OmtLog.e("Probe", "input probe exception", error)
-            AudioEndpointProbe(
-                deviceId = deviceId,
-                direction = AudioDirection.INPUT,
-                channelCount = 0,
-                sampleRate = 0,
-                framesPerBurst = 0,
-                errorMessage = error.message,
+        // Opening Oboe streams grabs snd-usb-audio and blocks usbdevfs isoch on some devices.
+        val skipOboeStreams = uac2Caps?.parseOk == true &&
+            (uac2Caps.maxCaptureChannels > 2 || uac2Caps.maxPlaybackChannels > 2)
+        if (skipOboeStreams) {
+            OmtLog.i(
+                "Probe",
+                "skipping Oboe stream open (UAC2 ${uac2Caps.maxCaptureChannels}in/" +
+                    "${uac2Caps.maxPlaybackChannels}out) — avoids kernel driver conflict",
             )
         }
 
-        val output = runCatching {
-            NativeAudioProbe.probe(deviceId, AudioDirection.OUTPUT)
-        }.getOrElse { error ->
-            OmtLog.e("Probe", "output probe exception", error)
-            AudioEndpointProbe(
-                deviceId = deviceId,
-                direction = AudioDirection.OUTPUT,
-                channelCount = 0,
-                sampleRate = 0,
-                framesPerBurst = 0,
-                errorMessage = error.message,
-            )
+        val input = if (skipOboeStreams) {
+            null
+        } else {
+            runCatching {
+                NativeAudioProbe.probe(deviceId, AudioDirection.INPUT)
+            }.getOrElse { error ->
+                OmtLog.e("Probe", "input probe exception", error)
+                AudioEndpointProbe(
+                    deviceId = deviceId,
+                    direction = AudioDirection.INPUT,
+                    channelCount = 0,
+                    sampleRate = 0,
+                    framesPerBurst = 0,
+                    errorMessage = error.message,
+                )
+            }
+        }
+
+        val output = if (skipOboeStreams) {
+            null
+        } else {
+            runCatching {
+                NativeAudioProbe.probe(deviceId, AudioDirection.OUTPUT)
+            }.getOrElse { error ->
+                OmtLog.e("Probe", "output probe exception", error)
+                AudioEndpointProbe(
+                    deviceId = deviceId,
+                    direction = AudioDirection.OUTPUT,
+                    channelCount = 0,
+                    sampleRate = 0,
+                    framesPerBurst = 0,
+                    errorMessage = error.message,
+                )
+            }
         }
 
         OmtLog.i(
             "Probe",
-            "result deviceId=$deviceId input=${input.channelCount}ch/${input.sampleRate}Hz " +
-                "output=${output.channelCount}ch/${output.sampleRate}Hz " +
+            "result deviceId=$deviceId input=${input?.channelCount ?: 0}ch/${input?.sampleRate ?: 0}Hz " +
+                "output=${output?.channelCount ?: 0}ch/${output?.sampleRate ?: 0}Hz " +
                 "uac2=${uac2Caps?.maxCaptureChannels ?: 0}in/${uac2Caps?.maxPlaybackChannels ?: 0}out",
         )
         return FullUsbProbeResult(
@@ -79,7 +98,7 @@ class UsbAudioProbeService(
             input = input,
             output = output,
             uac2Caps = uac2Caps,
-            note = buildNote(uac2Caps = uac2Caps, oboeInputChannels = input.channelCount),
+            note = buildNote(uac2Caps = uac2Caps, oboeInputChannels = input?.channelCount ?: 0),
         )
     }
 

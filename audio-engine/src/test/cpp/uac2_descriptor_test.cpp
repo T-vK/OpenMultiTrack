@@ -125,6 +125,30 @@ void testSyntheticXr18() {
     expect(playback.format.channels == 18, "xr18 virtual soundcheck playback alt");
 }
 
+void testPrefersLargeIsochPacketOverDummyAlt() {
+    openmultitrack::uac2::Uac2AltSetting dummy{};
+    dummy.format.valid = true;
+    dummy.format.channels = 18;
+    dummy.format.subframe_bytes = 4;
+    dummy.format.bit_resolution = 24;
+    dummy.format.sample_rate_hz = 48'000;
+    dummy.interface_number = 1;
+    dummy.endpoint_address = 0x81;
+    dummy.max_packet_size = 4;
+    dummy.is_input = true;
+
+    openmultitrack::uac2::Uac2AltSetting streaming = dummy;
+    streaming.interface_number = 2;
+    streaming.endpoint_address = 0x82;
+    streaming.max_packet_size = 576;
+
+    const std::vector<openmultitrack::uac2::Uac2AltSetting> alts = {dummy, streaming};
+    const auto best = openmultitrack::uac2::selectBestAlt(alts, 18, 48'000);
+    expect(best.format.valid, "xr18 dummy+streaming best alt valid");
+    expect(best.max_packet_size == 576, "xr18 prefers streaming isoch packet size");
+    expect(best.endpoint_address == 0x82, "xr18 streaming endpoint");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -135,6 +159,7 @@ int main(int argc, char** argv) {
 
     testFlow8Fixture(fixture);
     testSyntheticXr18();
+    testPrefersLargeIsochPacketOverDummyAlt();
 
     if (g_failures > 0) {
         std::fprintf(stderr, "%d test(s) failed\n", g_failures);

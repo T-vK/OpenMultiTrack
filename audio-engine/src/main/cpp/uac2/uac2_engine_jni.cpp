@@ -54,10 +54,12 @@ Java_org_openmultitrack_audio_NativeUac2Engine_nativeStartCapture(
     JNIEnv* env,
     jobject /*thiz*/,
     jint usbFd,
-    jobject altObj) {
+    jobject altObj,
+    jboolean javaInterfaceClaimed) {
     const openmultitrack::uac2::Uac2AltSetting alt = altFromJobject(env, altObj);
     const openmultitrack::uac2::CaptureStatus status =
-        openmultitrack::uac2::Uac2Capture::instance().open(usbFd, alt);
+        openmultitrack::uac2::Uac2Capture::instance().open(
+            usbFd, alt, javaInterfaceClaimed == JNI_TRUE);
     return makeEngineStatus(
         env,
         status.running,
@@ -99,10 +101,12 @@ Java_org_openmultitrack_audio_NativeUac2Engine_nativeStartPlayback(
     JNIEnv* env,
     jobject /*thiz*/,
     jint usbFd,
-    jobject altObj) {
+    jobject altObj,
+    jboolean javaInterfaceClaimed) {
     const openmultitrack::uac2::Uac2AltSetting alt = altFromJobject(env, altObj);
     const openmultitrack::uac2::PlaybackStatus status =
-        openmultitrack::uac2::Uac2Playback::instance().open(usbFd, alt);
+        openmultitrack::uac2::Uac2Playback::instance().open(
+            usbFd, alt, javaInterfaceClaimed == JNI_TRUE);
     return makeEngineStatus(
         env,
         status.running,

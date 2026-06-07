@@ -59,8 +59,10 @@ struct usbdevfs_ioctl {
 #define USBDEVFS_REAPURB _IOW('U', 12, void*)
 #define USBDEVFS_REAPURBNDELAY _IOW('U', 13, void*)
 #define USBDEVFS_DISCSIGNAL _IOR('U', 14, unsigned int)
+#define USBDEVFS_CLEAR_HALT _IOR('U', 20, unsigned int)
 #define USBDEVFS_GET_CAPABILITIES _IOR('U', 22, unsigned int)
 #define USBDEVFS_DISCONNECT_CLAIM _IOR('U', 27, struct usbdevfs_disconnect_claim)
+#define USBDEVFS_GETDRIVER _IOR('U', 8, struct usbdevfs_getdriver)
 
 struct usbdevfs_disconnect_claim {
     unsigned int interface;
