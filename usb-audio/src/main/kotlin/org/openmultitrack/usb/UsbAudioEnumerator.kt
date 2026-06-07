@@ -92,6 +92,30 @@ class UsbAudioEnumerator(
 
     fun getUsbDevice(deviceName: String): UsbDevice? = usbManager.deviceList[deviceName]
 
+    /**
+     * Raw USB configuration descriptor via [android.hardware.usb.UsbDeviceConnection].
+     * Requires USB permission. Opens the device briefly; does not claim audio interfaces.
+     */
+    fun getRawConfigDescriptor(deviceName: String): ByteArray? {
+        val device = getUsbDevice(deviceName) ?: return null
+        if (!usbManager.hasPermission(device)) {
+            OmtLog.d("Usb", "getRawConfigDescriptor: no permission for $deviceName")
+            return null
+        }
+        val connection = usbManager.openDevice(device) ?: run {
+            OmtLog.w("Usb", "getRawConfigDescriptor: openDevice failed for $deviceName")
+            return null
+        }
+        return try {
+            runCatching { connection.rawDescriptors }
+                .onFailure { OmtLog.w("Usb", "getRawConfigDescriptor failed for $deviceName", it) }
+                .getOrNull()
+                ?.takeIf { it.isNotEmpty() }
+        } finally {
+            connection.close()
+        }
+    }
+
     private fun toDescriptor(device: UsbDevice): UsbAudioDeviceDescriptor {
         val product = device.productName
         val manufacturer = device.manufacturerName

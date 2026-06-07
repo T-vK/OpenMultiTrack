@@ -236,8 +236,16 @@ class MainViewModel(
     }
 
     private fun buildProbeMessage(result: FullUsbProbeResult, inputChannels: Int?): String {
+        val uac2In = result.uac2Caps?.maxCaptureChannels ?: 0
         if (inputChannels != null && inputChannels > 0) {
+            if (uac2In > inputChannels) {
+                return "Oboe: $inputChannels ch. USB descriptor: $uac2In ch capture (UAC2 host needed)."
+            }
             return "Ready to record $inputChannels input channel(s)."
+        }
+        if (uac2In > 0) {
+            val uac2Out = result.uac2Caps?.maxPlaybackChannels ?: 0
+            return "USB descriptor: $uac2In ch in / $uac2Out ch out. ${result.note ?: ""}".trim()
         }
         return result.note ?: "Probe complete."
     }
