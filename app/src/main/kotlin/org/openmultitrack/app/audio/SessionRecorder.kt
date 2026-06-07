@@ -6,11 +6,14 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import org.openmultitrack.audio.NativeAudioEngine
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.audio.AudioConstants
 import org.openmultitrack.domain.session.RecordingSession
 import org.openmultitrack.sessionio.wav.WavWriter
+import android.hardware.usb.UsbDevice
+import org.openmultitrack.usb.AudioBackend
+import org.openmultitrack.usb.AudioEngineRouter
+import org.openmultitrack.usb.CaptureRoute
 import java.io.File
 import kotlin.math.max
 import kotlin.math.min
@@ -20,6 +23,7 @@ class SessionRecorder {
     private var outputFile: File? = null
     private var channelCount: Int = 2
     private var sampleRate: Int = AudioConstants.DEFAULT_SAMPLE_RATE
+    private var activeBackend: AudioBackend? = null
 
     @Volatile
     private var framesWritten: Long = 0
@@ -28,30 +32,28 @@ class SessionRecorder {
 
     fun start(
         scope: CoroutineScope,
-        deviceId: Int,
-        channels: Int,
+        route: CaptureRoute,
         outputDir: File,
-        sampleRateHz: Int = AudioConstants.DEFAULT_SAMPLE_RATE,
+        usbDevice: UsbDevice? = null,
     ): Result<RecordingSession> {
         writerJob?.cancel()
-        NativeAudioEngine.stopRecording()
-
-        val requestedChannels = channels.coerceIn(AudioConstants.MIN_CHANNELS, AudioConstants.MAX_CHANNELS)
-        sampleRate = sampleRateHz
+        AudioEngineRouter.stopRecording()
+        activeBackend = route.backend
 
         OmtLog.i(
             "Recorder",
-            "start deviceId=$deviceId requestedChannels=$requestedChannels sampleRate=$sampleRateHz",
+            "start backend=${route.backend} channels=${route.channelCount} sampleRate=${route.sampleRate}",
         )
-        val status = NativeAudioEngine.startRecording(deviceId, requestedChannels, sampleRate)
+        val status = AudioEngineRouter.startRecording(route, usbDevice)
         if (!status.active) {
             OmtLog.e("Recorder", "native start failed: ${status.errorMessage}")
+            activeBackend = null
             return Result.failure(IllegalStateException(status.errorMessage ?: "Recording failed"))
         }
 
         channelCount = status.channelCount.coerceIn(AudioConstants.MIN_CHANNELS, AudioConstants.MAX_CHANNELS)
         sampleRate = status.sampleRate
-        OmtLog.i("Recorder", "native running ${channelCount}ch @ ${sampleRate}Hz")
+        OmtLog.i("Recorder", "native running ${channelCount}ch @ ${sampleRate}Hz (${route.backend})")
 
         val file = File(
             outputDir,
@@ -64,16 +66,17 @@ class SessionRecorder {
         val wav = WavWriter(file, channelCount, sampleRate)
         val framesPerChunk = chunkFramesForChannels(channelCount)
         val scratch = FloatArray(framesPerChunk * channelCount)
+        val backend = route.backend
 
         writerJob = scope.launch(Dispatchers.IO) {
             try {
                 var lastLogFrames = 0L
                 while (isActive) {
-                    val frames = NativeAudioEngine.readRecordedFrames(scratch, framesPerChunk)
+                    val frames = AudioEngineRouter.readRecordedFrames(scratch, framesPerChunk, backend)
                     if (frames > 0) {
                         wav.writeInterleavedFloat(scratch, frames)
                         framesWritten += frames
-                        droppedFrames = NativeAudioEngine.recordingDroppedFrames()
+                        droppedFrames = AudioEngineRouter.recordingDroppedFrames(backend)
                         if (framesWritten - lastLogFrames >= sampleRate) {
                             OmtLog.d(
                                 "Recorder",
@@ -108,7 +111,8 @@ class SessionRecorder {
         OmtLog.i("Recorder", "stop requested framesWritten=$framesWritten")
         writerJob?.cancelAndJoin()
         writerJob = null
-        NativeAudioEngine.stopRecording()
+        AudioEngineRouter.stopRecording()
+        activeBackend = null
         val file = outputFile ?: return null
         OmtLog.i(
             "Recorder",

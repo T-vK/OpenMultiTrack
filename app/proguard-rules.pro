@@ -4,3 +4,4 @@
 }
 -keep class org.openmultitrack.audio.NativeProbeResult { *; }
 -keep class org.openmultitrack.audio.NativeEngineStatus { *; }
+-keep class org.openmultitrack.audio.NativeUac2AltSetting { *; }

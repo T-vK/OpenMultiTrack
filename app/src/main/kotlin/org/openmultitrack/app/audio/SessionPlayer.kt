@@ -5,15 +5,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import org.openmultitrack.audio.NativeAudioEngine
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.session.TransportState
 import org.openmultitrack.domain.session.TransportStatus
 import org.openmultitrack.sessionio.wav.WavReader
+import android.hardware.usb.UsbDevice
+import org.openmultitrack.usb.AudioEngineRouter
+import org.openmultitrack.usb.PlaybackRoute
 import java.io.File
 
 class SessionPlayer {
     private var playbackJob: Job? = null
+    private var activeBackend: org.openmultitrack.usb.AudioBackend? = null
 
     @Volatile
     var status: TransportStatus = TransportStatus()
@@ -22,11 +25,16 @@ class SessionPlayer {
     fun play(
         scope: CoroutineScope,
         file: File,
-        deviceId: Int,
+        route: PlaybackRoute,
+        usbDevice: UsbDevice? = null,
         startFrame: Long = 0,
     ): Result<Unit> {
         stop()
-        OmtLog.i("Player", "play file=${file.absolutePath} deviceId=$deviceId startFrame=$startFrame")
+        activeBackend = route.backend
+        OmtLog.i(
+            "Player",
+            "play file=${file.absolutePath} backend=${route.backend} startFrame=$startFrame",
+        )
         val reader = WavReader(file)
         val channels = reader.format.channelCount.coerceAtMost(32)
         val sampleRate = reader.format.sampleRate
@@ -36,13 +44,17 @@ class SessionPlayer {
             reader.seekFrame(startFrame)
         }
 
-        val engineStatus = NativeAudioEngine.startPlayback(deviceId, channels, sampleRate)
+        val engineStatus = AudioEngineRouter.startPlayback(route, usbDevice)
         if (!engineStatus.active) {
             OmtLog.e("Player", "native start failed: ${engineStatus.errorMessage}")
             reader.close()
+            activeBackend = null
             return Result.failure(IllegalStateException(engineStatus.errorMessage ?: "Playback failed"))
         }
-        OmtLog.i("Player", "native running ${engineStatus.channelCount}ch @ ${engineStatus.sampleRate}Hz")
+        OmtLog.i(
+            "Player",
+            "native running ${engineStatus.channelCount}ch @ ${engineStatus.sampleRate}Hz (${route.backend})",
+        )
 
         status = TransportStatus(
             state = TransportState.PLAYING,
@@ -51,6 +63,7 @@ class SessionPlayer {
         )
 
         val scratch = FloatArray(2048 * channels)
+        val backend = route.backend
         playbackJob = scope.launch(Dispatchers.IO) {
             try {
                 reader.use { wav ->
@@ -63,7 +76,7 @@ class SessionPlayer {
                             val sampleStart = submitted * channels
                             val sampleEnd = sampleStart + framesLeft * channels
                             val chunk = scratch.copyOfRange(sampleStart, sampleEnd)
-                            val written = NativeAudioEngine.writePlaybackFrames(chunk, framesLeft)
+                            val written = AudioEngineRouter.writePlaybackFrames(chunk, framesLeft, backend)
                             if (written <= 0) {
                                 Thread.sleep(2)
                                 continue
@@ -77,8 +90,9 @@ class SessionPlayer {
                 OmtLog.e("Player", "playback loop failed", e)
                 throw e
             } finally {
-                val underruns = NativeAudioEngine.playbackUnderrunFrames()
-                NativeAudioEngine.stopPlayback()
+                val underruns = AudioEngineRouter.playbackUnderrunFrames(backend)
+                AudioEngineRouter.stopPlayback()
+                activeBackend = null
                 OmtLog.i(
                     "Player",
                     "finished position=${status.positionFrames}/$duration underruns=$underruns",
@@ -93,9 +107,13 @@ class SessionPlayer {
         OmtLog.i("Player", "stop requested position=${status.positionFrames}")
         playbackJob?.cancel()
         playbackJob = null
-        val underruns = NativeAudioEngine.playbackUnderrunFrames()
-        NativeAudioEngine.stopPlayback()
-        OmtLog.i("Player", "stopped underruns=$underruns")
+        val backend = activeBackend
+        if (backend != null) {
+            val underruns = AudioEngineRouter.playbackUnderrunFrames(backend)
+            OmtLog.i("Player", "stopped underruns=$underruns")
+        }
+        AudioEngineRouter.stopPlayback()
+        activeBackend = null
         status = TransportStatus(state = TransportState.IDLE)
     }
 }

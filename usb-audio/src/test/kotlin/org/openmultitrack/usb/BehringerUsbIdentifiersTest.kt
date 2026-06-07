@@ -21,6 +21,17 @@ class BehringerUsbIdentifiersTest {
     }
 
     @Test
+    fun detectsFlow8() {
+        assertThat(
+            BehringerUsbIdentifiers.isLikelyBehringerMixer(
+                BehringerUsbIdentifiers.VENDOR_ID_BEHINGER,
+                "FLOW 8",
+            ),
+        ).isTrue()
+        assertThat(BehringerUsbIdentifiers.guessModel("FLOW 8")).isEqualTo("FLOW8")
+    }
+
+    @Test
     fun ignoresOtherVendors() {
         assertThat(
             BehringerUsbIdentifiers.isLikelyBehringerMixer(0x1234, "X32"),

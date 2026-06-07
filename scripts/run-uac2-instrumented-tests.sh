@@ -27,12 +27,17 @@ chmod +x scripts/run-uac2-native-tests.sh
 ./scripts/run-uac2-native-tests.sh
 
 echo "Building debug APK + androidTest..."
-./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :audio-engine:assembleDebugAndroidTest --no-daemon
+./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
 
 if ! "${ADB[@]}" "${ADB_FLAGS[@]}" get-state >/dev/null 2>&1; then
   echo "No adb device — skipping instrumented tests." >&2
   echo "Start an emulator (optionally with ./scripts/run-emulator-with-flow8.sh) and re-run." >&2
   exit 0
+fi
+
+if [[ "$MODE" == "hardware" || "$MODE" == "all" ]]; then
+  chmod +x scripts/setup-emulator-flow8.sh
+  ./scripts/setup-emulator-flow8.sh "$SERIAL" || true
 fi
 
 FIXTURE_TESTS="org.openmultitrack.app.Xr18VirtualSoundcheckInstrumentedTest"
