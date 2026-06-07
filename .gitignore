@@ -18,3 +18,4 @@ out/
 local.properties
 android-sdk/
 .kotlin/
+keystore/

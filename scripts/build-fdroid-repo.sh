@@ -12,9 +12,12 @@ if ! command -v fdroid >/dev/null 2>&1; then
   exit 1
 fi
 
+version_name="$(grep '^VERSION_NAME=' "${root}/gradle/version.properties" | cut -d= -f2)"
+"${root}/scripts/prepare-fdroid-metadata.sh" "$version_name"
+"${root}/scripts/prepare-fdroid-config.sh"
+
 cd "${root}/fdroid"
 export FDROID_UPDATE_AUTOKEY=1
-fdroid update --create-metadata --pretty
 fdroid update --pretty
 
 rsync -a --delete "${root}/fdroid/repo/" "$site_repo/"

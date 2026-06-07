@@ -118,6 +118,16 @@ jobs:
             -alias fdroidrepo -keyalg RSA -keysize 4096 -validity 10000 \
             -dname "CN=OpenMultiTrack Repo, OU=CI, O=OpenMultiTrack, C=DE"
 
+      - name: Restore published F-Droid repo
+        uses: actions/cache@v4
+        with:
+          path: |
+            fdroid/repo
+            site/fdroid/repo
+          key: fdroid-repo-contents-v1
+          restore-keys: |
+            fdroid-repo-contents-v1
+
       - name: Build F-Droid repo and site
         shell: bash
         run: |
@@ -126,13 +136,13 @@ jobs:
           VERSION="${{ needs.build.outputs.version }}"
           mkdir -p site/fdroid/repo fdroid/repo
           touch site/.nojekyll
-          cp dist/*.apk "site/fdroid/repo/org.openmultitrack_${VERSION}-debug.apk"
-          cp site/fdroid/repo/*.apk fdroid/repo/
+          cp dist/*.apk "fdroid/repo/org.openmultitrack_${VERSION}-debug.apk"
           export PATH="$ANDROID_HOME/build-tools/35.0.0:$ANDROID_HOME/platform-tools:$HOME/.local/bin:$PATH"
           ./scripts/prepare-fdroid-config.sh
+          ./scripts/prepare-fdroid-metadata.sh "$VERSION"
           cd fdroid
-          fdroid update --create-metadata --pretty
           fdroid update --pretty
+          ../scripts/verify-fdroid-index.sh repo/index-v1.json
           rsync -a repo/ ../site/fdroid/repo/
 
       - name: Setup Pages

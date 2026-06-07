@@ -1,0 +1,17 @@
+Categories:
+  - Multimedia
+License: GPL-3.0-or-later
+SourceCode: https://github.com/T-vK/OpenMultiTrack
+IssueTracker: https://github.com/T-vK/OpenMultiTrack/issues
+WebSite: https://github.com/T-vK/OpenMultiTrack
+
+AutoName: OpenMultiTrack
+Summary: Multitrack USB recorder for Behringer mixers
+Description: |-
+  Multitrack recorder and virtual soundcheck player for Behringer X32/XR18
+  USB mixers. Records all USB input channels and plays sessions back to mixer
+  returns with sample-aligned seeking. No Google Play Services or tracking.
+
+UpdateCheckMode: None
+CurrentVersion: '0.2.0'
+CurrentVersionCode: 200

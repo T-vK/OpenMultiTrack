@@ -13,9 +13,22 @@ val versionProps = Properties().apply {
     }
 }
 
+val ciDebugKeystore = rootProject.file("keystore/debug.keystore")
+
 android {
     namespace = "org.openmultitrack.app"
     compileSdk = 35
+
+    signingConfigs {
+        if (ciDebugKeystore.exists()) {
+            create("ciDebug") {
+                storeFile = ciDebugKeystore
+                storePassword = "openmultitrack"
+                keyAlias = "openmultitrack-debug"
+                keyPassword = "openmultitrack"
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = "org.openmultitrack"
@@ -36,6 +49,8 @@ android {
         }
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("ciDebug")
+                ?: signingConfigs.getByName("debug")
         }
     }
 
