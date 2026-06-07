@@ -71,15 +71,24 @@ FIXTURE_TESTS="org.openmultitrack.app.Xr18VirtualSoundcheckInstrumentedTest"
 HARDWARE_TESTS="org.openmultitrack.app.UsbAudioRecordingInstrumentedTest,org.openmultitrack.app.Flow8VirtualSoundcheckInstrumentedTest"
 
 run_tests() {
-  local class_list="$1"
+  local class_list="$1" output test_exit=0
   "${ADB[@]}" "${ADB_FLAGS[@]}" install -r app/build/outputs/apk/debug/app-debug.apk
   "${ADB[@]}" "${ADB_FLAGS[@]}" install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
   if [[ "$MODE" == "hardware" || "$MODE" == "all" ]]; then
     ./scripts/grant-usb-permission.sh --sync-uids-only ${SERIAL:+"$SERIAL"}
   fi
-  "${ADB[@]}" "${ADB_FLAGS[@]}" shell am instrument -w -r \
+  set +e
+  output="$("${ADB[@]}" "${ADB_FLAGS[@]}" shell am instrument -w -r \
     -e class "$class_list" \
-    org.openmultitrack.test/androidx.test.runner.AndroidJUnitRunner
+    org.openmultitrack.test/androidx.test.runner.AndroidJUnitRunner 2>&1)"
+  test_exit=$?
+  set -e
+  printf '%s\n' "$output"
+  if [[ "$test_exit" -ne 0 ]] \
+    || grep -qE 'FAILURES!!!|Tests run:.*Failures: [1-9]' <<<"$output" \
+    || grep -q 'INSTRUMENTATION_FAILED' <<<"$output"; then
+    return 1
+  fi
 }
 
 case "$MODE" in
@@ -97,3 +106,5 @@ case "$MODE" in
     exit 1
     ;;
 esac
+
+echo "Instrumented tests passed."

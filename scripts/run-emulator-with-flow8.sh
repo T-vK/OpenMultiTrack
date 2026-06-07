@@ -7,6 +7,9 @@
 #
 # Usage:
 #   ./scripts/run-emulator-with-flow8.sh [AVD_NAME]
+#
+# For full automation (emulator + permissions + tests), prefer:
+#   ./scripts/run-flow8-hardware-tests.sh
 
 set -euo pipefail
 
