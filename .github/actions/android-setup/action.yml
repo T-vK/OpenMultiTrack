@@ -67,8 +67,9 @@ runs:
     - name: Verify pinned debug signing keystore
       shell: bash
       run: |
+        chmod +x scripts/*.sh
         test -f keystore/debug.keystore
-        test -f keystore/EXPECTED_SIGNER.txt
+        ./scripts/apk-signer-fingerprint.sh >/dev/null
 
     - name: Gradle wrapper executable
       shell: bash

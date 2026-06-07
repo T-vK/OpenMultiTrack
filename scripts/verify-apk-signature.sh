@@ -3,7 +3,7 @@
 set -euo pipefail
 apk="${1:?APK path required}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
-expected="$(tr -d '[:space:]' < "${root}/keystore/EXPECTED_SIGNER.txt")"
+expected="$("${root}/scripts/apk-signer-fingerprint.sh")"
 
 sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 apksigner="${sdk}/build-tools/35.0.0/apksigner"
