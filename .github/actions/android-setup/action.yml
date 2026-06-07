@@ -64,23 +64,11 @@ runs:
         restore-keys: |
           cxx-${{ runner.os }}-
 
-    - name: Restore CI debug signing keystore
-      uses: actions/cache@v4
-      id: debug-keystore
-      with:
-        path: keystore/debug.keystore
-        key: debug-signing-keystore-v1
-
-    - name: Generate debug signing keystore if missing
-      if: steps.debug-keystore.outputs.cache-hit != 'true'
+    - name: Verify pinned debug signing keystore
       shell: bash
       run: |
-        mkdir -p keystore
-        keytool -genkeypair -v \
-          -keystore keystore/debug.keystore \
-          -storepass openmultitrack -keypass openmultitrack \
-          -alias openmultitrack-debug -keyalg RSA -keysize 4096 -validity 10000 \
-          -dname "CN=OpenMultiTrack Debug, OU=CI, O=OpenMultiTrack, C=DE"
+        test -f keystore/debug.keystore
+        test -f keystore/EXPECTED_SIGNER.txt
 
     - name: Gradle wrapper executable
       shell: bash

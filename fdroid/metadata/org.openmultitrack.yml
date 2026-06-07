@@ -13,5 +13,7 @@ Description: |-
   returns with sample-aligned seeking. No Google Play Services or tracking.
 
 UpdateCheckMode: None
-CurrentVersion: '0.2.0'
-CurrentVersionCode: 200
+AllowedAPKSigningKeys:
+  - 708c3b2ebf2a6bd57c4a72e4db209dc43ff18fd7f81aef4a5d565545c399c9b6
+CurrentVersion: '0.2.1'
+CurrentVersionCode: 201

@@ -54,17 +54,25 @@ jobs:
             --build-cache \
             --no-daemon
 
-      - name: Stage APK artifact
+      - name: Stage debug APK artifact
         run: |
+          set -euo pipefail
+          chmod +x scripts/*.sh
+          VERSION="${{ steps.semver.outputs.version }}"
+          APK="dist/org.openmultitrack_${VERSION}-debug.apk"
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk \
-            "dist/org.openmultitrack_${{ steps.semver.outputs.version }}-debug.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "$APK"
+          export PATH="$ANDROID_HOME/build-tools/35.0.0:$PATH"
+          ./scripts/verify-apk-signature.sh "$APK"
+          sha256sum "$APK" | tee dist/SHA256SUMS
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: release-apk
-          path: dist/*.apk
+          path: |
+            dist/*.apk
+            dist/SHA256SUMS
           retention-days: 30
 
   pages:
@@ -98,6 +106,12 @@ jobs:
           name: release-apk
           path: dist/
 
+      - name: Verify F-Droid APK matches pinned debug signer
+        run: |
+          chmod +x scripts/*.sh
+          export PATH="$ANDROID_HOME/build-tools/35.0.0:$PATH"
+          ./scripts/verify-apk-signature.sh dist/*.apk
+
       - name: Install fdroidserver
         run: pip install -r scripts/requirements-fdroid.txt
 
@@ -124,9 +138,9 @@ jobs:
           path: |
             fdroid/repo
             site/fdroid/repo
-          key: fdroid-repo-contents-v1
+          key: fdroid-repo-contents-v2
           restore-keys: |
-            fdroid-repo-contents-v1
+            fdroid-repo-contents-v2
 
       - name: Build F-Droid repo and site
         shell: bash
@@ -194,6 +208,14 @@ jobs:
         with:
           tag_name: ${{ needs.build.outputs.tag }}
           name: OpenMultiTrack ${{ needs.build.outputs.version }}
+          body: |
+            Debug build only. The APK attached here is identical to the one in the
+            [F-Droid repo](https://T-vK.github.io/OpenMultiTrack/fdroid/repo).
+
+            If you installed a build from before signing was pinned (≤0.2.1), uninstall
+            once, then install this version. Later updates will install in place.
           generate_release_notes: true
-          files: dist/*.apk
+          files: |
+            dist/*.apk
+            dist/SHA256SUMS
           prerelease: true

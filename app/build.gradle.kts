@@ -13,20 +13,21 @@ val versionProps = Properties().apply {
     }
 }
 
-val ciDebugKeystore = rootProject.file("keystore/debug.keystore")
+val debugKeystore = rootProject.file("keystore/debug.keystore")
+check(debugKeystore.exists()) {
+    "Missing keystore/debug.keystore — required for stable debug APK signatures."
+}
 
 android {
     namespace = "org.openmultitrack.app"
     compileSdk = 35
 
     signingConfigs {
-        if (ciDebugKeystore.exists()) {
-            create("ciDebug") {
-                storeFile = ciDebugKeystore
-                storePassword = "openmultitrack"
-                keyAlias = "openmultitrack-debug"
-                keyPassword = "openmultitrack"
-            }
+        create("debugSigning") {
+            storeFile = debugKeystore
+            storePassword = "openmultitrack"
+            keyAlias = "openmultitrack-debug"
+            keyPassword = "openmultitrack"
         }
     }
 
@@ -49,8 +50,7 @@ android {
         }
         debug {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.findByName("ciDebug")
-                ?: signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("debugSigning")
         }
     }
 

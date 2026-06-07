@@ -18,4 +18,6 @@ out/
 local.properties
 android-sdk/
 .kotlin/
-keystore/
+keystore/*
+!keystore/debug.keystore
+!keystore/EXPECTED_SIGNER.txt

@@ -51,7 +51,13 @@ Add in F-Droid client → Settings → Repositories.
 
 Optional secret `FDROID_KEYSTORE_PASS` overrides the default CI keystore password for repo signing. The signing keystore is cached between workflow runs.
 
-App metadata lives in `fdroid/metadata/org.openmultitrack.yml`. CI updates `CurrentVersionCode` before `fdroid update` so the client’s `suggestedVersionCode` matches a real APK (auto-generated skeleton metadata uses `2147483647`, which hides updates). Debug APKs are signed with a cached CI keystore (`keystore/debug.keystore`) so upgrades keep a stable signature.
+**One debug APK per release** — the `build` job produces a single `assembleDebug` artifact. The `pages` job publishes it to the F-Droid repo; the `release` job attaches the same file to the GitHub Release (plus `SHA256SUMS`). There is no separate release build type.
+
+App metadata lives in `fdroid/metadata/org.openmultitrack.yml`. CI updates `CurrentVersionCode` before `fdroid update` so the client’s `suggestedVersionCode` matches a real APK.
+
+**Stable debug signing** — `keystore/debug.keystore` is committed to the repo (debug-only, not a Play Store key). Every CI and local debug build uses it so in-place upgrades work. The expected certificate fingerprint is in `keystore/EXPECTED_SIGNER.txt`; `scripts/verify-apk-signature.sh` runs in the publish `build` job before upload.
+
+If you installed a build from before signing was pinned (≤0.2.1), uninstall once and reinstall from the F-Droid repo or GitHub Release. Later updates install in place.
 
 ## Local build
 
