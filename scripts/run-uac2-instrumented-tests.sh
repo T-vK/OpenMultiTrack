@@ -36,7 +36,7 @@ if ! "${ADB[@]}" "${ADB_FLAGS[@]}" get-state >/dev/null 2>&1; then
 fi
 
 FIXTURE_TESTS="org.openmultitrack.audio.Uac2FixtureInstrumentedTest,org.openmultitrack.app.Xr18VirtualSoundcheckInstrumentedTest"
-HARDWARE_TESTS="org.openmultitrack.audio.Flow8HardwareInstrumentedTest,org.openmultitrack.app.UsbAudioRecordingInstrumentedTest"
+HARDWARE_TESTS="org.openmultitrack.audio.Flow8HardwareInstrumentedTest,org.openmultitrack.app.UsbAudioRecordingInstrumentedTest,org.openmultitrack.app.Flow8VirtualSoundcheckInstrumentedTest"
 
 run_tests() {
   local class_list="$1"

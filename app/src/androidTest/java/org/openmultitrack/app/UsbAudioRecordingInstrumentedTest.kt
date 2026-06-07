@@ -15,7 +15,6 @@ import org.openmultitrack.app.audio.SessionRecorder
 import org.openmultitrack.app.test.RequiresUsbDevice
 import org.openmultitrack.app.test.UsbDeviceRule
 import org.openmultitrack.audio.NativeUac2Probe
-import org.openmultitrack.domain.audio.AudioDirection
 import org.openmultitrack.sessionio.wav.WavReader
 import org.openmultitrack.usb.UsbAudioEnumerator
 import org.openmultitrack.usb.UsbAudioProbeService

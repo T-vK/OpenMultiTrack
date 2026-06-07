@@ -6,6 +6,24 @@ import java.io.File
 
 class WavRoundTripTest {
     @Test
+    fun writerReader_roundTrip24BitFourChannels() {
+        val file = File.createTempFile("omt", ".wav")
+        try {
+            WavWriter(file, channelCount = 4, sampleRate = 48000).use { writer ->
+                val samples = FloatArray(4 * 2) { i -> if (i % 4 == 0) 0.5f else -0.25f }
+                writer.writeInterleavedFloat(samples, frames = 2)
+            }
+            WavReader(file).use { reader ->
+                assertThat(reader.format.channelCount).isEqualTo(4)
+                val out = FloatArray(8)
+                assertThat(reader.readInterleavedFloat(out, frames = 2)).isEqualTo(2)
+            }
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
     fun writerReader_roundTrip24Bit() {
         val file = File.createTempFile("omt", ".wav")
         try {

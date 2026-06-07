@@ -34,6 +34,7 @@ Store fixtures in `audio-engine/src/test/resources/uac2/`:
 | `Xr18VirtualSoundcheckInstrumentedTest` | app | No (synthetic) |
 | `Flow8HardwareInstrumentedTest` | audio-engine | Yes (Flow 8) |
 | `UsbAudioRecordingInstrumentedTest` | app | Yes (Flow 8) |
+| `Flow8VirtualSoundcheckInstrumentedTest` | app | Yes (Flow 8, 4ch play/record) |
 
 Emulator + Flow 8 passthrough (Linux):
 
