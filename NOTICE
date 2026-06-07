@@ -5,3 +5,8 @@ This product includes software developed by Google (Oboe), licensed under
 the Apache License, Version 2.0.
 
 See third_party/oboe/LICENSE for Oboe license terms.
+
+This product includes libusb, licensed under the GNU Lesser General Public
+License, version 2.1 or later.
+
+See third_party/libusb/COPYING for libusb license terms.

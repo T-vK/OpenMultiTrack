@@ -78,6 +78,18 @@ UsbIoStatus detachKernelDriver(int usb_fd, uint8_t interface_number) {
     return fail("DISCONNECT_CLAIM", EBUSY);
 }
 
+UsbIoStatus clearEndpointHalt(int usb_fd, uint8_t endpoint_address) {
+    unsigned int ep = endpoint_address;
+    if (ioctl(usb_fd, USBDEVFS_CLEAR_HALT, &ep) < 0) {
+        return fail("CLEAR_HALT", errno);
+    }
+    UsbIoStatus ok;
+    ok.ok = true;
+    return ok;
+}
+
+}  // namespace
+
 void detachForeignDrivers(int usb_fd, uint8_t keep_iface) {
     for (unsigned int ifno = 0; ifno < 16; ++ifno) {
         if (static_cast<uint8_t>(ifno) == keep_iface) {
@@ -92,18 +104,6 @@ void detachForeignDrivers(int usb_fd, uint8_t keep_iface) {
         }
     }
 }
-
-UsbIoStatus clearEndpointHalt(int usb_fd, uint8_t endpoint_address) {
-    unsigned int ep = endpoint_address;
-    if (ioctl(usb_fd, USBDEVFS_CLEAR_HALT, &ep) < 0) {
-        return fail("CLEAR_HALT", errno);
-    }
-    UsbIoStatus ok;
-    ok.ok = true;
-    return ok;
-}
-
-}  // namespace
 
 UsbIoStatus setAltOnClaimedInterface(int usb_fd, const Uac2AltSetting& alt) {
     if (usb_fd < 0) {

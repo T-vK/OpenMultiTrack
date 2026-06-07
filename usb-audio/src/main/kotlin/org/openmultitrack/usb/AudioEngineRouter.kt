@@ -158,8 +158,14 @@ object AudioEngineRouter {
             AudioBackend.UAC2 -> {
                 val stream = route.usbStream ?: return failed("missing usb stream")
                 val alt = route.uac2Alt ?: return failed("missing uac2 alt")
-                val javaClaimed = claimUac2Interface(stream, usbDevice, alt.interfaceNumber)
-                NativeUac2Engine.startCapture(stream.fd, alt, javaClaimed)
+                var status = NativeUac2Engine.startCapture(stream.fd, alt, javaInterfaceClaimed = false)
+                if (!status.active && usbDevice != null) {
+                    val javaClaimed = claimUac2Interface(stream, usbDevice, alt.interfaceNumber)
+                    if (javaClaimed) {
+                        status = NativeUac2Engine.startCapture(stream.fd, alt, javaInterfaceClaimed = true)
+                    }
+                }
+                status
             }
         }
     }
@@ -189,8 +195,14 @@ object AudioEngineRouter {
             AudioBackend.UAC2 -> {
                 val stream = route.usbStream ?: return failed("missing usb stream")
                 val alt = route.uac2Alt ?: return failed("missing uac2 alt")
-                val javaClaimed = claimUac2Interface(stream, usbDevice, alt.interfaceNumber)
-                NativeUac2Engine.startPlayback(stream.fd, alt, javaClaimed)
+                var status = NativeUac2Engine.startPlayback(stream.fd, alt, javaInterfaceClaimed = false)
+                if (!status.active && usbDevice != null) {
+                    val javaClaimed = claimUac2Interface(stream, usbDevice, alt.interfaceNumber)
+                    if (javaClaimed) {
+                        status = NativeUac2Engine.startPlayback(stream.fd, alt, javaInterfaceClaimed = true)
+                    }
+                }
+                status
             }
         }
     }

@@ -4,6 +4,8 @@
 #include "../spsc_ring_buffer.h"
 #include "android_usb_fs.h"
 #include "android_usb_io.h"
+#include "libusb.h"
+#include "libusb_session.h"
 #include "uac2_format.h"
 #include "uac2_urb.h"
 
@@ -40,41 +42,28 @@ PlaybackStatus Uac2Playback::open(int usb_fd, const Uac2AltSetting& alt, bool ja
         return status;
     }
 
-    java_interface_claimed_ = java_interface_claimed;
-    const UsbIoStatus io = java_interface_claimed
-        ? setAltOnClaimedInterface(usb_fd, alt)
-        : claimAndSetAlt(usb_fd, alt);
-    if (!io.ok) {
-        PlaybackStatus status;
-        status.error = io.error;
-        return status;
-    }
-
     usb_fd_ = usb_fd;
     alt_ = alt;
+    java_interface_claimed_ = java_interface_claimed;
     channel_count_ = alt.format.channels;
     sample_rate_ = static_cast<int32_t>(alt.format.sample_rate_hz);
     ring_ = std::make_unique<openmultitrack::SpscRingBuffer>(48'000, channel_count_);
     urb_layout_ = layoutForAlt(alt, false);
 
-    std::promise<bool> init_promise;
-    std::future<bool> init_future = init_promise.get_future();
-    running_.store(true);
-    worker_ = std::thread(&Uac2Playback::workerLoop, this, std::move(init_promise));
+    bool opened = tryOpenLibusb(usb_fd, alt, java_interface_claimed);
+    if (!opened) {
+        opened = tryOpenUsbdevfs(usb_fd, alt, java_interface_claimed);
+    }
 
-    if (init_future.wait_for(std::chrono::seconds(2)) != std::future_status::ready ||
-        !init_future.get()) {
-        running_.store(false);
-        if (worker_.joinable()) {
-            worker_.join();
-        }
+    if (!opened) {
         close();
         PlaybackStatus status;
         status.error = "isoch URB submit failed";
         return status;
     }
 
-    OMT_LOGI("uac2 playback open %dch @ %dHz ep=0x%02x pkt=%u",
+    OMT_LOGI("uac2 playback open %s %dch @ %dHz ep=0x%02x pkt=%u",
+             backend_ == IoBackend::Libusb ? "libusb" : "usbdevfs",
              channel_count_,
              sample_rate_,
              alt.endpoint_address,
@@ -87,17 +76,124 @@ PlaybackStatus Uac2Playback::open(int usb_fd, const Uac2AltSetting& alt, bool ja
     return status;
 }
 
-void Uac2Playback::close() {
+bool Uac2Playback::tryOpenLibusb(int usb_fd,
+                                 const Uac2AltSetting& alt,
+                                 bool java_interface_claimed) {
+    libusb_ctx_ = libusbAndroidContext();
+    if (libusb_ctx_ == nullptr) {
+        return false;
+    }
+
+    if (!libusbPrepareStreaming(
+            usb_fd, alt, java_interface_claimed, &libusb_handle_, &libusb_owns_interface_)) {
+        libusb_handle_ = nullptr;
+        return false;
+    }
+
+    std::promise<bool> init_promise;
+    std::future<bool> init_future = init_promise.get_future();
+    running_.store(true);
+    libusb_event_thread_ = std::thread(&Uac2Playback::libusbEventLoop, this);
+    worker_ = std::thread(&Uac2Playback::workerLoopLibusb, this, std::move(init_promise));
+
+    if (init_future.wait_for(std::chrono::seconds(2)) == std::future_status::ready &&
+        init_future.get()) {
+        backend_ = IoBackend::Libusb;
+        return true;
+    }
+
     running_.store(false);
     if (worker_.joinable()) {
         worker_.join();
     }
+    if (libusb_event_thread_.joinable()) {
+        libusb_event_thread_.join();
+    }
+    freeLibusbTransfers();
+    libusbReleaseStreaming(libusb_handle_, alt.interface_number, libusb_owns_interface_);
+    libusb_handle_ = nullptr;
+    libusb_owns_interface_ = false;
+    libusb_ctx_ = nullptr;
+    return false;
+}
 
-    if (usb_fd_ >= 0 && alt_.format.valid && !java_interface_claimed_) {
+bool Uac2Playback::tryOpenUsbdevfs(int usb_fd,
+                                   const Uac2AltSetting& alt,
+                                   bool java_interface_claimed) {
+    const UsbIoStatus io = java_interface_claimed
+        ? setAltOnClaimedInterface(usb_fd, alt)
+        : claimAndSetAlt(usb_fd, alt);
+    if (!io.ok) {
+        OMT_LOGE("uac2 playback usbdevfs setup failed: %s", io.error.c_str());
+        return false;
+    }
+
+    std::promise<bool> init_promise;
+    std::future<bool> init_future = init_promise.get_future();
+    running_.store(true);
+    worker_ = std::thread(&Uac2Playback::workerLoopUsbdevfs, this, std::move(init_promise));
+
+    if (init_future.wait_for(std::chrono::seconds(2)) == std::future_status::ready &&
+        init_future.get()) {
+        backend_ = IoBackend::Usbdevfs;
+        return true;
+    }
+
+    running_.store(false);
+    if (worker_.joinable()) {
+        worker_.join();
+    }
+    if (!java_interface_claimed) {
+        releaseInterface(usb_fd, alt.interface_number);
+    }
+    return false;
+}
+
+void Uac2Playback::close() {
+    running_.store(false);
+
+    if (backend_ == IoBackend::Libusb && libusb_ctx_ != nullptr) {
+        for (libusb_transfer* transfer : libusb_transfers_) {
+            if (transfer != nullptr) {
+                libusb_cancel_transfer(transfer);
+            }
+        }
+        timeval tv{};
+        tv.tv_sec = 0;
+        tv.tv_usec = 100'000;
+        for (int i = 0; i < 50; ++i) {
+            (void)libusb_handle_events_timeout_completed(libusb_ctx_, &tv, nullptr);
+        }
+    }
+
+    if (worker_.joinable()) {
+        worker_.join();
+    }
+    if (libusb_event_thread_.joinable()) {
+        libusb_event_thread_.join();
+    }
+
+    for (libusb_transfer* transfer : libusb_transfers_) {
+        if (transfer != nullptr) {
+            libusb_free_transfer(transfer);
+        }
+    }
+    libusb_transfers_.clear();
+    libusb_buffers_.clear();
+
+    if (backend_ == IoBackend::Libusb && libusb_handle_ != nullptr) {
+        libusbReleaseStreaming(
+            libusb_handle_, alt_.interface_number, libusb_owns_interface_);
+        libusb_handle_ = nullptr;
+        libusb_owns_interface_ = false;
+        libusb_ctx_ = nullptr;
+    } else if (backend_ == IoBackend::Usbdevfs && usb_fd_ >= 0 && alt_.format.valid &&
+               !java_interface_claimed_) {
         releaseInterface(usb_fd_, alt_.interface_number);
     }
 
     ring_.reset();
+    backend_ = IoBackend::None;
     usb_fd_ = -1;
     java_interface_claimed_ = false;
     alt_ = {};
@@ -152,7 +248,135 @@ bool Uac2Playback::fillUrbBuffer(uint8_t* dest, size_t byte_capacity, size_t* fr
     return true;
 }
 
-void Uac2Playback::workerLoop(std::promise<bool> init_promise) {
+void Uac2Playback::freeLibusbTransfers() {
+    if (libusb_ctx_ != nullptr) {
+        for (libusb_transfer* transfer : libusb_transfers_) {
+            if (transfer != nullptr) {
+                libusb_cancel_transfer(transfer);
+            }
+        }
+        timeval tv{};
+        tv.tv_sec = 0;
+        tv.tv_usec = 100'000;
+        for (int i = 0; i < 50; ++i) {
+            (void)libusb_handle_events_timeout_completed(libusb_ctx_, &tv, nullptr);
+        }
+    }
+    for (libusb_transfer* transfer : libusb_transfers_) {
+        if (transfer != nullptr) {
+            libusb_free_transfer(transfer);
+        }
+    }
+    libusb_transfers_.clear();
+    libusb_buffers_.clear();
+}
+
+void Uac2Playback::libusbEventLoop() {
+    timeval tv{};
+    tv.tv_sec = 0;
+    tv.tv_usec = 50'000;
+    while (running_.load()) {
+        if (libusb_ctx_ == nullptr) {
+            break;
+        }
+        (void)libusb_handle_events_timeout_completed(libusb_ctx_, &tv, nullptr);
+    }
+}
+
+void Uac2Playback::LIBUSB_CALL Uac2Playback::libusbPlaybackCallback(struct libusb_transfer* transfer) {
+    if (transfer == nullptr || transfer->user_data == nullptr) {
+        return;
+    }
+    auto* self = static_cast<Uac2Playback*>(transfer->user_data);
+
+    if (transfer->status != LIBUSB_TRANSFER_COMPLETED && transfer->status != LIBUSB_TRANSFER_CANCELLED &&
+        self->running_.load()) {
+        OMT_LOGW("uac2 playback libusb transfer status=%d", transfer->status);
+    }
+
+    if (!self->running_.load()) {
+        return;
+    }
+
+    size_t frames = 0;
+    self->fillUrbBuffer(transfer->buffer,
+                        static_cast<size_t>(transfer->length),
+                        &frames);
+    for (int p = 0; p < transfer->num_iso_packets; ++p) {
+        transfer->iso_packet_desc[p].actual_length = 0;
+    }
+
+    const int r = libusb_submit_transfer(transfer);
+    if (r != 0 && self->running_.load()) {
+        OMT_LOGE("uac2 playback libusb resubmit failed: %s", libusb_error_name(r));
+        self->running_.store(false);
+    }
+}
+
+void Uac2Playback::workerLoopLibusb(std::promise<bool> init_promise) {
+    const IsoUrbLayout layout = urb_layout_;
+    bool init_reported = false;
+
+    libusb_transfers_.clear();
+    libusb_buffers_.clear();
+    libusb_transfers_.reserve(kNumUrbs);
+    libusb_buffers_.reserve(static_cast<size_t>(kNumUrbs));
+
+    for (int i = 0; i < kNumUrbs; ++i) {
+        libusb_transfer* transfer = libusb_alloc_transfer(layout.num_packets);
+        if (transfer == nullptr) {
+            if (!init_reported) {
+                init_promise.set_value(false);
+            }
+            running_.store(false);
+            return;
+        }
+
+        libusb_buffers_.emplace_back(static_cast<size_t>(layout.buffer_length));
+        unsigned char* buffer = libusb_buffers_.back().data();
+        size_t frames = 0;
+        fillUrbBuffer(buffer, static_cast<size_t>(layout.buffer_length), &frames);
+
+        libusb_fill_iso_transfer(transfer,
+                                 libusb_handle_,
+                                 alt_.endpoint_address,
+                                 buffer,
+                                 layout.buffer_length,
+                                 layout.num_packets,
+                                 libusbPlaybackCallback,
+                                 this,
+                                 0);
+        libusb_set_iso_packet_lengths(transfer, static_cast<unsigned int>(layout.per_packet_bytes));
+
+        const int r = libusb_submit_transfer(transfer);
+        if (r != 0) {
+            OMT_LOGE("uac2 playback libusb SUBMIT failed: %s", libusb_error_name(r));
+            libusb_free_transfer(transfer);
+            if (!init_reported) {
+                init_promise.set_value(false);
+                init_reported = true;
+            }
+            running_.store(false);
+            return;
+        }
+
+        libusb_transfers_.push_back(transfer);
+        if (!init_reported) {
+            init_promise.set_value(true);
+            init_reported = true;
+        }
+    }
+
+    if (!init_reported) {
+        init_promise.set_value(false);
+    }
+
+    while (running_.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+
+void Uac2Playback::workerLoopUsbdevfs(std::promise<bool> init_promise) {
     const IsoUrbLayout layout = urb_layout_;
 
     std::vector<UrbContext> contexts(kNumUrbs);

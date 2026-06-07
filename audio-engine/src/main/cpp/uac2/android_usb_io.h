@@ -22,4 +22,7 @@ UsbIoStatus setAltOnClaimedInterface(int usb_fd, const Uac2AltSetting& alt);
 /** Release a previously claimed interface. */
 UsbIoStatus releaseInterface(int usb_fd, uint8_t interface_number);
 
+/** Disconnect kernel drivers on interfaces other than the streaming AS iface. */
+void detachForeignDrivers(int usb_fd, uint8_t keep_iface);
+
 }  // namespace openmultitrack::uac2
