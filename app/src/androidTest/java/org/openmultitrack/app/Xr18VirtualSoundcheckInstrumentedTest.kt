@@ -1,6 +1,7 @@
 package org.openmultitrack.app
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -12,6 +13,19 @@ import org.openmultitrack.audio.NativeUac2Probe
  */
 @RunWith(AndroidJUnit4::class)
 class Xr18VirtualSoundcheckInstrumentedTest {
+    @Test
+    fun parseFlow8FixtureReportsTenCaptureFourPlayback() {
+        val raw = InstrumentationRegistry.getInstrumentation().context.assets
+            .open("uac2/flow8_recording_mode.bin")
+            .use { it.readBytes() }
+        val caps = NativeUac2Probe.parseConfigDescriptor(raw)!!
+
+        assertThat(caps.parseOk).isTrue()
+        assertThat(caps.uacVersion).isEqualTo(2)
+        assertThat(caps.maxCaptureChannels).isAtLeast(10)
+        assertThat(caps.maxPlaybackChannels).isAtLeast(4)
+    }
+
     @Test
     fun syntheticDescriptorSupportsEighteenChannelVirtualSoundcheck() {
         val caps = NativeUac2Probe.parseConfigDescriptor(buildSyntheticXr18Descriptor())!!

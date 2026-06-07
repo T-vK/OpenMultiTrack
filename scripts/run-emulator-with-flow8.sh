@@ -42,7 +42,15 @@ if ! lsusb -d 1397:050c >/dev/null 2>&1; then
   exit 1
 fi
 
+ACCEL_ARGS=()
+if [[ ! -e /dev/kvm ]]; then
+  echo "No /dev/kvm — using -accel off (cold boot is slow)."
+  ACCEL_ARGS=(-accel off)
+fi
+
 echo "Starting AVD: $AVD with Flow 8 USB passthrough ($FLOW8_VID:$FLOW8_PID)"
+echo "If passthrough fails, the host may still own the device (lsusb). Stop DAW/PulseAudio using Flow 8, then retry."
 # -usb-passthrough is supported on Linux emulator builds.
-exec "$EMULATOR" -avd "$AVD" \
+exec "$EMULATOR" -avd "$AVD" -no-window -no-audio -gpu swiftshader_indirect \
+  "${ACCEL_ARGS[@]}" \
   -usb-passthrough "vendorid=${FLOW8_VID},productid=${FLOW8_PID}"

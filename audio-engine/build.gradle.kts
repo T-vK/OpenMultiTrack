@@ -56,5 +56,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
 
     androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:rules:1.6.2")
     androidTestImplementation(libs.truth)
 }

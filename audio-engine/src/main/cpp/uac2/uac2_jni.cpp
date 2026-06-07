@@ -62,7 +62,7 @@ bool initClasses(JNIEnv* env) {
     gAltCtor = env->GetMethodID(
         gAltClass,
         "<init>",
-        "(IIIIIZIIIIZ)V");
+        "(IIIIZIIIIZ)V");
     return gCapsCtor != nullptr && gAltCtor != nullptr;
 }
 
