@@ -13,6 +13,7 @@ import org.junit.runner.RunWith
 import org.openmultitrack.app.audio.SessionPlayer
 import org.openmultitrack.app.audio.SessionRecorder
 import org.openmultitrack.app.test.RequiresUsbDevice
+import org.openmultitrack.app.test.UsbAppProcessRule
 import org.openmultitrack.app.test.UsbDeviceRule
 import org.openmultitrack.sessionio.wav.WavReader
 import org.openmultitrack.sessionio.wav.WavWriter
@@ -33,12 +34,15 @@ import kotlin.math.sin
 @RunWith(AndroidJUnit4::class)
 @RequiresUsbDevice(vendorId = 0x1397, productId = 0x050c)
 class Flow8VirtualSoundcheckInstrumentedTest {
-    @get:Rule
+    @get:Rule(order = 0)
+    val usbAppProcessRule = UsbAppProcessRule()
+
+    @get:Rule(order = 1)
     val usbDeviceRule = UsbDeviceRule()
 
-    private val context = InstrumentationRegistry.getInstrumentation().targetContext
-    private val enumerator = UsbAudioEnumerator(context)
-    private val probeService = UsbAudioProbeService(enumerator)
+    private val context get() = usbAppProcessRule.appContext
+    private val enumerator get() = UsbAudioEnumerator(context)
+    private val probeService get() = UsbAudioProbeService(enumerator)
 
     @Test
     fun descriptorReportsFourPlaybackUsbReturns() {
@@ -155,8 +159,13 @@ class Flow8VirtualSoundcheckInstrumentedTest {
         val device = usbManager.deviceList.values.first {
             it.vendorId == FLOW8_VENDOR_ID && it.productId == FLOW8_PRODUCT_ID
         }
+        val opened = usbManager.openDevice(device)
+        if (opened != null) {
+            opened.close()
+            return
+        }
         assumeTrue(
-            "Grant USB permission in the app UI (see scripts/run-emulator-with-flow8.sh)",
+            "Grant USB permission (see scripts/grant-usb-permission.sh)",
             usbManager.hasPermission(device),
         )
     }
