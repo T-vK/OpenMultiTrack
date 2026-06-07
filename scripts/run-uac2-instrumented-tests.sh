@@ -74,6 +74,9 @@ run_tests() {
   local class_list="$1"
   "${ADB[@]}" "${ADB_FLAGS[@]}" install -r app/build/outputs/apk/debug/app-debug.apk
   "${ADB[@]}" "${ADB_FLAGS[@]}" install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+  if [[ "$MODE" == "hardware" || "$MODE" == "all" ]]; then
+    ./scripts/grant-usb-permission.sh --sync-uids-only ${SERIAL:+"$SERIAL"}
+  fi
   "${ADB[@]}" "${ADB_FLAGS[@]}" shell am instrument -w -r \
     -e class "$class_list" \
     org.openmultitrack.test/androidx.test.runner.AndroidJUnitRunner

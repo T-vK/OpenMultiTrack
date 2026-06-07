@@ -7,6 +7,7 @@
 #
 # Usage:
 #   ./scripts/grant-usb-permission.sh [adb-serial]
+#   ./scripts/grant-usb-permission.sh --sync-uids-only [adb-serial]   # after APK install
 
 set -euo pipefail
 
@@ -14,7 +15,23 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}"
 ADB="${SDK}/platform-tools/adb"
 
-SERIAL="${1:-}"
+SERIAL=""
+SYNC_UIDS_ONLY=false
+for arg in "$@"; do
+  case "$arg" in
+    --sync-uids-only) SYNC_UIDS_ONLY=true ;;
+    -h|--help)
+      sed -n '2,10p' "$0"
+      exit 0
+      ;;
+    *)
+      if [[ -z "$SERIAL" ]]; then
+        SERIAL="$arg"
+      fi
+      ;;
+  esac
+done
+
 ADB_FLAGS=()
 if [[ -n "$SERIAL" ]]; then
   ADB_FLAGS=(-s "$SERIAL")
@@ -60,6 +77,36 @@ find_sysfs_descriptors() {
 
 wait_for_boot
 
+grant_usb_uid_in_xml() {
+  local uid="$1"
+  [[ -z "$uid" ]] && return 0
+  "${ADB[@]}" "${ADB_FLAGS[@]}" shell "grep -q 'uid=\\\"$uid\\\"' /data/system/users/0/usb_permissions.xml 2>/dev/null || \
+    sed -i 's|</permissions>|  <permission uid=\"$uid\" granted=\"true\"><usb-device vendor-id=\"${FLOW8_VID}\" product-id=\"${FLOW8_PID}\" class=\"239\" subclass=\"2\" protocol=\"1\" /></permission>\\n</permissions>|' /data/system/users/0/usb_permissions.xml" 2>/dev/null || true
+}
+
+sync_usb_package_uids() {
+  "${ADB[@]}" "${ADB_FLAGS[@]}" root >/dev/null 2>&1 || true
+  sleep 1
+  local app_uid test_uid uid_marker current_uids
+  # pm list FILTER is substring match — anchor package names so .test is not included.
+  app_uid="$("${ADB[@]}" "${ADB_FLAGS[@]}" shell pm list packages -U 2>/dev/null \
+    | grep "^package:${PACKAGE} uid:" | sed -n 's/.*uid://p' | head -1 | tr -d '\r')"
+  test_uid="$("${ADB[@]}" "${ADB_FLAGS[@]}" shell pm list packages -U 2>/dev/null \
+    | grep "^package:${TEST_PACKAGE} uid:" | sed -n 's/.*uid://p' | head -1 | tr -d '\r')"
+  grant_usb_uid_in_xml "$app_uid"
+  grant_usb_uid_in_xml "$test_uid"
+  current_uids="${app_uid}:${test_uid}"
+  uid_marker="/data/local/tmp/omt_usb_granted_uids"
+  local applied_uids
+  applied_uids="$("${ADB[@]}" "${ADB_FLAGS[@]}" shell "cat '$uid_marker' 2>/dev/null || true" | tr -d '\r')"
+  if [[ -n "$current_uids" && "$current_uids" != "$applied_uids" ]]; then
+    echo "Refreshing USB permissions for app uid=$app_uid test uid=$test_uid..."
+    "${ADB[@]}" "${ADB_FLAGS[@]}" shell killall system_server 2>/dev/null || true
+    wait_for_boot
+    "${ADB[@]}" "${ADB_FLAGS[@]}" shell "echo '$current_uids' > '$uid_marker'" 2>/dev/null || true
+  fi
+}
+
 wait_for_flow8() {
   local max_attempts="${1:-60}"
   for attempt in $(seq 1 "$max_attempts"); do
@@ -73,6 +120,19 @@ wait_for_flow8() {
   done
   return 1
 }
+
+if [[ "$SYNC_UIDS_ONLY" == true ]]; then
+  "${ADB[@]}" "${ADB_FLAGS[@]}" root >/dev/null 2>&1 || true
+  sleep 1
+  sync_usb_package_uids
+  FLOW8_NODE="$("${ADB[@]}" "${ADB_FLAGS[@]}" shell dumpsys usb 2>/dev/null \
+    | grep -oE '/dev/bus/usb/[0-9]+/[0-9]+' | head -1 | tr -d '\r')" || true
+  FLOW8_NODE="${FLOW8_NODE:-/dev/bus/usb/001/002}"
+  "${ADB[@]}" "${ADB_FLAGS[@]}" shell "setenforce 0 2>/dev/null || true"
+  "${ADB[@]}" "${ADB_FLAGS[@]}" shell "chmod 666 '$FLOW8_NODE' 2>/dev/null || true"
+  echo "USB package UIDs synced."
+  exit 0
+fi
 
 if ! wait_for_flow8; then
   echo "Flow 8 not visible in emulator USB host manager." >&2
@@ -108,29 +168,30 @@ FLOW8_NODE="${FLOW8_NODE:-/dev/bus/usb/001/002}"
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell "setenforce 0 2>/dev/null || true"
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell "chmod 666 '$FLOW8_NODE' 2>/dev/null || true"
 
-# Ensure permission entries exist for app + test UIDs (re-applied after APK reinstall).
-APP_UID="$("${ADB[@]}" "${ADB_FLAGS[@]}" shell pm list packages -U "$PACKAGE" 2>/dev/null | sed -n 's/.*uid://p')"
-TEST_UID="$("${ADB[@]}" "${ADB_FLAGS[@]}" shell pm list packages -U "$TEST_PACKAGE" 2>/dev/null | sed -n 's/.*uid://p')"
-if [[ -n "$APP_UID" ]]; then
-  "${ADB[@]}" "${ADB_FLAGS[@]}" shell "grep -q 'uid=\\\"$APP_UID\\\"' /data/system/users/0/usb_permissions.xml 2>/dev/null || \
-    sed -i 's|</permissions>|  <permission uid=\"$APP_UID\" granted=\"true\"><usb-device vendor-id=\"${FLOW8_VID}\" product-id=\"${FLOW8_PID}\" class=\"239\" subclass=\"2\" protocol=\"1\" /></permission>\\n</permissions>|' /data/system/users/0/usb_permissions.xml" 2>/dev/null || true
-fi
-
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell cmd overlay fabricate --target android --name "$OVERLAY_NAME" \
   android:bool/config_disableUsbPermissionDialogs 0x01010001 true >/dev/null 2>&1 || \
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell cmd overlay fabricate --target android --name "$OVERLAY_NAME" \
   android:bool/config_disableUsbPermissionDialogs 0x12 0x1 >/dev/null 2>&1 || true
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell cmd overlay enable --user 0 "com.android.shell:${OVERLAY_NAME}" >/dev/null 2>&1 || true
-MARKER="/data/local/tmp/omt_usb_overlay_applied"
-if ! "${ADB[@]}" "${ADB_FLAGS[@]}" shell "[ -f '$MARKER' ]" 2>/dev/null; then
-  echo "Restarting system_server once to apply USB permission overlay..."
+# Restart system_server once per emulator boot so the USB permission overlay takes effect.
+MARKER="/data/local/tmp/omt_usb_overlay_boot_id"
+BOOT_ID="$("${ADB[@]}" "${ADB_FLAGS[@]}" shell settings get global boot_count 2>/dev/null | tr -d '\r')"
+MARKER_BOOT="$("${ADB[@]}" "${ADB_FLAGS[@]}" shell "cat '$MARKER' 2>/dev/null || true" | tr -d '\r')"
+if [[ -n "$BOOT_ID" && "$BOOT_ID" != "null" && "$BOOT_ID" != "$MARKER_BOOT" ]]; then
+  echo "Restarting system_server once to apply USB permission overlay (boot_count=$BOOT_ID)..."
   "${ADB[@]}" "${ADB_FLAGS[@]}" shell killall system_server 2>/dev/null || true
   wait_for_boot
-  "${ADB[@]}" "${ADB_FLAGS[@]}" shell "touch '$MARKER'" 2>/dev/null || true
+  "${ADB[@]}" "${ADB_FLAGS[@]}" shell "echo '$BOOT_ID' > '$MARKER'" 2>/dev/null || true
+  "${ADB[@]}" "${ADB_FLAGS[@]}" shell "setenforce 0 2>/dev/null || true"
+  "${ADB[@]}" "${ADB_FLAGS[@]}" shell "chmod 666 '$FLOW8_NODE' 2>/dev/null || true"
 fi
 
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell pm grant "$PACKAGE" android.permission.RECORD_AUDIO 2>/dev/null || true
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell pm grant "$TEST_PACKAGE" android.permission.RECORD_AUDIO 2>/dev/null || true
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell settings put global hidden_api_policy 1 2>/dev/null || true
+
+sync_usb_package_uids
+"${ADB[@]}" "${ADB_FLAGS[@]}" shell "setenforce 0 2>/dev/null || true"
+"${ADB[@]}" "${ADB_FLAGS[@]}" shell "chmod 666 '$FLOW8_NODE' 2>/dev/null || true"
 
 echo "Emulator Flow 8 ready (live descriptor cache at $CACHE_FILE)."
