@@ -16,10 +16,13 @@ add_library(openmultitrack_audio SHARED
     audio_recorder.cpp
     audio_player.cpp
     jni_bridge.cpp
+    uac2/uac2_descriptor.cpp
+    uac2/uac2_jni.cpp
 )
 
 target_include_directories(openmultitrack_audio PRIVATE
     ${OBOE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 target_link_libraries(openmultitrack_audio
