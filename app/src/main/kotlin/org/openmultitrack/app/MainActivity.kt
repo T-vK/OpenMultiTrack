@@ -139,13 +139,15 @@ class MainActivity : ComponentActivity() {
             return
         }
         OmtLog.i("Usb", "requesting permission for ${device.deviceName} (${device.productName})")
-        val flags = PendingIntent.FLAG_UPDATE_CURRENT or
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val permissionIntent = Intent(usbPermissionAction).setPackage(packageName)
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
+                PendingIntent.FLAG_IMMUTABLE
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
                 PendingIntent.FLAG_MUTABLE
-            } else {
-                0
-            }
-        val intent = PendingIntent.getBroadcast(this, 0, Intent(usbPermissionAction), flags)
+            else -> 0
+        }
+        val intent = PendingIntent.getBroadcast(this, device.deviceId, permissionIntent, flags)
         usbManager.requestPermission(device, intent)
     }
 }

@@ -95,8 +95,12 @@ class UsbAudioEnumerator(
     private fun toDescriptor(device: UsbDevice): UsbAudioDeviceDescriptor {
         val product = device.productName
         val manufacturer = device.manufacturerName
-        val serial = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            device.serialNumber
+        val serial = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP &&
+            usbManager.hasPermission(device)
+        ) {
+            runCatching { device.serialNumber }
+                .onFailure { OmtLog.w("Usb", "serial read failed for ${device.deviceName}", it) }
+                .getOrNull()
         } else {
             null
         }
