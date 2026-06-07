@@ -111,22 +111,25 @@ jobs:
 
       - name: Commit version.properties bump
         if: steps.semver.outputs.version_changed == 'true'
+        continue-on-error: true
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add gradle/version.properties fdroid/config.yml
+          git add gradle/version.properties
           git diff --staged --quiet && exit 0
           git commit -m "chore(release): v${{ steps.semver.outputs.version }} [skip ci]"
           git push
 
       - name: Push release tag
         if: steps.semver.outputs.version_changed == 'true'
+        continue-on-error: true
         run: |
           git tag -f "${{ steps.semver.outputs.tag }}"
           git push origin "${{ steps.semver.outputs.tag }}" --force
 
       - name: Create GitHub Release
         if: steps.semver.outputs.version_changed == 'true'
+        continue-on-error: true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.semver.outputs.tag }}

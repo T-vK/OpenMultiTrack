@@ -1,0 +1,9 @@
+repo_url: https://T-vK.github.io/OpenMultiTrack/fdroid/repo
+repo_name: OpenMultiTrack
+repo_description: |
+  OpenMultiTrack debug builds — FOSS multitrack recorder for Behringer USB mixers.
+archive_older: 5
+keystore: keystore.p12
+repo_keyalias: fdroidrepo
+keystorepass: testpass
+keypass: testpass
