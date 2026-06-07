@@ -9,7 +9,7 @@
 
 ## Semantic versioning (commit messages)
 
-Versions follow [Conventional Commits](https://www.conventionalcommits.org/) via `PaulHatcher/semantic-version`:
+Versions follow [Conventional Commits](https://www.conventionalcommits.org/) via [`scripts/compute-semver.sh`](../scripts/compute-semver.sh) (no third-party action):
 
 | Commit prefix | Bump |
 |---------------|------|

@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 concurrency:
   group: publish-main
@@ -21,44 +22,43 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      FDROID_KEYSTORE_PASS: ${{ secrets.FDROID_KEYSTORE_PASS || 'openmultitrack-ci' }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./.github/actions/android-setup
 
       - name: Compute semantic version
         id: semver
-        uses: PaulHatcher/semantic-version@v0.5.0
-        with:
-          tag_prefix: "v"
-          major_pattern: "(BREAKING CHANGE|!):"
-          minor_pattern: "feat:"
-          patch_pattern: "fix:"
-          version_format: "${major}.${minor}.${patch}"
+        shell: bash
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/compute-semver.sh
 
       - name: Apply version to Gradle
         run: |
-          chmod +x scripts/*.sh
           ./scripts/write-version-properties.sh "${{ steps.semver.outputs.version }}"
           echo "Building OpenMultiTrack ${{ steps.semver.outputs.version }} (${{ steps.semver.outputs.tag }})"
 
       - name: Run unit tests
-        run: ./gradlew :domain:test :mixer-behringer:test :usb-audio:testDebugUnitTest :session-io:test --no-daemon
+        run: ./gradlew :domain:test :mixer-behringer:test :session-io:test :usb-audio:testDebugUnitTest --no-daemon
 
       - name: Assemble debug APK
         run: ./gradlew :app:assembleDebug --no-daemon
 
-      - name: Stage versioned APK
+      - name: Prepare site and APK artifacts
         run: |
+          VERSION="${{ steps.semver.outputs.version }}"
           mkdir -p dist site/fdroid/repo
+          cp -f site/index.html site/
+          touch site/.nojekyll
           cp app/build/outputs/apk/debug/app-debug.apk \
-            "dist/org.openmultitrack_${{ steps.semver.outputs.version }}-debug.apk"
-          cp "dist/org.openmultitrack_${{ steps.semver.outputs.version }}-debug.apk" \
-            site/fdroid/repo/
+            "dist/org.openmultitrack_${VERSION}-debug.apk"
+          cp "dist/org.openmultitrack_${VERSION}-debug.apk" site/fdroid/repo/
 
       - name: Set up Python for fdroidserver
         uses: actions/setup-python@v5
@@ -77,8 +77,6 @@ jobs:
 
       - name: Generate repo keystore if missing
         if: steps.fdroid-keystore.outputs.cache-hit != 'true'
-        env:
-          FDROID_KEYSTORE_PASS: ${{ secrets.FDROID_KEYSTORE_PASS || 'openmultitrack-ci' }}
         run: |
           keytool -genkeypair -v \
             -keystore fdroid/keystore.p12 -storetype PKCS12 \
@@ -87,15 +85,18 @@ jobs:
             -alias fdroidrepo -keyalg RSA -keysize 4096 -validity 10000 \
             -dname "CN=OpenMultiTrack Repo, OU=CI, O=OpenMultiTrack, C=DE"
 
-      - name: Update F-Droid repo index
-        env:
-          FDROID_KEYSTORE_PASS: ${{ secrets.FDROID_KEYSTORE_PASS || 'openmultitrack-ci' }}
+      - name: Build F-Droid repo index
+        shell: bash
         run: |
-          export FDROID_UPDATE_AUTOKEY=1
+          set -euo pipefail
+          export PATH="$ANDROID_HOME/build-tools/35.0.0:$ANDROID_HOME/platform-tools:$HOME/.local/bin:$PATH"
+          ./scripts/prepare-fdroid-config.sh
+          mkdir -p fdroid/repo
+          cp site/fdroid/repo/*.apk fdroid/repo/
           cd fdroid
           fdroid update --create-metadata --pretty
           fdroid update --pretty
-          rsync -a --delete repo/ ../site/fdroid/repo/
+          rsync -a repo/ ../site/fdroid/repo/
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -114,7 +115,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add gradle/version.properties
+          git add gradle/version.properties fdroid/config.yml
           git diff --staged --quiet && exit 0
           git commit -m "chore(release): v${{ steps.semver.outputs.version }} [skip ci]"
           git push
