@@ -1,5 +1,7 @@
 # OpenMultiTrack — System Architecture
 
+> **Agent onboarding:** [AGENTS.md](AGENTS.md) · **Feature status:** [PROJECT_STATUS.md](PROJECT_STATUS.md)
+
 ## Purpose
 
 OpenMultiTrack records multichannel audio from Behringer/Midas USB mixers and plays sessions back for virtual soundchecks, with OSC-based routing control and an on-device web remote.
