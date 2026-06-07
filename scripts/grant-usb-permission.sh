@@ -60,8 +60,29 @@ find_sysfs_descriptors() {
 
 wait_for_boot
 
-if ! "${ADB[@]}" "${ADB_FLAGS[@]}" shell dumpsys usb 2>/dev/null | grep -q "product_name=FLOW 8"; then
-  echo "Flow 8 not visible in emulator USB host manager — check passthrough." >&2
+wait_for_flow8() {
+  local max_attempts="${1:-60}"
+  for attempt in $(seq 1 "$max_attempts"); do
+    if "${ADB[@]}" "${ADB_FLAGS[@]}" shell dumpsys usb 2>/dev/null | grep -q "product_name=FLOW 8"; then
+      return 0
+    fi
+    if [[ "$attempt" -eq 1 ]] || (( attempt % 6 == 0 )); then
+      echo "Waiting for Flow 8 in emulator USB host manager ($attempt/$max_attempts)..."
+    fi
+    sleep 5
+  done
+  return 1
+}
+
+if ! wait_for_flow8; then
+  echo "Flow 8 not visible in emulator USB host manager." >&2
+  if ! lsusb -d 1397:050c >/dev/null 2>&1; then
+    echo "  Host: Flow 8 not found (lsusb). Connect the mixer via USB." >&2
+  else
+    echo "  Host: Flow 8 is connected — restart the emulator with passthrough:" >&2
+    echo "    ./scripts/run-emulator-with-flow8.sh" >&2
+  fi
+  echo "  Check guest: adb ${ADB_FLAGS[*]} shell dumpsys usb | grep -i flow" >&2
   exit 1
 fi
 
