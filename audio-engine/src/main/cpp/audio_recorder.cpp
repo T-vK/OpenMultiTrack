@@ -1,6 +1,7 @@
 #include "audio_recorder.h"
 
 #include "audio_limits.h"
+#include "audio_log.h"
 
 #include <oboe/Oboe.h>
 
@@ -23,6 +24,7 @@ RecorderStatus AudioRecorder::stop() {
 }
 
 RecorderStatus AudioRecorder::stopUnlocked() {
+    const uint64_t dropped = droppedFrames_.load();
     running_.store(false);
     if (stream_ != nullptr) {
         stream_->stop();
@@ -30,6 +32,9 @@ RecorderStatus AudioRecorder::stopUnlocked() {
         stream_.reset();
     }
     ring_.reset();
+    OMT_LOGI("recorder stopped deviceId=%d channels=%d sampleRate=%d droppedFrames=%llu",
+             deviceId_, channelCount_, sampleRate_,
+             static_cast<unsigned long long>(dropped));
     RecorderStatus status;
     status.running = false;
     return status;
@@ -43,8 +48,13 @@ RecorderStatus AudioRecorder::start(int32_t deviceId, int32_t channelCount, int3
     if (channelCount < 1 || channelCount > kMaxAudioChannels) {
         RecorderStatus status;
         status.error = "channelCount out of range";
+        OMT_LOGE("recorder start rejected deviceId=%d channels=%d: %s",
+                 deviceId, channelCount, status.error->c_str());
         return status;
     }
+
+    OMT_LOGI("recorder start deviceId=%d requestedChannels=%d sampleRate=%d",
+             deviceId, channelCount, sampleRate);
 
     ring_ = std::make_unique<SpscRingBuffer>(kRingCapacityFrames, channelCount);
 
@@ -63,6 +73,7 @@ RecorderStatus AudioRecorder::start(int32_t deviceId, int32_t channelCount, int3
     if (openResult != oboe::Result::OK || raw == nullptr) {
         RecorderStatus status;
         status.error = std::string("openStream: ") + oboe::convertToText(openResult);
+        OMT_LOGE("recorder openStream failed deviceId=%d: %s", deviceId, status.error->c_str());
         return status;
     }
     stream_.reset(raw);
@@ -75,9 +86,12 @@ RecorderStatus AudioRecorder::start(int32_t deviceId, int32_t channelCount, int3
         stream_.reset();
         RecorderStatus status;
         status.error = std::string("start: ") + oboe::convertToText(startResult);
+        OMT_LOGE("recorder start failed deviceId=%d: %s", deviceId, status.error->c_str());
         return status;
     }
 
+    OMT_LOGI("recorder running deviceId=%d actualChannels=%d actualSampleRate=%d",
+             deviceId_, channelCount_, sampleRate_);
     running_.store(true);
     RecorderStatus status;
     status.running = true;

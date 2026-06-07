@@ -1,4 +1,5 @@
 #include "audio_probe.h"
+#include "audio_log.h"
 
 #include <oboe/Oboe.h>
 
@@ -19,6 +20,9 @@ oboe::Direction toOboeDirection(ProbeDirection direction) {
 }  // namespace
 
 ProbeResult probeUsbAudioEndpoint(int32_t deviceId, ProbeDirection direction) {
+    const char* dirLabel = direction == ProbeDirection::Input ? "input" : "output";
+    OMT_LOGI("probe start deviceId=%d direction=%s", deviceId, dirLabel);
+
     ProbeResult result{};
     result.deviceId = deviceId;
     result.direction = direction;
@@ -41,6 +45,8 @@ ProbeResult probeUsbAudioEndpoint(int32_t deviceId, ProbeDirection direction) {
         std::ostringstream message;
         message << "openStream failed: " << oboe::convertToText(openResult);
         result.error = message.str();
+        OMT_LOGE("probe openStream failed deviceId=%d direction=%s: %s",
+                 deviceId, dirLabel, result.error->c_str());
         return result;
     }
 
@@ -54,6 +60,8 @@ ProbeResult probeUsbAudioEndpoint(int32_t deviceId, ProbeDirection direction) {
         std::ostringstream message;
         message << "start failed: " << oboe::convertToText(startResult);
         result.error = message.str();
+        OMT_LOGE("probe start failed deviceId=%d direction=%s: %s",
+                 deviceId, dirLabel, result.error->c_str());
         return result;
     }
 
@@ -66,6 +74,8 @@ ProbeResult probeUsbAudioEndpoint(int32_t deviceId, ProbeDirection direction) {
     }
 
     stream->close();
+    OMT_LOGI("probe ok deviceId=%d direction=%s channels=%d sampleRate=%d burst=%d",
+             deviceId, dirLabel, result.channelCount, result.sampleRate, result.framesPerBurst);
     return result;
 }
 

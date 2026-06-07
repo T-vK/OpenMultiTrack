@@ -3,6 +3,7 @@
 #include <optional>
 #include <string>
 
+#include "audio_log.h"
 #include "audio_player.h"
 #include "audio_probe.h"
 #include "audio_recorder.h"
@@ -31,11 +32,17 @@ Java_org_openmultitrack_audio_NativeAudioProbe_nativeProbe(
         openmultitrack::probeUsbAudioEndpoint(deviceId, directionFromJni(isInput));
 
     jclass resultClass = env->FindClass("org/openmultitrack/audio/NativeProbeResult");
-    if (resultClass == nullptr) return nullptr;
+    if (resultClass == nullptr) {
+        OMT_LOGE("JNI FindClass NativeProbeResult failed");
+        return nullptr;
+    }
 
     jmethodID ctor = env->GetMethodID(
         resultClass, "<init>", "(IIZIIIILjava/lang/String;)V");
-    if (ctor == nullptr) return nullptr;
+    if (ctor == nullptr) {
+        OMT_LOGE("JNI GetMethodID NativeProbeResult.<init> failed");
+        return nullptr;
+    }
 
     const bool success = !result.error.has_value() && result.channelCount > 0;
   return env->NewObject(
@@ -61,7 +68,15 @@ Java_org_openmultitrack_audio_NativeAudioEngine_nativeStartRecording(
     const openmultitrack::RecorderStatus status =
         openmultitrack::AudioRecorder::instance().start(deviceId, channelCount, sampleRate);
     jclass cls = env->FindClass("org/openmultitrack/audio/NativeEngineStatus");
+    if (cls == nullptr) {
+        OMT_LOGE("JNI FindClass NativeEngineStatus failed (recording)");
+        return nullptr;
+    }
     jmethodID ctor = env->GetMethodID(cls, "<init>", "(ZIILjava/lang/String;)V");
+    if (ctor == nullptr) {
+        OMT_LOGE("JNI GetMethodID NativeEngineStatus.<init> failed (recording)");
+        return nullptr;
+    }
     return env->NewObject(
         cls,
         ctor,
@@ -110,7 +125,15 @@ Java_org_openmultitrack_audio_NativeAudioEngine_nativeStartPlayback(
     const openmultitrack::PlayerStatus status =
         openmultitrack::AudioPlayer::instance().start(deviceId, channelCount, sampleRate);
     jclass cls = env->FindClass("org/openmultitrack/audio/NativeEngineStatus");
+    if (cls == nullptr) {
+        OMT_LOGE("JNI FindClass NativeEngineStatus failed (playback)");
+        return nullptr;
+    }
     jmethodID ctor = env->GetMethodID(cls, "<init>", "(ZIILjava/lang/String;)V");
+    if (ctor == nullptr) {
+        OMT_LOGE("JNI GetMethodID NativeEngineStatus.<init> failed (playback)");
+        return nullptr;
+    }
     return env->NewObject(
         cls,
         ctor,
@@ -118,6 +141,14 @@ Java_org_openmultitrack_audio_NativeAudioEngine_nativeStartPlayback(
         static_cast<jint>(status.channelCount),
         static_cast<jint>(status.sampleRate),
         toJstring(env, status.error));
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_org_openmultitrack_audio_NativeAudioEngine_nativePlaybackUnderrunFrames(
+    JNIEnv* /*env*/,
+    jobject /*thiz*/) {
+    return static_cast<jlong>(
+        openmultitrack::AudioPlayer::instance().status().underrunFrames);
 }
 
 extern "C" JNIEXPORT void JNICALL

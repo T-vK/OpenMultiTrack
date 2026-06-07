@@ -17,6 +17,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.openmultitrack.app.ui.MainScreen
+import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 
 class MainActivity : ComponentActivity() {
@@ -31,6 +32,7 @@ class MainActivity : ComponentActivity() {
             when (intent?.action) {
                 usbPermissionAction -> {
                     val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
+                    OmtLog.i("Usb", "permission result granted=$granted")
                     val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
                     } else {
@@ -38,19 +40,33 @@ class MainActivity : ComponentActivity() {
                         intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
                     }
                     if (granted && device != null) {
+                        OmtLog.i("Usb", "permission granted for ${device.deviceName} (${device.productName})")
                         viewModel.onUsbPermissionGranted(device.deviceName)
+                    } else if (!granted) {
+                        OmtLog.w("Usb", "permission denied for ${device?.deviceName}")
                     }
                 }
-                in setOf(
-                    UsbManager.ACTION_USB_DEVICE_ATTACHED,
-                    UsbManager.ACTION_USB_DEVICE_DETACHED,
-                ) -> viewModel.refreshDevices()
+                UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
+                    val attached = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+                    }
+                    OmtLog.i("Usb", "device attached: ${attached?.deviceName}")
+                    viewModel.refreshDevices()
+                }
+                UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                    OmtLog.i("Usb", "device detached")
+                    viewModel.refreshDevices()
+                }
             }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        OmtLog.d("Activity", "onCreate")
         registerUsbReceiver()
 
         setContent {
@@ -99,6 +115,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleUsbIntent(intent: Intent?) {
+        OmtLog.d("Usb", "handleUsbIntent action=${intent?.action}")
         val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             intent?.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
         } else {
@@ -117,9 +134,11 @@ class MainActivity : ComponentActivity() {
     private fun requestUsbPermission(device: UsbDevice) {
         val usbManager = getSystemService(USB_SERVICE) as UsbManager
         if (usbManager.hasPermission(device)) {
+            OmtLog.d("Usb", "already have permission for ${device.deviceName}")
             viewModel.onUsbPermissionGranted(device.deviceName)
             return
         }
+        OmtLog.i("Usb", "requesting permission for ${device.deviceName} (${device.productName})")
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 PendingIntent.FLAG_MUTABLE

@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.openmultitrack.app.audio.SessionPlayer
 import org.openmultitrack.app.audio.SessionRecorder
+import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.audio.RecordingChannels
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 import org.openmultitrack.domain.session.TransportState
@@ -55,6 +56,7 @@ class MainViewModel(
 
     fun refreshDevices() {
         viewModelScope.launch {
+            OmtLog.d("ViewModel", "refreshDevices")
             _uiState.update { it.copy(isRefreshing = true) }
             val rows = withContext(Dispatchers.IO) {
                 enumerator.listUsbDevices().map { usb ->
@@ -68,6 +70,7 @@ class MainViewModel(
                     )
                 }
             }
+            OmtLog.i("ViewModel", "found ${rows.size} USB device(s): ${rows.map { it.descriptor.productName }}")
             _uiState.update {
                 it.copy(devices = rows, isRefreshing = false, statusMessage = null)
             }
@@ -75,12 +78,14 @@ class MainViewModel(
     }
 
     fun onUsbPermissionGranted(deviceName: String) {
+        OmtLog.i("ViewModel", "onUsbPermissionGranted deviceName=$deviceName")
         refreshDevices()
         val row = _uiState.value.devices.firstOrNull { it.descriptor.deviceName == deviceName }
         if (row != null) probeDevice(row.descriptor)
     }
 
     fun probeDevice(descriptor: UsbAudioDeviceDescriptor) {
+        OmtLog.i("ViewModel", "probeDevice ${descriptor.productName} (${descriptor.deviceName})")
         viewModelScope.launch {
             _uiState.update { state ->
                 state.copy(
@@ -91,6 +96,11 @@ class MainViewModel(
             }
             val result = withContext(Dispatchers.IO) { probeService.probe(descriptor) }
             val inputChannels = result.input?.takeIf { it.isSuccess }?.channelCount
+            OmtLog.i(
+                "ViewModel",
+                "probe result input=${result.input?.channelCount}ch output=${result.output?.channelCount}ch " +
+                    "inputErr=${result.input?.errorMessage} outputErr=${result.output?.errorMessage}",
+            )
             _uiState.update { state ->
                 state.copy(
                     devices = state.devices.map { row ->
@@ -113,10 +123,16 @@ class MainViewModel(
     fun startRecording(descriptor: UsbAudioDeviceDescriptor) {
         val row = _uiState.value.devices.firstOrNull { it.descriptor.deviceName == descriptor.deviceName }
         val resolved = RecordingChannels.fromInputProbe(row?.probe?.input).getOrElse { error ->
+            OmtLog.w("ViewModel", "startRecording rejected: ${error.message}")
             _uiState.update { it.copy(statusMessage = error.message) }
             return
         }
 
+        OmtLog.i(
+            "ViewModel",
+            "startRecording ${descriptor.productName} deviceId=${resolved.deviceId} " +
+                "${resolved.channelCount}ch @ ${resolved.sampleRate}Hz",
+        )
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 recorder.start(
@@ -138,15 +154,21 @@ class MainViewModel(
                     )
                 }
             }.onFailure { error ->
+                OmtLog.e("ViewModel", "startRecording failed", error)
                 _uiState.update { it.copy(statusMessage = error.message) }
             }
         }
     }
 
     fun stopRecording() {
+        OmtLog.i("ViewModel", "stopRecording")
         viewModelScope.launch {
             val session = withContext(Dispatchers.IO) { recorder.stop() }
             val dropped = recorder.droppedFrameCount()
+            OmtLog.i(
+                "ViewModel",
+                "recording stopped frames=${session?.framesRecorded} dropped=$dropped path=${session?.filePath}",
+            )
             activeRecordingDevice = null
             _uiState.update { state ->
                 state.copy(
@@ -172,9 +194,11 @@ class MainViewModel(
         val deviceId = outputProbe?.takeIf { it.isSuccess }?.deviceId
             ?: enumerator.findAndroidAudioDeviceId(descriptor, input = false)
         if (deviceId == null) {
+            OmtLog.w("ViewModel", "playLastRecording: no output device id for ${descriptor.productName}")
             _uiState.update { it.copy(statusMessage = "Probe output channels before playback.") }
             return
         }
+        OmtLog.i("ViewModel", "playLastRecording path=$path deviceId=$deviceId")
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 player.play(viewModelScope, File(path), deviceId)
@@ -187,12 +211,14 @@ class MainViewModel(
                     )
                 }
             }.onFailure { e ->
+                OmtLog.e("ViewModel", "playLastRecording failed", e)
                 _uiState.update { it.copy(statusMessage = e.message) }
             }
         }
     }
 
     fun stopPlayback() {
+        OmtLog.i("ViewModel", "stopPlayback")
         player.stop()
         _uiState.update {
             it.copy(transportState = TransportState.IDLE, statusMessage = "Playback stopped")
@@ -200,8 +226,10 @@ class MainViewModel(
     }
 
     override fun onCleared() {
+        OmtLog.d("ViewModel", "onCleared")
         kotlinx.coroutines.runBlocking {
             runCatching { recorder.stop() }
+                .onFailure { OmtLog.w("ViewModel", "recorder.stop on clear failed", it) }
         }
         player.stop()
         super.onCleared()

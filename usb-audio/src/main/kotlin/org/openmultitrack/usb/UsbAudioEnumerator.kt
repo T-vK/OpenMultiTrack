@@ -6,6 +6,7 @@ import android.hardware.usb.UsbManager
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
+import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 
 /**
@@ -20,9 +21,18 @@ class UsbAudioEnumerator(
         context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     fun listUsbDevices(): List<UsbAudioDeviceDescriptor> {
-        return usbManager.deviceList.values.map { usbDevice ->
+        val devices = usbManager.deviceList.values.map { usbDevice ->
             toDescriptor(usbDevice)
         }.sortedBy { it.productName ?: it.deviceName }
+        OmtLog.d("Usb", "listUsbDevices count=${devices.size}")
+        devices.forEach { d ->
+            OmtLog.d(
+                "Usb",
+                "  ${d.productName} vid=${d.vendorId} pid=${d.productId} " +
+                    "behringer=${d.isLikelyBehringerMixer} audioId=${d.androidAudioDeviceId}",
+            )
+        }
+        return devices
     }
 
     fun listAudioOutputDevices(): List<AudioDeviceInfo> =
@@ -36,8 +46,24 @@ class UsbAudioEnumerator(
      * Returns AAudio device id suitable for Oboe setDeviceId().
      */
     fun findAndroidAudioDeviceId(usb: UsbAudioDeviceDescriptor, input: Boolean): Int? {
+        val direction = if (input) "input" else "output"
         val pool = if (input) listAudioInputDevices() else listAudioOutputDevices()
-        val key = usb.productName?.lowercase()?.takeIf { it.isNotBlank() } ?: return null
+        OmtLog.d(
+            "Usb",
+            "findAndroidAudioDeviceId ${usb.productName} direction=$direction pool=${pool.size}",
+        )
+        pool.forEach { info ->
+            val product = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                info.productName?.toString()
+            } else {
+                null
+            }
+            OmtLog.d("Usb", "  candidate id=${info.id} type=${info.type} product=$product")
+        }
+        val key = usb.productName?.lowercase()?.takeIf { it.isNotBlank() } ?: run {
+            OmtLog.w("Usb", "no product name for ${usb.deviceName}, cannot match by name")
+            return null
+        }
         val match = pool.firstOrNull { info ->
             info.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
                 info.type == AudioDeviceInfo.TYPE_USB_HEADSET
@@ -50,6 +76,11 @@ class UsbAudioEnumerator(
         } ?: pool.firstOrNull { info ->
             info.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
                 info.type == AudioDeviceInfo.TYPE_USB_HEADSET
+        }
+        if (match != null) {
+            OmtLog.i("Usb", "mapped ${usb.productName} → audio device id=${match.id} ($direction)")
+        } else {
+            OmtLog.w("Usb", "no audio device id for ${usb.productName} ($direction)")
         }
         return match?.id
     }

@@ -28,6 +28,8 @@ object NativeAudioEngine {
     fun writePlaybackFrames(src: FloatArray, frameCount: Int): Int =
         nativeWritePlaybackFrames(src, frameCount)
 
+    fun playbackUnderrunFrames(): Long = nativePlaybackUnderrunFrames()
+
     private external fun nativeStartRecording(
         deviceId: Int,
         channelCount: Int,
@@ -49,4 +51,6 @@ object NativeAudioEngine {
     private external fun nativeStopPlayback()
 
     private external fun nativeWritePlaybackFrames(src: FloatArray, frameCount: Int): Int
+
+    private external fun nativePlaybackUnderrunFrames(): Long
 }

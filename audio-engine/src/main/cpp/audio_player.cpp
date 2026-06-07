@@ -1,6 +1,7 @@
 #include "audio_player.h"
 
 #include "audio_limits.h"
+#include "audio_log.h"
 
 #include <oboe/Oboe.h>
 
@@ -24,6 +25,7 @@ PlayerStatus AudioPlayer::stop() {
 }
 
 PlayerStatus AudioPlayer::stopUnlocked() {
+    const uint64_t underruns = underrunFrames_.load();
     playing_.store(false);
     if (stream_ != nullptr) {
         stream_->stop();
@@ -31,6 +33,9 @@ PlayerStatus AudioPlayer::stopUnlocked() {
         stream_.reset();
     }
     ring_.reset();
+    OMT_LOGI("player stopped deviceId=%d channels=%d sampleRate=%d underrunFrames=%llu",
+             deviceId_, channelCount_, sampleRate_,
+             static_cast<unsigned long long>(underruns));
     PlayerStatus status;
     status.playing = false;
     return status;
@@ -44,8 +49,13 @@ PlayerStatus AudioPlayer::start(int32_t deviceId, int32_t channelCount, int32_t 
     if (channelCount < 1 || channelCount > kMaxAudioChannels) {
         PlayerStatus status;
         status.error = "channelCount out of range";
+        OMT_LOGE("player start rejected deviceId=%d channels=%d: %s",
+                 deviceId, channelCount, status.error->c_str());
         return status;
     }
+
+    OMT_LOGI("player start deviceId=%d requestedChannels=%d sampleRate=%d",
+             deviceId, channelCount, sampleRate);
 
     ring_ = std::make_unique<SpscRingBuffer>(kRingCapacityFrames, channelCount);
 
@@ -64,6 +74,7 @@ PlayerStatus AudioPlayer::start(int32_t deviceId, int32_t channelCount, int32_t 
     if (openResult != oboe::Result::OK || raw == nullptr) {
         PlayerStatus status;
         status.error = std::string("openStream: ") + oboe::convertToText(openResult);
+        OMT_LOGE("player openStream failed deviceId=%d: %s", deviceId, status.error->c_str());
         return status;
     }
     stream_.reset(raw);
@@ -76,9 +87,12 @@ PlayerStatus AudioPlayer::start(int32_t deviceId, int32_t channelCount, int32_t 
         stream_.reset();
         PlayerStatus status;
         status.error = std::string("start: ") + oboe::convertToText(startResult);
+        OMT_LOGE("player start failed deviceId=%d: %s", deviceId, status.error->c_str());
         return status;
     }
 
+    OMT_LOGI("player running deviceId=%d actualChannels=%d actualSampleRate=%d",
+             deviceId_, channelCount_, sampleRate_);
     playing_.store(true);
     PlayerStatus status;
     status.playing = true;

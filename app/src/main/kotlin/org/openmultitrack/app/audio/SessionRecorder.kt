@@ -7,6 +7,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.openmultitrack.audio.NativeAudioEngine
+import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.audio.AudioConstants
 import org.openmultitrack.domain.session.RecordingSession
 import org.openmultitrack.sessionio.wav.WavWriter
@@ -38,13 +39,19 @@ class SessionRecorder {
         val requestedChannels = channels.coerceIn(AudioConstants.MIN_CHANNELS, AudioConstants.MAX_CHANNELS)
         sampleRate = sampleRateHz
 
+        OmtLog.i(
+            "Recorder",
+            "start deviceId=$deviceId requestedChannels=$requestedChannels sampleRate=$sampleRateHz",
+        )
         val status = NativeAudioEngine.startRecording(deviceId, requestedChannels, sampleRate)
         if (!status.active) {
+            OmtLog.e("Recorder", "native start failed: ${status.errorMessage}")
             return Result.failure(IllegalStateException(status.errorMessage ?: "Recording failed"))
         }
 
         channelCount = status.channelCount.coerceIn(AudioConstants.MIN_CHANNELS, AudioConstants.MAX_CHANNELS)
         sampleRate = status.sampleRate
+        OmtLog.i("Recorder", "native running ${channelCount}ch @ ${sampleRate}Hz")
 
         val file = File(
             outputDir,
@@ -60,17 +67,29 @@ class SessionRecorder {
 
         writerJob = scope.launch(Dispatchers.IO) {
             try {
+                var lastLogFrames = 0L
                 while (isActive) {
                     val frames = NativeAudioEngine.readRecordedFrames(scratch, framesPerChunk)
                     if (frames > 0) {
                         wav.writeInterleavedFloat(scratch, frames)
                         framesWritten += frames
                         droppedFrames = NativeAudioEngine.recordingDroppedFrames()
+                        if (framesWritten - lastLogFrames >= sampleRate) {
+                            OmtLog.d(
+                                "Recorder",
+                                "written $framesWritten frames, dropped=$droppedFrames",
+                            )
+                            lastLogFrames = framesWritten
+                        }
                     } else {
                         Thread.sleep(2)
                     }
                 }
+            } catch (e: Exception) {
+                OmtLog.e("Recorder", "writer loop failed", e)
+                throw e
             } finally {
+                OmtLog.i("Recorder", "writer closing file=${file.absolutePath} frames=$framesWritten")
                 wav.close()
             }
         }
@@ -86,10 +105,15 @@ class SessionRecorder {
     }
 
     suspend fun stop(): RecordingSession? {
+        OmtLog.i("Recorder", "stop requested framesWritten=$framesWritten")
         writerJob?.cancelAndJoin()
         writerJob = null
         NativeAudioEngine.stopRecording()
         val file = outputFile ?: return null
+        OmtLog.i(
+            "Recorder",
+            "stopped path=${file.absolutePath} frames=$framesWritten dropped=$droppedFrames",
+        )
         return RecordingSession(
             filePath = file.absolutePath,
             channelCount = channelCount,
