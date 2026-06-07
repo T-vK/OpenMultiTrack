@@ -46,11 +46,11 @@ flow8_resolve_avd() {
   echo "$avd"
 }
 
-# Return adb serial for a running QEMU instance of [avd], or empty.
+# Return adb serial for a running QEMU instance of [avd], or empty (any adb state).
 emulator_running_serial() {
   local avd="$1"
   pgrep -f "qemu-system.*-avd ${avd}( |$)" >/dev/null 2>&1 || return 1
-  flow8__adb "" devices 2>/dev/null | awk '/^emulator-[0-9]+\tdevice$/{print $1; exit}'
+  flow8__adb "" devices 2>/dev/null | awk '/^emulator-/{print $1; exit}'
 }
 
 # Parse hostbus/hostaddr from the running emulator QEMU command line.
@@ -87,20 +87,34 @@ emulator_passthrough_ok() {
   return 0
 }
 
+emulator_boot_timeout() {
+  # Cold boot without KVM can exceed 15 minutes on CI hosts.
+  if [[ ! -e /dev/kvm ]]; then
+    echo 2400
+  else
+    echo 900
+  fi
+}
+
 emulator_wait_for_device() {
-  local avd="$1" timeout="${2:-900}"
-  local elapsed=0 serial=""
+  local avd="$1" timeout="${2:-$(emulator_boot_timeout)}"
+  local elapsed=0 serial="" state=""
   flow8__log "Waiting for adb device (timeout ${timeout}s)..."
   while (( elapsed < timeout )); do
-    serial="$(emulator_running_serial "$avd" || true)"
-    if [[ -n "$serial" ]] && flow8__adb "$serial" get-state 2>/dev/null | grep -q '^device$'; then
-      echo "$serial"
-      return 0
+    if pgrep -f "qemu-system.*-avd ${avd}( |$)" >/dev/null 2>&1; then
+      serial="$(flow8__adb "" devices 2>/dev/null | awk '/^emulator-/{print $1; exit}')"
+      if [[ -n "$serial" ]]; then
+        state="$(flow8__adb "$serial" get-state 2>/dev/null | tr -d '\r' || true)"
+        if [[ "$state" == "device" ]]; then
+          echo "$serial"
+          return 0
+        fi
+      fi
     fi
     sleep 5
     elapsed=$((elapsed + 5))
-    if (( elapsed % 30 == 0 )); then
-      flow8__log "  still waiting (${elapsed}s)..."
+    if (( elapsed % 60 == 0 )); then
+      flow8__log "  still waiting (${elapsed}s, adb state=${state:-none})..."
     fi
   done
   return 1

@@ -110,12 +110,16 @@ ensure_emulator() {
     fi
   else
     serial="$(emulator_running_serial "$avd" || true)"
-    if [[ -n "$serial" ]] && emulator_passthrough_ok "$avd" "$serial"; then
-      reuse=true
-    elif [[ -n "$serial" ]]; then
-      flow8__log "Running emulator $serial needs restart (stale USB passthrough or Flow 8 missing in guest)."
-      emulator_kill "$serial"
-      serial=""
+    if [[ -n "$serial" ]]; then
+      if emulator_passthrough_addrs "$avd" \
+        && [[ "$EMU_PT_BUS" == "$FLOW8_HOST_BUS" && "$EMU_PT_ADDR" == "$FLOW8_HOST_ADDR" ]]; then
+        flow8__log "Reusing $serial (USB passthrough address matches host)."
+        reuse=true
+      else
+        flow8__log "Running emulator $serial has stale USB passthrough — restarting."
+        emulator_kill "$serial"
+        serial=""
+      fi
     fi
   fi
 
@@ -125,7 +129,7 @@ ensure_emulator() {
     log_file="$ROOT/.cache/omt-emulator-${avd}.log"
     emulator_start_background "$avd" "$log_file" >/dev/null
     flow8__log "Emulator log: $log_file"
-    serial="$(emulator_wait_for_device "$avd" 900)" || flow8__die "Emulator did not appear on adb within 15 minutes."
+    serial="$(emulator_wait_for_device "$avd")" || flow8__die "Emulator did not appear on adb (timeout $(emulator_boot_timeout)s)."
     flow8__log "Emulator online: $serial"
   fi
 
