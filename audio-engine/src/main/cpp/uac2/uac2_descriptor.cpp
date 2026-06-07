@@ -8,31 +8,54 @@ namespace openmultitrack::uac2 {
 
 namespace {
 
-bool parseTypeIFormat(const uint8_t* data, size_t len, Uac2Format* out) {
-    if (len < 8 || data[0] < 8) return false;
+bool parseAsGeneral(const uint8_t* data, size_t len, uint8_t protocol, Uac2Format* out) {
+    if (len < 2 || data[1] != kCsInterface || data[2] != kAsSubtypeGeneral) return false;
+
+    // UAC2 AS_GENERAL (16 bytes): bmFormats is 4 bytes; bNrChannels follows at offset 10.
+    if (protocol == kUsbProtocolUac2 && len >= 16) {
+        out->channels = data[10];
+        out->valid = out->channels > 0;
+        return out->valid;
+    }
+
+    // UAC1 AS_GENERAL does not carry channel count; format type follows.
+    return false;
+}
+
+bool parseTypeIFormat(const uint8_t* data, size_t len, Uac2Format* in_out) {
+    if (len < 6 || data[0] < 6) return false;
     if (data[1] != kCsInterface || data[2] != kAsSubtypeFormatType) return false;
     if (data[3] != kFormatTypeI) return false;
 
-    out->channels = data[4];
-    out->subframe_bytes = data[5];
-    out->bit_resolution = data[6];
+    Uac2Format fmt = *in_out;
 
-    const uint8_t freq_count = data[7];
-    size_t offset = 8;
-    if (freq_count == 0) {
-        if (len < offset + 3) return false;
-        out->sample_rate_hz = static_cast<uint32_t>(data[offset]) |
-                              (static_cast<uint32_t>(data[offset + 1]) << 8) |
-                              (static_cast<uint32_t>(data[offset + 2]) << 16);
+    // UAC2 Type I format is 6 bytes: subslot + bit resolution only.
+    if (len == 6) {
+        fmt.subframe_bytes = data[4];
+        fmt.bit_resolution = data[5];
+    } else if (len >= 8) {
+        // UAC1 Type I: channels, subslot, bit resolution, then sample rate(s).
+        fmt.channels = data[4];
+        fmt.subframe_bytes = data[5];
+        fmt.bit_resolution = data[6];
+
+        size_t offset = 8;
+        if (len >= offset + 3) {
+            fmt.sample_rate_hz = static_cast<uint32_t>(data[offset]) |
+                                 (static_cast<uint32_t>(data[offset + 1]) << 8) |
+                                 (static_cast<uint32_t>(data[offset + 2]) << 16);
+        }
     } else {
-        if (len < offset + 3) return false;
-        out->sample_rate_hz = static_cast<uint32_t>(data[offset]) |
-                              (static_cast<uint32_t>(data[offset + 1]) << 8) |
-                              (static_cast<uint32_t>(data[offset + 2]) << 16);
+        return false;
     }
 
-    out->valid = out->channels > 0 && out->subframe_bytes > 0;
-    return out->valid;
+    if (fmt.sample_rate_hz == 0) {
+        fmt.sample_rate_hz = 48'000;
+    }
+
+    fmt.valid = fmt.channels > 0 && fmt.subframe_bytes > 0;
+    *in_out = fmt;
+    return fmt.valid;
 }
 
 void commitAlt(const Uac2AltSetting& alt, Uac2DeviceCaps* caps, uint8_t protocol) {
@@ -81,17 +104,26 @@ Uac2DeviceCaps parseConfigDescriptor(const uint8_t* data, size_t length) {
 
             iface_num = data[offset + 2];
             iface_alt = data[offset + 3];
-            iface_subclass = data[offset + 5];
-            iface_protocol = data[offset + 6];
+            iface_subclass = data[offset + 6];
+            iface_protocol = data[offset + 7];
             iface_format = {};
             pending.interface_number = iface_num;
             pending.alternate_setting = iface_alt;
             pending.format = {};
         } else if (desc_type == kCsInterface && iface_subclass == kUsbSubclassAudioStreaming) {
-            Uac2Format fmt{};
-            if (parseTypeIFormat(data + offset, desc_len, &fmt)) {
-                iface_format = fmt;
-                pending.format = fmt;
+            const uint8_t subtype = data[offset + 2];
+            if (subtype == kAsSubtypeGeneral) {
+                Uac2Format fmt = pending.format;
+                if (parseAsGeneral(data + offset, desc_len, iface_protocol, &fmt)) {
+                    iface_format = fmt;
+                    pending.format = fmt;
+                }
+            } else if (subtype == kAsSubtypeFormatType) {
+                Uac2Format fmt = pending.format;
+                if (parseTypeIFormat(data + offset, desc_len, &fmt)) {
+                    iface_format = fmt;
+                    pending.format = fmt;
+                }
             }
         } else if (desc_type == 0x05 && iface_subclass == kUsbSubclassAudioStreaming &&
                    iface_alt > 0) {
@@ -153,6 +185,7 @@ Uac2AltSetting selectBestAlt(const std::vector<Uac2AltSetting>& alts,
             alt.format.sample_rate_hz != sample_rate_hz) {
             continue;
         }
+        // sample_rate_hz == 0 on alt means "any" (UAC2 implicit 48 kHz default).
         if (best == nullptr || alt.format.channels > best->format.channels) {
             best = &alt;
         }
