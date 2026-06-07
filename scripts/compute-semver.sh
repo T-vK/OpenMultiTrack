@@ -27,15 +27,19 @@ bump="none"
 if [[ -n "$(git rev-parse "$commit_range" 2>/dev/null || true)" ]]; then
   while IFS= read -r subject; do
     [[ -z "$subject" ]] && continue
-    if [[ "$subject" =~ BREAKING[[:space:]]CHANGE ]] || [[ "$subject" =~ ^[a-zA-Z]+(\([^)]+\))?!: ]]; then
+    if [[ "$subject" == *"BREAKING CHANGE"* ]] || [[ "$subject" == *"!"*":"* ]]; then
       bump="major"
       break
     fi
-    if [[ "$subject" =~ ^feat(\([^)]+\))?: ]] && [[ "$bump" != "major" ]]; then
-      bump="minor"
+    if [[ "$subject" == feat:* ]] || [[ "$subject" == feat\(* ]]; then
+      if [[ "$bump" != "major" ]]; then
+        bump="minor"
+      fi
     fi
-    if [[ "$subject" =~ ^fix(\([^)]+\))?: ]] && [[ "$bump" == "none" ]]; then
-      bump="patch"
+    if [[ "$subject" == fix:* ]] || [[ "$subject" == fix\(* ]]; then
+      if [[ "$bump" == "none" ]]; then
+        bump="patch"
+      fi
     fi
   done < <(git log "$commit_range" --pretty=format:%s 2>/dev/null || true)
 fi
