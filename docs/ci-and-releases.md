@@ -5,7 +5,7 @@
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `ci.yml` | PRs, non-release pushes | Unit tests, debug APK artifact, FOSS dependency check |
-| `publish.yml` | `main` push | Semver, debug APK, F-Droid index, GitHub Pages, GitHub Release |
+| `publish.yml` | `main` push | Three jobs: **build** → **pages** (F-Droid + GitHub Pages) + **release** (parallel) |
 
 ## CI caching
 
@@ -15,7 +15,7 @@ The composite action `.github/actions/android-setup` caches:
 |-------|------------|-------|
 | Gradle | `*.gradle*`, wrapper, version catalog | Dependencies + wrapper |
 | Android SDK | API 35, NDK r26d, build-tools 35 | NDK, CMake, platforms (~minutes) |
-| Native CXX | `audio-engine` sources, Oboe headers | `.cxx` / CMake outputs |
+| Native CXX | `audio-engine` sources, Oboe headers | `audio-engine/.cxx` only (not full intermediates) |
 | pip | `scripts/requirements-fdroid.txt` | fdroidserver (publish only) |
 
 Gradle build cache is enabled via `org.gradle.caching=true` and `--build-cache` on CI invocations.

@@ -24,10 +24,14 @@ else
 fi
 
 bump="none"
-if [[ -n "$(git rev-parse "$commit_range" 2>/dev/null || true)" ]]; then
-  while IFS= read -r subject; do
+if [[ -n "$(git rev-list "$commit_range" 2>/dev/null | head -1 || true)" ]]; then
+  mapfile -t subjects < <(git log "$commit_range" --pretty=format:%s 2>/dev/null || true)
+  for subject in "${subjects[@]}"; do
     [[ -z "$subject" ]] && continue
-    if [[ "$subject" == *"BREAKING CHANGE"* ]] || [[ "$subject" == *"!"*":"* ]]; then
+    if [[ "$subject" == chore\(release\):* ]]; then
+      continue
+    fi
+    if [[ "$subject" == *"BREAKING CHANGE"* ]] || [[ "$subject" == *"!"* ]]; then
       bump="major"
       break
     fi
@@ -41,7 +45,7 @@ if [[ -n "$(git rev-parse "$commit_range" 2>/dev/null || true)" ]]; then
         bump="patch"
       fi
     fi
-  done < <(git log "$commit_range" --pretty=format:%s 2>/dev/null || true)
+  done
 fi
 
 case "$bump" in
@@ -53,7 +57,7 @@ esac
 new_version="${major}.${minor}.${patch}"
 new_tag="${TAG_PREFIX}${new_version}"
 version_changed="false"
-if [[ "$new_tag" != "$last_tag" ]]; then
+if [[ -z "$last_tag" ]] || [[ "$new_tag" != "$last_tag" ]]; then
   version_changed="true"
 fi
 
