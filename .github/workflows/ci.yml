@@ -38,6 +38,11 @@ jobs:
           ./scripts/write-version-properties.sh "$NAME"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
 
+      - name: Run UAC2 native descriptor tests
+        run: |
+          chmod +x scripts/run-uac2-native-tests.sh
+          ./scripts/run-uac2-native-tests.sh
+
       - name: Run tests and assemble debug APK
         run: |
           ./gradlew \
@@ -45,7 +50,9 @@ jobs:
             :mixer-behringer:test \
             :session-io:test \
             :usb-audio:testDebugUnitTest \
+            :audio-engine:assembleDebugAndroidTest \
             :app:assembleDebug \
+            :app:assembleDebugAndroidTest \
             --build-cache \
             --no-daemon
 

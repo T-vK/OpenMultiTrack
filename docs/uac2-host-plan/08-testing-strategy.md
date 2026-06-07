@@ -4,9 +4,15 @@
 
 | Test | Location | Method |
 |------|----------|--------|
-| Descriptor parse | `audio-engine/src/test/cpp/uac2_descriptor_test.cpp` or GoogleTest in CI | Synthetic byte arrays |
-| Alt selection | same | Assert best alt for 10ch@48k |
-| PCM conversion | `uac2_format_test.cpp` | Round-trip 24-bit LE |
+| Descriptor parse | `audio-engine/src/test/cpp/uac2_descriptor_test.cpp` | Flow 8 fixture + synthetic XR18 |
+| Alt selection | same | Assert best alt for 10ch@48k / 18ch playback |
+| PCM conversion | `uac2_format_test.cpp` (Phase 2) | Round-trip 24-bit LE |
+
+Run host parser tests:
+
+```bash
+./scripts/run-uac2-native-tests.sh
+```
 
 Capture real descriptors:
 
@@ -17,14 +23,27 @@ adb shell dumpsys usb
 
 Store fixtures in `audio-engine/src/test/resources/uac2/`:
 
-- `flow8_recording_mode.bin`
-- `xr18_18ch.bin`
-- `stereo_only.bin` (negative case)
+- `flow8_recording_mode.bin` (captured from host `sysfs` / `UsbDeviceConnection.getRawDescriptors()`)
+- XR18: synthetic builder in tests until hardware is available
 
-## Instrumented tests (device)
+## Instrumented tests (device / emulator)
 
-- `Uac2ProbeInstrumentedTest` — device connected, parse descriptors, assert channel count > 2 for Flow 8
-- Skip in CI without hardware (`@RequiresDevice`)
+| Test | Module | Needs USB |
+|------|--------|-----------|
+| `Uac2FixtureInstrumentedTest` | audio-engine | No (assets) |
+| `Xr18VirtualSoundcheckInstrumentedTest` | app | No (synthetic) |
+| `Flow8HardwareInstrumentedTest` | audio-engine | Yes (Flow 8) |
+| `UsbAudioRecordingInstrumentedTest` | app | Yes (Flow 8) |
+
+Emulator + Flow 8 passthrough (Linux):
+
+```bash
+./scripts/run-emulator-with-flow8.sh
+# Grant USB permission in the app UI, then:
+./scripts/run-uac2-instrumented-tests.sh emulator-5554 hardware
+```
+
+Hardware tests skip automatically when Flow 8 is not attached (`@RequiresUsbDevice`).
 
 ## Manual hardware matrix
 
