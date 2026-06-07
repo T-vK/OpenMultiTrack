@@ -17,9 +17,23 @@ ADB="${SDK}/platform-tools/adb"
 
 FLOW8_VID="0x1397"
 FLOW8_PID="0x050c"
-FLOW8_HOST_BUS="1"
-FLOW8_HOST_ADDR="6"
-FLOW8_BUS_DEV="/dev/bus/usb/${FLOW8_HOST_BUS}/${FLOW8_HOST_ADDR}"
+FLOW8_VID_DEC="1397"
+FLOW8_PID_DEC="050c"
+
+# Resolve host bus + device address from lsusb (address changes when replugged).
+detect_flow8_host_path() {
+  local line bus dev
+  line="$(lsusb -d "${FLOW8_VID_DEC}:${FLOW8_PID_DEC}" 2>/dev/null | head -1)" || return 1
+  if [[ "$line" =~ Bus\ ([0-9]+)\ Device\ ([0-9]+) ]]; then
+    bus=$((10#${BASH_REMATCH[1]}))
+    dev=$((10#${BASH_REMATCH[2]}))
+    FLOW8_HOST_BUS="$bus"
+    FLOW8_HOST_ADDR="$dev"
+    FLOW8_BUS_DEV="/dev/bus/usb/$(printf '%03d' "$bus")/$(printf '%03d' "$dev")"
+    return 0
+  fi
+  return 1
+}
 
 if [[ ! -x "$EMULATOR" ]]; then
   echo "Emulator not found at $EMULATOR" >&2
@@ -35,9 +49,25 @@ if [[ -z "$AVD" ]]; then
   exit 1
 fi
 
-if ! lsusb -d 1397:050c >/dev/null 2>&1; then
+if ! detect_flow8_host_path; then
   echo "Flow 8 (1397:050c) not visible on host — connect it before starting the emulator." >&2
   exit 1
+fi
+
+echo "Flow 8 on host: bus=${FLOW8_HOST_BUS} device=${FLOW8_HOST_ADDR} (${FLOW8_BUS_DEV})"
+
+# Reuse an already-running emulator for this AVD (QEMU forbids two writable instances).
+if pgrep -f "qemu-system.*-avd ${AVD}( |$)" >/dev/null 2>&1; then
+  SERIAL="$("$ADB" devices 2>/dev/null | awk '/^emulator-/{print $1; exit}')"
+  echo "Emulator for AVD '$AVD' is already running${SERIAL:+ ($SERIAL)}."
+  echo "Reuse it — no need to start again:"
+  echo "  ./scripts/setup-emulator-flow8.sh ${SERIAL:-emulator-5554}"
+  echo "  ./scripts/run-uac2-instrumented-tests.sh ${SERIAL:-emulator-5554} hardware"
+  echo ""
+  echo "If Flow 8 is missing in the guest (wrong USB port or replugged), restart:"
+  echo "  adb ${SERIAL:+-s $SERIAL }emu kill"
+  echo "  ./scripts/run-emulator-with-flow8.sh $AVD"
+  exit 0
 fi
 
 # Release device from host audio stack when possible.

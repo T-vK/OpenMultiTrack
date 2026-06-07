@@ -102,7 +102,9 @@ echo "Publishing live descriptor from $SYSFS_DESC → $CACHE_FILE"
 
 # Emulator passthrough: UsbManager.openDevice() often throws SecurityException even when
 # usb_permissions.xml shows granted. Allow direct usbfs open via device node fallback.
-FLOW8_NODE="/dev/bus/usb/001/002"
+FLOW8_NODE="$("${ADB[@]}" "${ADB_FLAGS[@]}" shell dumpsys usb 2>/dev/null \
+  | grep -oE '/dev/bus/usb/[0-9]+/[0-9]+' | head -1 | tr -d '\r')" || true
+FLOW8_NODE="${FLOW8_NODE:-/dev/bus/usb/001/002}"
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell "setenforce 0 2>/dev/null || true"
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell "chmod 666 '$FLOW8_NODE' 2>/dev/null || true"
 
