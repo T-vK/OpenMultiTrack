@@ -79,9 +79,32 @@ SYSFS_DESC="$(find_sysfs_descriptors)" || {
 echo "Publishing live descriptor from $SYSFS_DESC → $CACHE_FILE"
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell "cat '$SYSFS_DESC' > '$CACHE_FILE' && chmod 644 '$CACHE_FILE'"
 
+# Emulator passthrough: UsbManager.openDevice() often throws SecurityException even when
+# usb_permissions.xml shows granted. Allow direct usbfs open via device node fallback.
+FLOW8_NODE="/dev/bus/usb/001/002"
+"${ADB[@]}" "${ADB_FLAGS[@]}" shell "setenforce 0 2>/dev/null || true"
+"${ADB[@]}" "${ADB_FLAGS[@]}" shell "chmod 666 '$FLOW8_NODE' 2>/dev/null || true"
+
+# Ensure permission entries exist for app + test UIDs (re-applied after APK reinstall).
+APP_UID="$("${ADB[@]}" "${ADB_FLAGS[@]}" shell pm list packages -U "$PACKAGE" 2>/dev/null | sed -n 's/.*uid://p')"
+TEST_UID="$("${ADB[@]}" "${ADB_FLAGS[@]}" shell pm list packages -U "$TEST_PACKAGE" 2>/dev/null | sed -n 's/.*uid://p')"
+if [[ -n "$APP_UID" ]]; then
+  "${ADB[@]}" "${ADB_FLAGS[@]}" shell "grep -q 'uid=\\\"$APP_UID\\\"' /data/system/users/0/usb_permissions.xml 2>/dev/null || \
+    sed -i 's|</permissions>|  <permission uid=\"$APP_UID\" granted=\"true\"><usb-device vendor-id=\"${FLOW8_VID}\" product-id=\"${FLOW8_PID}\" class=\"239\" subclass=\"2\" protocol=\"1\" /></permission>\\n</permissions>|' /data/system/users/0/usb_permissions.xml" 2>/dev/null || true
+fi
+
+"${ADB[@]}" "${ADB_FLAGS[@]}" shell cmd overlay fabricate --target android --name "$OVERLAY_NAME" \
+  android:bool/config_disableUsbPermissionDialogs 0x01010001 true >/dev/null 2>&1 || \
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell cmd overlay fabricate --target android --name "$OVERLAY_NAME" \
   android:bool/config_disableUsbPermissionDialogs 0x12 0x1 >/dev/null 2>&1 || true
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell cmd overlay enable --user 0 "com.android.shell:${OVERLAY_NAME}" >/dev/null 2>&1 || true
+MARKER="/data/local/tmp/omt_usb_overlay_applied"
+if ! "${ADB[@]}" "${ADB_FLAGS[@]}" shell "[ -f '$MARKER' ]" 2>/dev/null; then
+  echo "Restarting system_server once to apply USB permission overlay..."
+  "${ADB[@]}" "${ADB_FLAGS[@]}" shell killall system_server 2>/dev/null || true
+  wait_for_boot
+  "${ADB[@]}" "${ADB_FLAGS[@]}" shell "touch '$MARKER'" 2>/dev/null || true
+fi
 
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell pm grant "$PACKAGE" android.permission.RECORD_AUDIO 2>/dev/null || true
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell pm grant "$TEST_PACKAGE" android.permission.RECORD_AUDIO 2>/dev/null || true

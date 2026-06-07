@@ -1,7 +1,7 @@
 package org.openmultitrack.app
 
+import android.hardware.usb.UsbManager
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -13,17 +13,20 @@ import org.openmultitrack.app.audio.SessionRecorder
 import org.openmultitrack.app.test.RequiresUsbDevice
 import org.openmultitrack.app.test.UsbAppProcessRule
 import org.openmultitrack.app.test.UsbDeviceRule
+import org.openmultitrack.app.test.UsbInstrumentedPermission
 import org.openmultitrack.audio.NativeUac2Probe
 import org.openmultitrack.sessionio.wav.WavReader
+import org.openmultitrack.usb.AudioEngineRouter
+import org.openmultitrack.usb.FullUsbProbeResult
 import org.openmultitrack.usb.UsbAudioEnumerator
 import org.openmultitrack.usb.UsbAudioProbeService
+import org.openmultitrack.usb.UsbAudioStreamHandle
 import java.io.File
 
 /**
  * End-to-end USB audio tests with Flow 8 attached to the emulator.
  *
- * Recording uses Oboe today (often stereo on Android). UAC2 descriptor caps are asserted
- * separately so Phase 2 can tighten the WAV channel assertion to 10 without rewriting tests.
+ * Uses UAC2 isoch when Oboe cannot expose multichannel USB audio (typical on emulator passthrough).
  */
 @RunWith(AndroidJUnit4::class)
 @RequiresUsbDevice(vendorId = 0x1397, productId = 0x050c)
@@ -35,17 +38,10 @@ class UsbAudioRecordingInstrumentedTest {
     val usbDeviceRule = UsbDeviceRule()
 
     private val context get() = usbAppProcessRule.appContext
-    private val enumerator get() = UsbAudioEnumerator(context)
-    private val probeService get() = UsbAudioProbeService(enumerator)
 
     @Test
     fun probeShowsMultichannelDescriptorEvenWhenOboeIsLimited() {
-        val result = usbAppProcessRule.runOnActivity { activity ->
-            val flow8 = UsbAudioEnumerator(activity).listUsbDevices().first {
-                it.vendorId == FLOW8_VENDOR_ID && it.productId == FLOW8_PRODUCT_ID
-            }
-            UsbAudioProbeService(UsbAudioEnumerator(activity)).probe(flow8)
-        }
+        val result = probeOnAppProcess()
 
         assertThat(result.uac2Caps).isNotNull()
         assertThat(result.uac2Caps!!.maxCaptureChannels).isAtLeast(10)
@@ -59,62 +55,49 @@ class UsbAudioRecordingInstrumentedTest {
 
     @Test
     fun recordAndPlaybackRoundTrip() = runBlocking {
-        val probe = usbAppProcessRule.runOnActivity { activity ->
-            val flow8 = UsbAudioEnumerator(activity).listUsbDevices().first {
-                it.vendorId == FLOW8_VENDOR_ID && it.productId == FLOW8_PRODUCT_ID
+        withFlow8Stream { probe, stream, device ->
+            val uac2In = probe.uac2Caps?.maxCaptureChannels ?: 0
+            assertThat(uac2In).isAtLeast(10)
+
+            val requestedChannels = uac2In.coerceAtMost(10)
+            val captureRoute = AudioEngineRouter.resolveCaptureRoute(probe, stream, requestedChannels)
+                ?: error("No capture route")
+            val playbackRoute = AudioEngineRouter.resolvePlaybackRoute(
+                probe,
+                stream,
+                minOf(4, requestedChannels),
+            ) ?: error("No playback route")
+
+            val sessionsDir = File(context.getExternalFilesDir(null), "instrumented-sessions").apply { mkdirs() }
+            val recorder = SessionRecorder()
+            val player = SessionPlayer()
+
+            val start = recorder.start(
+                scope = this,
+                route = captureRoute,
+                outputDir = sessionsDir,
+                usbDevice = device,
+            )
+            assertThat(start.isSuccess).isTrue()
+            delay(2_000)
+            val session = recorder.stop()
+            assertThat(session).isNotNull()
+            assertThat(session!!.framesRecorded).isGreaterThan(0)
+
+            val wavFormat = WavReader(File(session.filePath)).use { it.format }
+            assertThat(wavFormat.channelCount).isEqualTo(session.channelCount)
+            assertThat(session.channelCount).isAtLeast(2)
+
+            if (requestedChannels >= 10) {
+                assertThat(session.channelCount).isAtLeast(10)
+                assertThat(wavFormat.channelCount).isAtLeast(10)
             }
-            UsbAudioProbeService(UsbAudioEnumerator(activity)).probe(flow8)
-        }
-        val uac2In = probe.uac2Caps?.maxCaptureChannels ?: 0
-        assertThat(uac2In).isAtLeast(10)
 
-        val inputProbe = probe.input
-        val outputProbe = probe.output
-        org.junit.Assume.assumeTrue(
-            "Oboe USB audio device not exposed (emulator has no snd-usb-audio; physical device required for record/playback)",
-            inputProbe?.isSuccess == true || outputProbe?.isSuccess == true,
-        )
+            val playResult = player.play(this, File(session.filePath), playbackRoute, usbDevice = device)
+            assertThat(playResult.isSuccess).isTrue()
+            delay(500)
+            player.stop()
 
-        val recordDeviceId = inputProbe?.takeIf { it.isSuccess }?.deviceId
-            ?: outputProbe!!.deviceId
-        val recordChannels = inputProbe?.takeIf { it.isSuccess }?.channelCount ?: 2
-
-        val outputDeviceId = outputProbe?.takeIf { it.isSuccess }?.deviceId ?: recordDeviceId
-        val playbackChannels = outputProbe?.takeIf { it.isSuccess }?.channelCount ?: 2
-
-        val sessionsDir = File(context.getExternalFilesDir(null), "instrumented-sessions").apply { mkdirs() }
-        val recorder = SessionRecorder()
-        val player = SessionPlayer()
-
-        val start = recorder.start(
-            scope = this,
-            deviceId = recordDeviceId,
-            channels = recordChannels.coerceAtLeast(2),
-            outputDir = sessionsDir,
-            sampleRateHz = inputProbe?.sampleRate ?: 48_000,
-        )
-        assertThat(start.isSuccess).isTrue()
-        delay(2_000)
-        val session = recorder.stop()
-        assertThat(session).isNotNull()
-        assertThat(session!!.framesRecorded).isGreaterThan(0)
-
-        val wavFormat = WavReader(File(session.filePath)).use { it.format }
-        assertThat(wavFormat.channelCount).isEqualTo(session.channelCount)
-        assertThat(session.channelCount).isAtLeast(2)
-
-        if (recordChannels >= 10) {
-            assertThat(session.channelCount).isAtLeast(10)
-            assertThat(wavFormat.channelCount).isAtLeast(10)
-        }
-
-        val playResult = player.play(this, File(session.filePath), outputDeviceId)
-        assertThat(playResult.isSuccess).isTrue()
-        delay(500)
-        player.stop()
-
-        assertThat(playbackChannels).isAtLeast(2)
-        if (playbackChannels >= 4) {
             assertThat(probe.uac2Caps!!.maxPlaybackChannels).isAtLeast(4)
         }
     }
@@ -136,8 +119,40 @@ class UsbAudioRecordingInstrumentedTest {
         }
     }
 
-    private fun findFlow8Descriptor() =
-        enumerator.listUsbDevices().first { it.vendorId == FLOW8_VENDOR_ID && it.productId == FLOW8_PRODUCT_ID }
+    private fun probeOnAppProcess() = usbAppProcessRule.runOnActivity { activity ->
+        val flow8 = UsbAudioEnumerator(activity).listUsbDevices().first {
+            it.vendorId == FLOW8_VENDOR_ID && it.productId == FLOW8_PRODUCT_ID
+        }
+        UsbAudioProbeService(UsbAudioEnumerator(activity)).probe(flow8)
+    }
+
+    private fun <T> withFlow8Stream(
+        block: suspend (FullUsbProbeResult, UsbAudioStreamHandle, android.hardware.usb.UsbDevice) -> T,
+    ): T {
+        val probe = probeOnAppProcess()
+        val deviceName = usbAppProcessRule.runOnActivity { activity ->
+            UsbAudioEnumerator(activity).listUsbDevices().first {
+                it.vendorId == FLOW8_VENDOR_ID && it.productId == FLOW8_PRODUCT_ID
+            }.deviceName
+        }
+        return runBlocking {
+            val stream = usbAppProcessRule.runOnActivity { activity ->
+                val usbManager = activity.getSystemService(UsbManager::class.java)
+                val device = usbManager.deviceList[deviceName]
+                    ?: error("Flow 8 not in UsbManager device list")
+                UsbInstrumentedPermission.ensure(activity, usbManager, device)
+                UsbAudioStreamHandle.open(activity, usbManager, device)
+            } ?: error("Could not open USB stream — run scripts/grant-usb-permission.sh")
+            val device = usbAppProcessRule.runOnActivity { activity ->
+                (activity.getSystemService(UsbManager::class.java)).deviceList[deviceName]!!
+            }
+            try {
+                block(probe, stream, device)
+            } finally {
+                stream.close()
+            }
+        }
+    }
 
     private companion object {
         const val FLOW8_VENDOR_ID = 0x1397

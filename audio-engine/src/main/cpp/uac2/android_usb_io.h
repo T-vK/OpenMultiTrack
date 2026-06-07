@@ -1,0 +1,22 @@
+#pragma once
+
+#include "uac2_types.h"
+
+#include <optional>
+#include <string>
+
+namespace openmultitrack::uac2 {
+
+/** Result of a usbdevfs setup step. */
+struct UsbIoStatus {
+    bool ok = false;
+    std::string error;
+};
+
+/** Claim AS interface and select alternate setting on an open usbfs fd. */
+UsbIoStatus claimAndSetAlt(int usb_fd, const Uac2AltSetting& alt);
+
+/** Release a previously claimed interface. */
+UsbIoStatus releaseInterface(int usb_fd, uint8_t interface_number);
+
+}  // namespace openmultitrack::uac2

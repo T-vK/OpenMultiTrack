@@ -2,11 +2,9 @@ package org.openmultitrack.app
 
 import android.hardware.usb.UsbManager
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -15,10 +13,14 @@ import org.openmultitrack.app.audio.SessionRecorder
 import org.openmultitrack.app.test.RequiresUsbDevice
 import org.openmultitrack.app.test.UsbAppProcessRule
 import org.openmultitrack.app.test.UsbDeviceRule
+import org.openmultitrack.app.test.UsbInstrumentedPermission
 import org.openmultitrack.sessionio.wav.WavReader
 import org.openmultitrack.sessionio.wav.WavWriter
+import org.openmultitrack.usb.AudioEngineRouter
+import org.openmultitrack.usb.FullUsbProbeResult
 import org.openmultitrack.usb.UsbAudioEnumerator
 import org.openmultitrack.usb.UsbAudioProbeService
+import org.openmultitrack.usb.UsbAudioStreamHandle
 import java.io.File
 import kotlin.math.min
 import kotlin.math.sin
@@ -26,10 +28,7 @@ import kotlin.math.sin
 /**
  * Flow 8 virtual soundcheck simulation: up to **4 playback USB returns** (not 18 like XR18).
  *
- * - Descriptor probe asserts 4ch playback capability.
- * - Playback test uses a synthetic 4ch tone file (works even when Oboe input is stereo-limited).
- * - Record-and-playback requests 4ch capture; skips with a clear message if Oboe negotiates fewer
- *   channels until UAC2 isoch capture lands.
+ * Uses UAC2 isoch when Oboe exposes no multichannel USB audio device (emulator passthrough).
  */
 @RunWith(AndroidJUnit4::class)
 @RequiresUsbDevice(vendorId = 0x1397, productId = 0x050c)
@@ -41,8 +40,6 @@ class Flow8VirtualSoundcheckInstrumentedTest {
     val usbDeviceRule = UsbDeviceRule()
 
     private val context get() = usbAppProcessRule.appContext
-    private val enumerator get() = UsbAudioEnumerator(context)
-    private val probeService get() = UsbAudioProbeService(enumerator)
 
     @Test
     fun descriptorReportsFourPlaybackUsbReturns() {
@@ -54,86 +51,68 @@ class Flow8VirtualSoundcheckInstrumentedTest {
 
     @Test
     fun playFourChannelTestToneToUsbReturns() = runBlocking {
-        val probe = probeOnAppProcess()
-        val outputProbe = probe.output
-        assumeTrue(
-            "Oboe output probe must succeed for playback (got ${outputProbe?.errorMessage})",
-            outputProbe?.isSuccess == true,
-        )
-        val output = outputProbe!!
+        withFlow8Stream { probe, stream, device ->
+            val route = AudioEngineRouter.resolvePlaybackRoute(
+                probe,
+                stream,
+                VIRTUAL_SOUNDCHECK_CHANNELS,
+            ) ?: error("No playback route for Flow 8")
 
-        val wavFile = File(context.getExternalFilesDir(null), "instrumented-sessions/flow8_4ch_tone.wav").apply {
-            parentFile?.mkdirs()
+            val wavFile = File(context.getExternalFilesDir(null), "instrumented-sessions/flow8_4ch_tone.wav").apply {
+                parentFile?.mkdirs()
+            }
+            writeFourChannelTestTone(wavFile, sampleRate = route.sampleRate)
+
+            val player = SessionPlayer()
+            val playResult = player.play(this, wavFile, route, usbDevice = device)
+            assertThat(playResult.isSuccess).isTrue()
+            delay(1_500)
+            player.stop()
+
+            assertThat(WavReader(wavFile).use { it.format.channelCount }).isEqualTo(VIRTUAL_SOUNDCHECK_CHANNELS)
         }
-        writeFourChannelTestTone(wavFile, sampleRate = output.sampleRate)
-
-        val player = SessionPlayer()
-        val playResult = player.play(this, wavFile, output.deviceId)
-        assumeTrue(
-            "4ch playback to Flow 8 USB returns failed (Oboe reported ${output.channelCount}ch on probe; " +
-                "UAC2 isoch playback may be required): ${playResult.exceptionOrNull()?.message}",
-            playResult.isSuccess,
-        )
-        delay(1_500)
-        player.stop()
-
-        assertThat(WavReader(wavFile).use { it.format.channelCount }).isEqualTo(VIRTUAL_SOUNDCHECK_CHANNELS)
     }
 
     @Test
     fun recordFourChannelsAndPlayBackToUsbReturns() = runBlocking {
-        val probe = probeOnAppProcess()
-        val outputProbe = probe.output
-        val inputProbe = probe.input
+        withFlow8Stream { probe, stream, device ->
+            val sessionsDir = File(context.getExternalFilesDir(null), "instrumented-sessions").apply { mkdirs() }
+            val captureRoute = AudioEngineRouter.resolveCaptureRoute(
+                probe,
+                stream,
+                VIRTUAL_SOUNDCHECK_CHANNELS,
+            ) ?: error("No capture route for Flow 8")
 
-        assumeTrue(
-            "Oboe output probe required for virtual soundcheck playback",
-            outputProbe?.isSuccess == true,
-        )
-        assumeTrue(
-            "Oboe input probe required to record a session",
-            inputProbe?.isSuccess == true,
-        )
+            val recorder = SessionRecorder()
+            val recordStart = recorder.start(
+                scope = this,
+                route = captureRoute,
+                outputDir = sessionsDir,
+                usbDevice = device,
+            )
+            assertThat(recordStart.isSuccess).isTrue()
 
-        val sessionsDir = File(context.getExternalFilesDir(null), "instrumented-sessions").apply { mkdirs() }
-        val recorder = SessionRecorder()
+            delay(2_000)
+            val session = recorder.stop()
+            assertThat(session).isNotNull()
+            assertThat(session!!.channelCount).isAtLeast(VIRTUAL_SOUNDCHECK_CHANNELS)
 
-        val recordStart = recorder.start(
-            scope = this,
-            deviceId = inputProbe!!.deviceId,
-            channels = VIRTUAL_SOUNDCHECK_CHANNELS,
-            outputDir = sessionsDir,
-            sampleRateHz = inputProbe.sampleRate,
-        )
-        assumeTrue(
-            "Could not start ${VIRTUAL_SOUNDCHECK_CHANNELS}ch recording: ${recordStart.exceptionOrNull()?.message}",
-            recordStart.isSuccess,
-        )
+            val wavFormat = WavReader(File(session.filePath)).use { it.format }
+            assertThat(wavFormat.channelCount).isEqualTo(VIRTUAL_SOUNDCHECK_CHANNELS)
 
-        delay(2_000)
-        val session = recorder.stop()
-        assertThat(session).isNotNull()
+            val playbackRoute = AudioEngineRouter.resolvePlaybackRoute(
+                probe,
+                stream,
+                min(VIRTUAL_SOUNDCHECK_CHANNELS, wavFormat.channelCount),
+            ) ?: error("No playback route for Flow 8")
+            assertThat(playbackRoute.channelCount).isAtLeast(VIRTUAL_SOUNDCHECK_CHANNELS)
 
-        assumeTrue(
-            "Oboe opened ${session!!.channelCount}ch capture; need $VIRTUAL_SOUNDCHECK_CHANNELS for Flow 8 " +
-                "virtual soundcheck record path (UAC2 isoch capture not implemented yet)",
-            session.channelCount >= VIRTUAL_SOUNDCHECK_CHANNELS,
-        )
-
-        val wavFormat = WavReader(File(session.filePath)).use { it.format }
-        assertThat(wavFormat.channelCount).isEqualTo(VIRTUAL_SOUNDCHECK_CHANNELS)
-
-        val playbackChannels = min(VIRTUAL_SOUNDCHECK_CHANNELS, outputProbe!!.channelCount)
-        assumeTrue(
-            "Oboe output is ${outputProbe.channelCount}ch; need $VIRTUAL_SOUNDCHECK_CHANNELS for playback",
-            playbackChannels >= VIRTUAL_SOUNDCHECK_CHANNELS,
-        )
-
-        val player = SessionPlayer()
-        val playResult = player.play(this, File(session.filePath), outputProbe.deviceId)
-        assertThat(playResult.isSuccess).isTrue()
-        delay(1_500)
-        player.stop()
+            val player = SessionPlayer()
+            val playResult = player.play(this, File(session.filePath), playbackRoute, usbDevice = device)
+            assertThat(playResult.isSuccess).isTrue()
+            delay(1_500)
+            player.stop()
+        }
     }
 
     private fun writeFourChannelTestTone(file: File, sampleRate: Int, frames: Int = sampleRate / 2) {
@@ -158,8 +137,33 @@ class Flow8VirtualSoundcheckInstrumentedTest {
         UsbAudioProbeService(UsbAudioEnumerator(activity)).probe(flow8)
     }
 
-    private fun findFlow8() =
-        enumerator.listUsbDevices().first { it.vendorId == FLOW8_VENDOR_ID && it.productId == FLOW8_PRODUCT_ID }
+    private fun <T> withFlow8Stream(
+        block: suspend (FullUsbProbeResult, UsbAudioStreamHandle, android.hardware.usb.UsbDevice) -> T,
+    ): T {
+        val probe = probeOnAppProcess()
+        val deviceName = usbAppProcessRule.runOnActivity { activity ->
+            UsbAudioEnumerator(activity).listUsbDevices().first {
+                it.vendorId == FLOW8_VENDOR_ID && it.productId == FLOW8_PRODUCT_ID
+            }.deviceName
+        }
+        return runBlocking {
+            val stream = usbAppProcessRule.runOnActivity { activity ->
+                val usbManager = activity.getSystemService(UsbManager::class.java)
+                val device = usbManager.deviceList[deviceName]
+                    ?: error("Flow 8 not in UsbManager device list")
+                UsbInstrumentedPermission.ensure(activity, usbManager, device)
+                UsbAudioStreamHandle.open(activity, usbManager, device)
+            } ?: error("Could not open USB stream — run scripts/grant-usb-permission.sh")
+            val device = usbAppProcessRule.runOnActivity { activity ->
+                (activity.getSystemService(UsbManager::class.java)).deviceList[deviceName]!!
+            }
+            try {
+                block(probe, stream, device)
+            } finally {
+                stream.close()
+            }
+        }
+    }
 
     private companion object {
         const val FLOW8_VENDOR_ID = 0x1397

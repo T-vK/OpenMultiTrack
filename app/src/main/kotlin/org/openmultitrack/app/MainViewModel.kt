@@ -1,6 +1,7 @@
 package org.openmultitrack.app
 
 import android.content.Context
+import android.hardware.usb.UsbManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -14,12 +15,13 @@ import kotlinx.coroutines.withContext
 import org.openmultitrack.app.audio.SessionPlayer
 import org.openmultitrack.app.audio.SessionRecorder
 import org.openmultitrack.audio.OmtLog
-import org.openmultitrack.domain.audio.RecordingChannels
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 import org.openmultitrack.domain.session.TransportState
+import org.openmultitrack.usb.AudioEngineRouter
 import org.openmultitrack.usb.FullUsbProbeResult
 import org.openmultitrack.usb.UsbAudioEnumerator
 import org.openmultitrack.usb.UsbAudioProbeService
+import org.openmultitrack.usb.UsbAudioStreamHandle
 import java.io.File
 
 data class DeviceRow(
@@ -48,8 +50,11 @@ class MainViewModel(
     private val recorder = SessionRecorder()
     private val player = SessionPlayer()
     private val sessionsDir: File = File(appContext.getExternalFilesDir(null), "sessions").apply { mkdirs() }
+    private val usbManager: UsbManager =
+        appContext.getSystemService(Context.USB_SERVICE) as UsbManager
 
     private var activeRecordingDevice: String? = null
+    private var usbStream: UsbAudioStreamHandle? = null
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -66,7 +71,8 @@ class MainViewModel(
                         hasPermission = enumerator.hasUsbPermission(usb.deviceName),
                         isRecording = usb.deviceName == activeRecordingDevice,
                         probe = existing?.probe,
-                        recordChannelCount = existing?.probe?.input?.channelCount?.takeIf { it > 0 },
+                        recordChannelCount = existing?.probe?.input?.channelCount?.takeIf { it > 0 }
+                            ?: existing?.probe?.uac2Caps?.maxCaptureChannels?.takeIf { it > 0 },
                     )
                 }
             }
@@ -96,9 +102,11 @@ class MainViewModel(
             }
             val result = withContext(Dispatchers.IO) { probeService.probe(descriptor) }
             val inputChannels = result.input?.takeIf { it.isSuccess }?.channelCount
+                ?: result.uac2Caps?.maxCaptureChannels?.takeIf { it > 0 }
             OmtLog.i(
                 "ViewModel",
                 "probe result input=${result.input?.channelCount}ch output=${result.output?.channelCount}ch " +
+                    "uac2=${result.uac2Caps?.maxCaptureChannels}in " +
                     "inputErr=${result.input?.errorMessage} outputErr=${result.output?.errorMessage}",
             )
             _uiState.update { state ->
@@ -122,25 +130,41 @@ class MainViewModel(
 
     fun startRecording(descriptor: UsbAudioDeviceDescriptor) {
         val row = _uiState.value.devices.firstOrNull { it.descriptor.deviceName == descriptor.deviceName }
-        val resolved = RecordingChannels.fromInputProbe(row?.probe?.input).getOrElse { error ->
-            OmtLog.w("ViewModel", "startRecording rejected: ${error.message}")
-            _uiState.update { it.copy(statusMessage = error.message) }
+        val probe = row?.probe
+        if (probe == null) {
+            _uiState.update { it.copy(statusMessage = "Probe device before recording.") }
             return
         }
 
+        val requestedChannels = probe.uac2Caps?.maxCaptureChannels?.takeIf { it > 0 }
+            ?: probe.input?.takeIf { it.isSuccess }?.channelCount
+            ?: run {
+                _uiState.update { it.copy(statusMessage = "No capture channels available.") }
+                return
+            }
+
         OmtLog.i(
             "ViewModel",
-            "startRecording ${descriptor.productName} deviceId=${resolved.deviceId} " +
-                "${resolved.channelCount}ch @ ${resolved.sampleRate}Hz",
+            "startRecording ${descriptor.productName} requestedChannels=$requestedChannels",
         )
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
+                val device = enumerator.getUsbDevice(descriptor.deviceName)
+                    ?: return@withContext Result.failure(IllegalStateException("USB device not found"))
+                val stream = openStream(descriptor) ?: return@withContext Result.failure(
+                    IllegalStateException("Could not open USB device for streaming"),
+                )
+                usbStream?.close()
+                usbStream = stream
+                val route = AudioEngineRouter.resolveCaptureRoute(probe, stream, requestedChannels)
+                    ?: return@withContext Result.failure(
+                        IllegalStateException("No audio capture route available"),
+                    )
                 recorder.start(
                     scope = viewModelScope,
-                    deviceId = resolved.deviceId,
-                    channels = resolved.channelCount,
+                    route = route,
                     outputDir = sessionsDir,
-                    sampleRateHz = resolved.sampleRate,
+                    usbDevice = device,
                 )
             }
             result.onSuccess { session ->
@@ -154,6 +178,8 @@ class MainViewModel(
                     )
                 }
             }.onFailure { error ->
+                usbStream?.close()
+                usbStream = null
                 OmtLog.e("ViewModel", "startRecording failed", error)
                 _uiState.update { it.copy(statusMessage = error.message) }
             }
@@ -164,6 +190,8 @@ class MainViewModel(
         OmtLog.i("ViewModel", "stopRecording")
         viewModelScope.launch {
             val session = withContext(Dispatchers.IO) { recorder.stop() }
+            usbStream?.close()
+            usbStream = null
             val dropped = recorder.droppedFrameCount()
             OmtLog.i(
                 "ViewModel",
@@ -188,20 +216,32 @@ class MainViewModel(
             _uiState.update { it.copy(statusMessage = "No recording to play.") }
             return
         }
-        val outputProbe = _uiState.value.devices
+        val probe = _uiState.value.devices
             .firstOrNull { it.descriptor.deviceName == descriptor.deviceName }
-            ?.probe?.output
-        val deviceId = outputProbe?.takeIf { it.isSuccess }?.deviceId
-            ?: enumerator.findAndroidAudioDeviceId(descriptor, input = false)
-        if (deviceId == null) {
-            OmtLog.w("ViewModel", "playLastRecording: no output device id for ${descriptor.productName}")
-            _uiState.update { it.copy(statusMessage = "Probe output channels before playback.") }
+            ?.probe
+        if (probe == null) {
+            _uiState.update { it.copy(statusMessage = "Probe device before playback.") }
             return
         }
-        OmtLog.i("ViewModel", "playLastRecording path=$path deviceId=$deviceId")
+        val wavChannels = runCatching {
+            org.openmultitrack.sessionio.wav.WavReader(File(path)).use { it.format.channelCount }
+        }.getOrDefault(2)
+
+        OmtLog.i("ViewModel", "playLastRecording path=$path channels=$wavChannels")
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
-                player.play(viewModelScope, File(path), deviceId)
+                val device = enumerator.getUsbDevice(descriptor.deviceName)
+                    ?: return@withContext Result.failure(IllegalStateException("USB device not found"))
+                val stream = openStream(descriptor) ?: return@withContext Result.failure(
+                    IllegalStateException("Could not open USB device for streaming"),
+                )
+                usbStream?.close()
+                usbStream = stream
+                val route = AudioEngineRouter.resolvePlaybackRoute(probe, stream, wavChannels)
+                    ?: return@withContext Result.failure(
+                        IllegalStateException("No audio playback route available"),
+                    )
+                player.play(viewModelScope, File(path), route, usbDevice = device)
             }
             result.onSuccess {
                 _uiState.update {
@@ -211,6 +251,8 @@ class MainViewModel(
                     )
                 }
             }.onFailure { e ->
+                usbStream?.close()
+                usbStream = null
                 OmtLog.e("ViewModel", "playLastRecording failed", e)
                 _uiState.update { it.copy(statusMessage = e.message) }
             }
@@ -220,6 +262,8 @@ class MainViewModel(
     fun stopPlayback() {
         OmtLog.i("ViewModel", "stopPlayback")
         player.stop()
+        usbStream?.close()
+        usbStream = null
         _uiState.update {
             it.copy(transportState = TransportState.IDLE, statusMessage = "Playback stopped")
         }
@@ -232,14 +276,22 @@ class MainViewModel(
                 .onFailure { OmtLog.w("ViewModel", "recorder.stop on clear failed", it) }
         }
         player.stop()
+        usbStream?.close()
+        usbStream = null
         super.onCleared()
+    }
+
+    private fun openStream(descriptor: UsbAudioDeviceDescriptor): UsbAudioStreamHandle? {
+        val device = enumerator.getUsbDevice(descriptor.deviceName) ?: return null
+        return UsbAudioStreamHandle.open(appContext, usbManager, device)
     }
 
     private fun buildProbeMessage(result: FullUsbProbeResult, inputChannels: Int?): String {
         val uac2In = result.uac2Caps?.maxCaptureChannels ?: 0
         if (inputChannels != null && inputChannels > 0) {
-            if (uac2In > inputChannels) {
-                return "Oboe: $inputChannels ch. USB descriptor: $uac2In ch capture (UAC2 host needed)."
+            val oboeIn = result.input?.takeIf { it.isSuccess }?.channelCount ?: 0
+            if (uac2In > oboeIn && oboeIn > 0) {
+                return "Oboe: $oboeIn ch. USB descriptor: $uac2In ch capture (UAC2 host available)."
             }
             return "Ready to record $inputChannels input channel(s)."
         }

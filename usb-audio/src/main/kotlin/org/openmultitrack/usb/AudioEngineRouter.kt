@@ -1,0 +1,221 @@
+package org.openmultitrack.usb
+
+import org.openmultitrack.audio.NativeAudioEngine
+import org.openmultitrack.audio.NativeEngineStatus
+import org.openmultitrack.audio.NativeUac2AltSetting
+import org.openmultitrack.audio.NativeUac2Engine
+import org.openmultitrack.audio.NativeUac2Probe
+import org.openmultitrack.audio.OmtLog
+import org.openmultitrack.domain.audio.AudioEndpointProbe
+
+enum class AudioBackend { OBOE, UAC2 }
+
+data class CaptureRoute(
+    val backend: AudioBackend,
+    val oboeDeviceId: Int = -1,
+    val usbStream: UsbAudioStreamHandle? = null,
+    val uac2Alt: NativeUac2AltSetting? = null,
+    val channelCount: Int = 0,
+    val sampleRate: Int = 48_000,
+)
+
+data class PlaybackRoute(
+    val backend: AudioBackend,
+    val oboeDeviceId: Int = -1,
+    val usbStream: UsbAudioStreamHandle? = null,
+    val uac2Alt: NativeUac2AltSetting? = null,
+    val channelCount: Int = 0,
+    val sampleRate: Int = 48_000,
+)
+
+/**
+ * Picks Oboe vs UAC2 isoch based on probe results and requested channel count.
+ */
+object AudioEngineRouter {
+    fun resolveCaptureRoute(
+        probe: FullUsbProbeResult,
+        stream: UsbAudioStreamHandle?,
+        requestedChannels: Int,
+        sampleRateHz: Int = 48_000,
+    ): CaptureRoute? {
+        val uac2 = probe.uac2Caps
+        val oboeIn = probe.input?.takeIf { it.isSuccess }
+        val oboeChannels = oboeIn?.channelCount ?: 0
+
+        if (stream != null && uac2 != null && uac2.parseOk) {
+            val alt = NativeUac2Probe.selectBestCaptureAlt(uac2, requestedChannels, sampleRateHz)
+            if (alt != null && alt.formatValid && alt.channels >= requestedChannels &&
+                (oboeChannels < requestedChannels || oboeIn == null)
+            ) {
+                OmtLog.i(
+                    "Router",
+                    "capture → UAC2 ${alt.channels}ch (Oboe=${oboeChannels}ch, requested=$requestedChannels)",
+                )
+                return CaptureRoute(
+                    backend = AudioBackend.UAC2,
+                    usbStream = stream,
+                    uac2Alt = alt,
+                    channelCount = alt.channels,
+                    sampleRate = alt.sampleRateHz.takeIf { it > 0 } ?: sampleRateHz,
+                )
+            }
+        }
+
+        if (oboeIn != null && oboeChannels >= 1) {
+            val channels = minOf(requestedChannels, oboeChannels)
+            OmtLog.i("Router", "capture → Oboe ${channels}ch deviceId=${oboeIn.deviceId}")
+            return CaptureRoute(
+                backend = AudioBackend.OBOE,
+                oboeDeviceId = oboeIn.deviceId,
+                channelCount = channels,
+                sampleRate = oboeIn.sampleRate.takeIf { it > 0 } ?: sampleRateHz,
+            )
+        }
+
+        if (stream != null && uac2 != null && uac2.parseOk) {
+            val alt = NativeUac2Probe.selectBestCaptureAlt(uac2, minOf(requestedChannels, 2), sampleRateHz)
+                ?: NativeUac2Probe.selectBestCaptureAlt(uac2, 1, sampleRateHz)
+            if (alt != null && alt.formatValid) {
+                OmtLog.i("Router", "capture → UAC2 fallback ${alt.channels}ch (Oboe unavailable)")
+                return CaptureRoute(
+                    backend = AudioBackend.UAC2,
+                    usbStream = stream,
+                    uac2Alt = alt,
+                    channelCount = alt.channels,
+                    sampleRate = alt.sampleRateHz.takeIf { it > 0 } ?: sampleRateHz,
+                )
+            }
+        }
+
+        OmtLog.w("Router", "no capture route for requested=$requestedChannels")
+        return null
+    }
+
+    fun resolvePlaybackRoute(
+        probe: FullUsbProbeResult,
+        stream: UsbAudioStreamHandle?,
+        requestedChannels: Int,
+        sampleRateHz: Int = 48_000,
+    ): PlaybackRoute? {
+        val uac2 = probe.uac2Caps
+        val oboeOut = probe.output?.takeIf { it.isSuccess }
+        val oboeChannels = oboeOut?.channelCount ?: 0
+
+        if (stream != null && uac2 != null && uac2.parseOk) {
+            val alt = NativeUac2Probe.selectBestPlaybackAlt(uac2, requestedChannels, sampleRateHz)
+            if (alt != null && alt.formatValid && alt.channels >= requestedChannels &&
+                (oboeChannels < requestedChannels || oboeOut == null)
+            ) {
+                OmtLog.i(
+                    "Router",
+                    "playback → UAC2 ${alt.channels}ch (Oboe=${oboeChannels}ch, requested=$requestedChannels)",
+                )
+                return PlaybackRoute(
+                    backend = AudioBackend.UAC2,
+                    usbStream = stream,
+                    uac2Alt = alt,
+                    channelCount = alt.channels,
+                    sampleRate = alt.sampleRateHz.takeIf { it > 0 } ?: sampleRateHz,
+                )
+            }
+        }
+
+        if (oboeOut != null && oboeChannels >= 1) {
+            val channels = minOf(requestedChannels, oboeChannels)
+            OmtLog.i("Router", "playback → Oboe ${channels}ch deviceId=${oboeOut.deviceId}")
+            return PlaybackRoute(
+                backend = AudioBackend.OBOE,
+                oboeDeviceId = oboeOut.deviceId,
+                channelCount = channels,
+                sampleRate = oboeOut.sampleRate.takeIf { it > 0 } ?: sampleRateHz,
+            )
+        }
+
+        if (stream != null && uac2 != null && uac2.parseOk) {
+            val alt = NativeUac2Probe.selectBestPlaybackAlt(uac2, minOf(requestedChannels, 2), sampleRateHz)
+                ?: NativeUac2Probe.selectBestPlaybackAlt(uac2, 1, sampleRateHz)
+            if (alt != null && alt.formatValid) {
+                OmtLog.i("Router", "playback → UAC2 fallback ${alt.channels}ch (Oboe unavailable)")
+                return PlaybackRoute(
+                    backend = AudioBackend.UAC2,
+                    usbStream = stream,
+                    uac2Alt = alt,
+                    channelCount = alt.channels,
+                    sampleRate = alt.sampleRateHz.takeIf { it > 0 } ?: sampleRateHz,
+                )
+            }
+        }
+
+        OmtLog.w("Router", "no playback route for requested=$requestedChannels")
+        return null
+    }
+
+    fun startRecording(route: CaptureRoute, usbDevice: android.hardware.usb.UsbDevice? = null): NativeEngineStatus {
+        stopRecording()
+        return when (route.backend) {
+            AudioBackend.OBOE ->
+                NativeAudioEngine.startRecording(route.oboeDeviceId, route.channelCount, route.sampleRate)
+            AudioBackend.UAC2 -> {
+                val stream = route.usbStream ?: return failed("missing usb stream")
+                val alt = route.uac2Alt ?: return failed("missing uac2 alt")
+                if (usbDevice != null) {
+                    stream.claimInterface(usbDevice, alt.interfaceNumber)
+                }
+                NativeUac2Engine.startCapture(stream.fd, alt)
+            }
+        }
+    }
+
+    fun stopRecording() {
+        NativeAudioEngine.stopRecording()
+        NativeUac2Engine.stopCapture()
+    }
+
+    fun readRecordedFrames(dest: FloatArray, maxFrames: Int, backend: AudioBackend): Int =
+        when (backend) {
+            AudioBackend.OBOE -> NativeAudioEngine.readRecordedFrames(dest, maxFrames)
+            AudioBackend.UAC2 -> NativeUac2Engine.readCapturedFrames(dest, maxFrames)
+        }
+
+    fun recordingDroppedFrames(backend: AudioBackend): Long =
+        when (backend) {
+            AudioBackend.OBOE -> NativeAudioEngine.recordingDroppedFrames()
+            AudioBackend.UAC2 -> NativeUac2Engine.captureDroppedFrames()
+        }
+
+    fun startPlayback(route: PlaybackRoute, usbDevice: android.hardware.usb.UsbDevice? = null): NativeEngineStatus {
+        stopPlayback()
+        return when (route.backend) {
+            AudioBackend.OBOE ->
+                NativeAudioEngine.startPlayback(route.oboeDeviceId, route.channelCount, route.sampleRate)
+            AudioBackend.UAC2 -> {
+                val stream = route.usbStream ?: return failed("missing usb stream")
+                val alt = route.uac2Alt ?: return failed("missing uac2 alt")
+                if (usbDevice != null) {
+                    stream.claimInterface(usbDevice, alt.interfaceNumber)
+                }
+                NativeUac2Engine.startPlayback(stream.fd, alt)
+            }
+        }
+    }
+
+    fun stopPlayback() {
+        NativeAudioEngine.stopPlayback()
+        NativeUac2Engine.stopPlayback()
+    }
+
+    fun writePlaybackFrames(src: FloatArray, frameCount: Int, backend: AudioBackend): Int =
+        when (backend) {
+            AudioBackend.OBOE -> NativeAudioEngine.writePlaybackFrames(src, frameCount)
+            AudioBackend.UAC2 -> NativeUac2Engine.writePlaybackFrames(src, frameCount)
+        }
+
+    fun playbackUnderrunFrames(backend: AudioBackend): Long =
+        when (backend) {
+            AudioBackend.OBOE -> NativeAudioEngine.playbackUnderrunFrames()
+            AudioBackend.UAC2 -> NativeUac2Engine.playbackUnderrunFrames()
+        }
+
+    private fun failed(message: String): NativeEngineStatus =
+        NativeEngineStatus(active = false, channelCount = 0, sampleRate = 0, errorMessage = message)
+}

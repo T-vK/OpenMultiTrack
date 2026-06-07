@@ -16,8 +16,13 @@ add_library(openmultitrack_audio SHARED
     audio_recorder.cpp
     audio_player.cpp
     jni_bridge.cpp
+    uac2/android_usb_io.cpp
+    uac2/uac2_capture.cpp
     uac2/uac2_descriptor.cpp
+    uac2/uac2_engine_jni.cpp
+    uac2/uac2_format.cpp
     uac2/uac2_jni.cpp
+    uac2/uac2_playback.cpp
 )
 
 target_include_directories(openmultitrack_audio PRIVATE
