@@ -38,11 +38,16 @@ jobs:
           ./scripts/write-version-properties.sh "$NAME"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Run JVM unit tests
-        run: ./gradlew :domain:test :mixer-behringer:test :session-io:test :usb-audio:testDebugUnitTest --no-daemon
-
-      - name: Assemble debug APK
-        run: ./gradlew :app:assembleDebug --no-daemon
+      - name: Run tests and assemble debug APK
+        run: |
+          ./gradlew \
+            :domain:test \
+            :mixer-behringer:test \
+            :session-io:test \
+            :usb-audio:testDebugUnitTest \
+            :app:assembleDebug \
+            --build-cache \
+            --no-daemon
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -54,7 +59,7 @@ jobs:
 
       - name: Verify no Play Services on classpath
         run: |
-          ./gradlew :app:dependencies --configuration debugRuntimeClasspath --no-daemon \
+          ./gradlew :app:dependencies --configuration debugRuntimeClasspath --build-cache --no-daemon \
             | tee /tmp/deps.txt
           if grep -E 'com\.google\.android\.gms|firebase|play-services' /tmp/deps.txt; then
             echo "Forbidden Google Play / Firebase dependency detected." >&2

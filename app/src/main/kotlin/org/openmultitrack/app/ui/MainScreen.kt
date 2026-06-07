@@ -43,7 +43,7 @@ fun MainScreen(
     ) {
         Text(text = "OpenMultiTrack", style = MaterialTheme.typography.headlineMedium)
         Text(
-            text = "v${org.openmultitrack.app.BuildConfig.VERSION_NAME} — USB probe, 2ch record, playback",
+            text = "v${org.openmultitrack.app.BuildConfig.VERSION_NAME} — multichannel USB record & playback",
             style = MaterialTheme.typography.bodyMedium,
         )
         Button(onClick = onRefresh, enabled = !state.isRefreshing) {
@@ -108,8 +108,15 @@ private fun DeviceCard(
                             Text(stringResource(R.string.stop_record))
                         }
                     } else {
-                        Button(onClick = { onStartRecord(d) }) {
-                            Text(stringResource(R.string.start_record))
+                        Button(
+                            onClick = { onStartRecord(d) },
+                            enabled = row.recordChannelCount != null && row.recordChannelCount > 0,
+                        ) {
+                            Text(
+                                row.recordChannelCount?.let { ch ->
+                                    stringResource(R.string.start_record_channels, ch)
+                                } ?: stringResource(R.string.start_record_probe_first),
+                            )
                         }
                     }
                 }

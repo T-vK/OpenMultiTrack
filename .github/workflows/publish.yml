@@ -44,11 +44,16 @@ jobs:
           ./scripts/write-version-properties.sh "${{ steps.semver.outputs.version }}"
           echo "Building OpenMultiTrack ${{ steps.semver.outputs.version }} (${{ steps.semver.outputs.tag }})"
 
-      - name: Run unit tests
-        run: ./gradlew :domain:test :mixer-behringer:test :session-io:test :usb-audio:testDebugUnitTest --no-daemon
-
-      - name: Assemble debug APK
-        run: ./gradlew :app:assembleDebug --no-daemon
+      - name: Run tests and assemble debug APK
+        run: |
+          ./gradlew \
+            :domain:test \
+            :mixer-behringer:test \
+            :session-io:test \
+            :usb-audio:testDebugUnitTest \
+            :app:assembleDebug \
+            --build-cache \
+            --no-daemon
 
       - name: Prepare site and APK artifacts
         run: |
@@ -63,9 +68,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/requirements-fdroid.txt
 
       - name: Install fdroidserver
-        run: pip install fdroidserver
+        run: pip install -r scripts/requirements-fdroid.txt
 
       - name: Restore F-Droid repo keystore
         uses: actions/cache@v4

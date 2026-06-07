@@ -7,7 +7,7 @@ kotlin {
 }
 
 dependencies {
-    implementation(project(":domain"))
+    implementation(project(":domain")) // AudioConstants
     testImplementation(libs.junit)
     testImplementation(libs.truth)
 }

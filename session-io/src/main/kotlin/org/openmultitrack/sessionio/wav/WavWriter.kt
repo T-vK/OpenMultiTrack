@@ -4,6 +4,7 @@ import java.io.File
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import org.openmultitrack.domain.audio.AudioConstants
 import kotlin.math.max
 import kotlin.math.min
 
@@ -21,7 +22,9 @@ class WavWriter(
     private var closed = false
 
     init {
-        require(channelCount in 1..32) { "channelCount out of range: $channelCount" }
+        require(channelCount in AudioConstants.MIN_CHANNELS..AudioConstants.MAX_CHANNELS) {
+            "channelCount out of range: $channelCount"
+        }
         require(sampleRate > 0) { "sampleRate must be positive" }
         writePlaceholderHeader()
     }

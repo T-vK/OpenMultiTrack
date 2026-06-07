@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.openmultitrack.app.audio.SessionPlayer
 import org.openmultitrack.app.audio.SessionRecorder
+import org.openmultitrack.domain.audio.RecordingChannels
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 import org.openmultitrack.domain.session.TransportState
 import org.openmultitrack.usb.FullUsbProbeResult
@@ -26,6 +27,7 @@ data class DeviceRow(
     val probe: FullUsbProbeResult? = null,
     val probing: Boolean = false,
     val isRecording: Boolean = false,
+    val recordChannelCount: Int? = null,
 )
 
 data class MainUiState(
@@ -47,7 +49,6 @@ class MainViewModel(
     private val sessionsDir: File = File(appContext.getExternalFilesDir(null), "sessions").apply { mkdirs() }
 
     private var activeRecordingDevice: String? = null
-    private var selectedDeviceId: Int? = null
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -57,10 +58,13 @@ class MainViewModel(
             _uiState.update { it.copy(isRefreshing = true) }
             val rows = withContext(Dispatchers.IO) {
                 enumerator.listUsbDevices().map { usb ->
+                    val existing = _uiState.value.devices.firstOrNull { it.descriptor.deviceName == usb.deviceName }
                     DeviceRow(
                         descriptor = usb,
                         hasPermission = enumerator.hasUsbPermission(usb.deviceName),
                         isRecording = usb.deviceName == activeRecordingDevice,
+                        probe = existing?.probe,
+                        recordChannelCount = existing?.probe?.input?.channelCount?.takeIf { it > 0 },
                     )
                 }
             }
@@ -86,42 +90,50 @@ class MainViewModel(
                 )
             }
             val result = withContext(Dispatchers.IO) { probeService.probe(descriptor) }
-            selectedDeviceId = result.input?.deviceId ?: result.output?.deviceId
+            val inputChannels = result.input?.takeIf { it.isSuccess }?.channelCount
             _uiState.update { state ->
                 state.copy(
                     devices = state.devices.map { row ->
                         if (row.descriptor.deviceName == descriptor.deviceName) {
-                            row.copy(probing = false, probe = result)
+                            row.copy(
+                                probing = false,
+                                probe = result,
+                                recordChannelCount = inputChannels,
+                            )
                         } else {
                             row
                         }
                     },
-                    statusMessage = result.note,
+                    statusMessage = buildProbeMessage(result, inputChannels),
                 )
             }
         }
     }
 
     fun startRecording(descriptor: UsbAudioDeviceDescriptor) {
-        val deviceId = selectedDeviceId
-            ?: descriptor.androidAudioDeviceId
-            ?: enumerator.findAndroidAudioDeviceId(descriptor, input = true)
-        if (deviceId == null) {
-            _uiState.update { it.copy(statusMessage = "Probe channels before recording.") }
+        val row = _uiState.value.devices.firstOrNull { it.descriptor.deviceName == descriptor.deviceName }
+        val resolved = RecordingChannels.fromInputProbe(row?.probe?.input).getOrElse { error ->
+            _uiState.update { it.copy(statusMessage = error.message) }
             return
         }
-        val channels = 2
+
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
-                recorder.start(viewModelScope, deviceId, channels, sessionsDir)
+                recorder.start(
+                    scope = viewModelScope,
+                    deviceId = resolved.deviceId,
+                    channels = resolved.channelCount,
+                    outputDir = sessionsDir,
+                    sampleRateHz = resolved.sampleRate,
+                )
             }
-            result.onSuccess {
+            result.onSuccess { session ->
                 activeRecordingDevice = descriptor.deviceName
                 _uiState.update { state ->
                     state.copy(
-                        statusMessage = "Recording ${channels}ch → ${it.filePath}",
-                        devices = state.devices.map { row ->
-                            row.copy(isRecording = row.descriptor.deviceName == descriptor.deviceName)
+                        statusMessage = "Recording ${session.channelCount}ch @ ${session.sampleRate}Hz → ${session.filePath}",
+                        devices = state.devices.map { dev ->
+                            dev.copy(isRecording = dev.descriptor.deviceName == descriptor.deviceName)
                         },
                     )
                 }
@@ -134,12 +146,14 @@ class MainViewModel(
     fun stopRecording() {
         viewModelScope.launch {
             val session = withContext(Dispatchers.IO) { recorder.stop() }
+            val dropped = recorder.droppedFrameCount()
             activeRecordingDevice = null
             _uiState.update { state ->
                 state.copy(
                     lastRecordingPath = session?.filePath,
                     statusMessage = session?.let {
-                        "Saved ${it.framesRecorded} frames → ${it.filePath}"
+                        val dropNote = if (dropped > 0) " ($dropped drops)" else ""
+                        "Saved ${it.channelCount}ch, ${it.framesRecorded} frames$dropNote → ${it.filePath}"
                     } ?: "Recording stopped",
                     devices = state.devices.map { it.copy(isRecording = false) },
                 )
@@ -152,10 +166,13 @@ class MainViewModel(
             _uiState.update { it.copy(statusMessage = "No recording to play.") }
             return
         }
-        val deviceId = selectedDeviceId
+        val outputProbe = _uiState.value.devices
+            .firstOrNull { it.descriptor.deviceName == descriptor.deviceName }
+            ?.probe?.output
+        val deviceId = outputProbe?.takeIf { it.isSuccess }?.deviceId
             ?: enumerator.findAndroidAudioDeviceId(descriptor, input = false)
         if (deviceId == null) {
-            _uiState.update { it.copy(statusMessage = "No output device id for playback.") }
+            _uiState.update { it.copy(statusMessage = "Probe output channels before playback.") }
             return
         }
         viewModelScope.launch {
@@ -188,6 +205,13 @@ class MainViewModel(
         }
         player.stop()
         super.onCleared()
+    }
+
+    private fun buildProbeMessage(result: FullUsbProbeResult, inputChannels: Int?): String {
+        if (inputChannels != null && inputChannels > 0) {
+            return "Ready to record $inputChannels input channel(s)."
+        }
+        return result.note ?: "Probe complete."
     }
 
     companion object {

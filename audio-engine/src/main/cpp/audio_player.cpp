@@ -1,5 +1,7 @@
 #include "audio_player.h"
 
+#include "audio_limits.h"
+
 #include <oboe/Oboe.h>
 
 #include <cstring>
@@ -38,6 +40,13 @@ PlayerStatus AudioPlayer::start(int32_t deviceId, int32_t channelCount, int32_t 
     std::lock_guard<std::mutex> lock(mutex_);
     stopUnlocked();
     underrunFrames_.store(0);
+
+    if (channelCount < 1 || channelCount > kMaxAudioChannels) {
+        PlayerStatus status;
+        status.error = "channelCount out of range";
+        return status;
+    }
+
     ring_ = std::make_unique<SpscRingBuffer>(kRingCapacityFrames, channelCount);
 
     oboe::AudioStreamBuilder builder;
@@ -83,12 +92,12 @@ size_t AudioPlayer::writeFrames(const float* src, size_t frameCount) {
     if (ring_ == nullptr) return 0;
     const int32_t channels = ring_->channelCount();
     size_t accepted = 0;
-    float frame[32];
+    std::vector<float> frame(static_cast<size_t>(channels));
     for (size_t f = 0; f < frameCount; ++f) {
         for (int32_t c = 0; c < channels; ++c) {
-            frame[c] = src[f * static_cast<size_t>(channels) + static_cast<size_t>(c)];
+            frame[static_cast<size_t>(c)] = src[f * static_cast<size_t>(channels) + static_cast<size_t>(c)];
         }
-        if (!ring_->pushFrame(frame)) {
+        if (!ring_->pushFrame(frame.data())) {
             break;
         }
         ++accepted;

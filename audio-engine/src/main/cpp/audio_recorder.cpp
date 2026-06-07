@@ -1,6 +1,10 @@
 #include "audio_recorder.h"
 
+#include "audio_limits.h"
+
 #include <oboe/Oboe.h>
+
+#include <vector>
 
 namespace openmultitrack {
 
@@ -35,6 +39,12 @@ RecorderStatus AudioRecorder::start(int32_t deviceId, int32_t channelCount, int3
     std::lock_guard<std::mutex> lock(mutex_);
     stopUnlocked();
     droppedFrames_.store(0);
+
+    if (channelCount < 1 || channelCount > kMaxAudioChannels) {
+        RecorderStatus status;
+        status.error = "channelCount out of range";
+        return status;
+    }
 
     ring_ = std::make_unique<SpscRingBuffer>(kRingCapacityFrames, channelCount);
 
@@ -101,12 +111,12 @@ oboe::DataCallbackResult AudioRecorder::onAudioReady(oboe::AudioStream* /*stream
     }
     const auto* data = static_cast<const float*>(audioData);
     const int32_t channels = ring_->channelCount();
-    float frame[32];
+    std::vector<float> frame(static_cast<size_t>(channels));
     for (int32_t i = 0; i < numFrames; ++i) {
         for (int32_t c = 0; c < channels; ++c) {
-            frame[c] = data[i * channels + c];
+            frame[static_cast<size_t>(c)] = data[i * channels + c];
         }
-        if (!ring_->pushFrame(frame)) {
+        if (!ring_->pushFrame(frame.data())) {
             droppedFrames_.fetch_add(1);
         }
     }
