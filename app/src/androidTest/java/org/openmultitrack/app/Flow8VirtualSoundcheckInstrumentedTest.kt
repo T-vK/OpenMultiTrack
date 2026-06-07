@@ -46,8 +46,7 @@ class Flow8VirtualSoundcheckInstrumentedTest {
 
     @Test
     fun descriptorReportsFourPlaybackUsbReturns() {
-        assumeUsbPermission()
-        val probe = probeService.probe(findFlow8())
+        val probe = probeOnAppProcess()
         assertThat(probe.uac2Caps).isNotNull()
         assertThat(probe.uac2Caps!!.maxPlaybackChannels).isEqualTo(4)
         assertThat(probe.uac2Caps!!.maxCaptureChannels).isAtLeast(10)
@@ -55,8 +54,7 @@ class Flow8VirtualSoundcheckInstrumentedTest {
 
     @Test
     fun playFourChannelTestToneToUsbReturns() = runBlocking {
-        assumeUsbPermission()
-        val probe = probeService.probe(findFlow8())
+        val probe = probeOnAppProcess()
         val outputProbe = probe.output
         assumeTrue(
             "Oboe output probe must succeed for playback (got ${outputProbe?.errorMessage})",
@@ -84,8 +82,7 @@ class Flow8VirtualSoundcheckInstrumentedTest {
 
     @Test
     fun recordFourChannelsAndPlayBackToUsbReturns() = runBlocking {
-        assumeUsbPermission()
-        val probe = probeService.probe(findFlow8())
+        val probe = probeOnAppProcess()
         val outputProbe = probe.output
         val inputProbe = probe.input
 
@@ -154,20 +151,11 @@ class Flow8VirtualSoundcheckInstrumentedTest {
         }
     }
 
-    private fun assumeUsbPermission() {
-        val usbManager = context.getSystemService(UsbManager::class.java)
-        val device = usbManager.deviceList.values.first {
+    private fun probeOnAppProcess() = usbAppProcessRule.runOnActivity { activity ->
+        val flow8 = UsbAudioEnumerator(activity).listUsbDevices().first {
             it.vendorId == FLOW8_VENDOR_ID && it.productId == FLOW8_PRODUCT_ID
         }
-        val opened = usbManager.openDevice(device)
-        if (opened != null) {
-            opened.close()
-            return
-        }
-        assumeTrue(
-            "Grant USB permission (see scripts/grant-usb-permission.sh)",
-            usbManager.hasPermission(device),
-        )
+        UsbAudioProbeService(UsbAudioEnumerator(activity)).probe(flow8)
     }
 
     private fun findFlow8() =

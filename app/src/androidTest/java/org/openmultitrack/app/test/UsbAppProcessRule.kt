@@ -6,9 +6,9 @@ import org.junit.rules.ExternalResource
 import org.openmultitrack.app.MainActivity
 
 /**
- * Hardware USB calls must run in the app process (org.openmultitrack). Instrumentation tests
- * execute in org.openmultitrack.test, and [android.hardware.usb.UsbManager.hasPermission] checks
- * the calling UID — so pre-granted emulator permissions do not apply from [targetContext] alone.
+ * Hardware USB IPC uses the **calling process UID**, not just [Context.getPackageName].
+ * Instrumentation runs in org.openmultitrack.test; use [runOnActivity] so UsbManager calls
+ * execute in org.openmultitrack (same as a user opening the app).
  */
 class UsbAppProcessRule : ExternalResource() {
     private lateinit var scenario: ActivityScenario<MainActivity>
@@ -24,5 +24,14 @@ class UsbAppProcessRule : ExternalResource() {
 
     override fun after() {
         scenario.close()
+    }
+
+    fun <T> runOnActivity(block: (MainActivity) -> T): T {
+        var result: T? = null
+        scenario.onActivity { activity ->
+            result = block(activity)
+        }
+        @Suppress("UNCHECKED_CAST")
+        return result as T
     }
 }

@@ -98,22 +98,24 @@ class UsbAudioEnumerator(
      */
     fun getRawConfigDescriptor(deviceName: String): ByteArray? {
         val device = getUsbDevice(deviceName) ?: return null
-        val connection = usbManager.openDevice(device) ?: run {
-            if (!usbManager.hasPermission(device)) {
-                OmtLog.d("Usb", "getRawConfigDescriptor: no permission for $deviceName")
-            } else {
-                OmtLog.w("Usb", "getRawConfigDescriptor: openDevice failed for $deviceName")
+        val connection = usbManager.openDevice(device)
+        if (connection != null) {
+            return try {
+                runCatching { connection.rawDescriptors }
+                    .onFailure { OmtLog.w("Usb", "getRawConfigDescriptor failed for $deviceName", it) }
+                    .getOrNull()
+                    ?.takeIf { it.isNotEmpty() }
+            } finally {
+                connection.close()
             }
-            return null
         }
-        return try {
-            runCatching { connection.rawDescriptors }
-                .onFailure { OmtLog.w("Usb", "getRawConfigDescriptor failed for $deviceName", it) }
-                .getOrNull()
-                ?.takeIf { it.isNotEmpty() }
-        } finally {
-            connection.close()
+        UsbEmulatorDescriptorCache.read(device.vendorId, device.productId)?.let { return it }
+        if (!usbManager.hasPermission(device)) {
+            OmtLog.d("Usb", "getRawConfigDescriptor: no permission for $deviceName")
+        } else {
+            OmtLog.w("Usb", "getRawConfigDescriptor: openDevice failed for $deviceName")
         }
+        return null
     }
 
     private fun toDescriptor(device: UsbDevice): UsbAudioDeviceDescriptor {

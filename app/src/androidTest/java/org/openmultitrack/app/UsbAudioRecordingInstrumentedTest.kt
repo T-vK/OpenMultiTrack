@@ -1,7 +1,5 @@
 package org.openmultitrack.app
 
-import android.hardware.usb.UsbDevice
-import android.hardware.usb.UsbManager
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.truth.Truth.assertThat
@@ -42,13 +40,14 @@ class UsbAudioRecordingInstrumentedTest {
 
     @Test
     fun probeShowsMultichannelDescriptorEvenWhenOboeIsLimited() {
-        val flow8 = findFlow8Descriptor()
-        val result = probeService.probe(flow8)
+        val result = usbAppProcessRule.runOnActivity { activity ->
+            val flow8 = UsbAudioEnumerator(activity).listUsbDevices().first {
+                it.vendorId == FLOW8_VENDOR_ID && it.productId == FLOW8_PRODUCT_ID
+            }
+            UsbAudioProbeService(UsbAudioEnumerator(activity)).probe(flow8)
+        }
 
-        org.junit.Assume.assumeTrue(
-            "Live descriptor read needs USB permission (run scripts/grant-usb-permission.sh on emulator)",
-            result.uac2Caps != null,
-        )
+        assertThat(result.uac2Caps).isNotNull()
         assertThat(result.uac2Caps!!.maxCaptureChannels).isAtLeast(10)
         assertThat(result.uac2Caps!!.maxPlaybackChannels).isAtLeast(4)
 
@@ -60,18 +59,21 @@ class UsbAudioRecordingInstrumentedTest {
 
     @Test
     fun recordAndPlaybackRoundTrip() = runBlocking {
-        val flow8 = findFlow8Descriptor()
-        val probe = probeService.probe(flow8)
-        org.junit.Assume.assumeTrue(
-            "Live descriptor read needs USB permission (run scripts/grant-usb-permission.sh on emulator)",
-            probe.uac2Caps != null,
-        )
-        val uac2In = probe.uac2Caps!!.maxCaptureChannels
+        val probe = usbAppProcessRule.runOnActivity { activity ->
+            val flow8 = UsbAudioEnumerator(activity).listUsbDevices().first {
+                it.vendorId == FLOW8_VENDOR_ID && it.productId == FLOW8_PRODUCT_ID
+            }
+            UsbAudioProbeService(UsbAudioEnumerator(activity)).probe(flow8)
+        }
+        val uac2In = probe.uac2Caps?.maxCaptureChannels ?: 0
         assertThat(uac2In).isAtLeast(10)
 
         val inputProbe = probe.input
         val outputProbe = probe.output
-        assertThat(inputProbe?.isSuccess == true || outputProbe?.isSuccess == true).isTrue()
+        org.junit.Assume.assumeTrue(
+            "Oboe USB audio device not exposed (emulator has no snd-usb-audio; physical device required for record/playback)",
+            inputProbe?.isSuccess == true || outputProbe?.isSuccess == true,
+        )
 
         val recordDeviceId = inputProbe?.takeIf { it.isSuccess }?.deviceId
             ?: outputProbe!!.deviceId
@@ -119,40 +121,23 @@ class UsbAudioRecordingInstrumentedTest {
 
     @Test
     fun uac2DescriptorMatchesDirectParse() {
-        val flow8 = findFlow8UsbDevice()
-        val connection = openConnection(flow8)
-        val raw = try {
-            connection.rawDescriptors
-        } finally {
-            connection.close()
-        }
-        val direct = NativeUac2Probe.parseConfigDescriptor(raw)!!
-        val viaProbe = probeService.probe(findFlow8Descriptor()).uac2Caps!!
+        usbAppProcessRule.runOnActivity { activity ->
+            val enumerator = UsbAudioEnumerator(activity)
+            val flow8 = enumerator.listUsbDevices().first {
+                it.vendorId == FLOW8_VENDOR_ID && it.productId == FLOW8_PRODUCT_ID
+            }
+            val raw = enumerator.getRawConfigDescriptor(flow8.deviceName)
+                ?: error("No config descriptor — run scripts/grant-usb-permission.sh")
+            val direct = NativeUac2Probe.parseConfigDescriptor(raw)!!
+            val viaProbe = UsbAudioProbeService(enumerator).probe(flow8).uac2Caps!!
 
-        assertThat(viaProbe.maxCaptureChannels).isEqualTo(direct.maxCaptureChannels)
-        assertThat(viaProbe.maxPlaybackChannels).isEqualTo(direct.maxPlaybackChannels)
-    }
-
-    private fun findFlow8UsbDevice(): UsbDevice {
-        val usbManager = context.getSystemService(UsbManager::class.java)
-        return usbManager.deviceList.values.first {
-            it.vendorId == FLOW8_VENDOR_ID && it.productId == FLOW8_PRODUCT_ID
+            assertThat(viaProbe.maxCaptureChannels).isEqualTo(direct.maxCaptureChannels)
+            assertThat(viaProbe.maxPlaybackChannels).isEqualTo(direct.maxPlaybackChannels)
         }
     }
 
     private fun findFlow8Descriptor() =
         enumerator.listUsbDevices().first { it.vendorId == FLOW8_VENDOR_ID && it.productId == FLOW8_PRODUCT_ID }
-
-    private fun openConnection(device: UsbDevice): android.hardware.usb.UsbDeviceConnection {
-        val usbManager = context.getSystemService(UsbManager::class.java)
-        return usbManager.openDevice(device) ?: run {
-            org.junit.Assume.assumeTrue(
-                "Grant USB permission in the app (see scripts/grant-usb-permission.sh)",
-                usbManager.hasPermission(device),
-            )
-            error("USB open failed")
-        }
-    }
 
     private companion object {
         const val FLOW8_VENDOR_ID = 0x1397

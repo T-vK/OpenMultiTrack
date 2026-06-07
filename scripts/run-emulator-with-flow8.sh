@@ -57,9 +57,11 @@ fi
 
 echo "Starting AVD: $AVD with Flow 8 USB passthrough (writable-system for USB host feature)."
 echo "After boot:"
-echo "  ./scripts/grant-emulator-usb-host.sh"
+echo "  ./scripts/grant-emulator-usb-host.sh    # first time only"
 echo "  ./scripts/grant-usb-permission.sh"
 echo "  ./scripts/run-uac2-instrumented-tests.sh emulator-5554 hardware"
+echo ""
+echo "Or run ./scripts/setup-emulator-flow8.sh after the emulator is up."
 
 exec "$EMULATOR" -avd "$AVD" \
   -no-window -no-audio -gpu swiftshader_indirect \

@@ -36,8 +36,8 @@ if ! "${ADB[@]}" "${ADB_FLAGS[@]}" get-state >/dev/null 2>&1; then
 fi
 
 if [[ "$MODE" == "hardware" || "$MODE" == "all" ]]; then
-  chmod +x scripts/grant-usb-permission.sh
-  ./scripts/grant-usb-permission.sh "$SERIAL" || true
+  chmod +x scripts/setup-emulator-flow8.sh
+  ./scripts/setup-emulator-flow8.sh "$SERIAL" || true
 fi
 
 FIXTURE_TESTS="org.openmultitrack.app.Xr18VirtualSoundcheckInstrumentedTest"
