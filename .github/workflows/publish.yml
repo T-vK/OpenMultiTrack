@@ -54,7 +54,6 @@ jobs:
         run: |
           VERSION="${{ steps.semver.outputs.version }}"
           mkdir -p dist site/fdroid/repo
-          cp -f site/index.html site/
           touch site/.nojekyll
           cp app/build/outputs/apk/debug/app-debug.apk \
             "dist/org.openmultitrack_${VERSION}-debug.apk"
