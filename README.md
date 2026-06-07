@@ -4,14 +4,18 @@ FOSS Android app for **live multitrack recording** and **virtual soundcheck** wi
 
 ## Status
 
-- [x] Architecture, risk assessment, mixer driver design docs
-- [x] Gradle multi-module skeleton (Kotlin, Compose, NDK, Oboe)
-- [x] USB device enumeration + Oboe channel-count probe UI
-- [x] 2-channel WAV record + playback (milestone 2, initial)
-- [x] GitHub Actions CI + semantic versioning + Pages F-Droid repo
-- [ ] Multitrack playback + seek (milestone 3)
-- [ ] OSC snapshots (milestone 4)
-- [ ] Embedded web remote (milestone 5)
+| Milestone | State |
+|-----------|-------|
+| Architecture, docs, Gradle/Oboe skeleton | ✅ |
+| USB enumeration + Oboe channel probe | ✅ |
+| Multichannel WAV record + basic playback | ✅ (interleaved, no seek UI yet) |
+| CI, semver, GitHub Pages F-Droid repo, pinned debug signing | ✅ |
+| Playback seek + transport UI (virtual soundcheck) | ❌ **next** |
+| OSC routing snapshots (X32/XR18) | 🟡 stubs |
+| Embedded web remote (Ktor) | ❌ |
+
+**Detailed tracker:** [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)  
+**AI agent onboarding:** [docs/AGENTS.md](docs/AGENTS.md)
 
 ## License
 
@@ -21,7 +25,8 @@ FOSS Android app for **live multitrack recording** and **virtual soundcheck** wi
 
 Add F-Droid repository: **`https://T-vK.github.io/OpenMultiTrack/fdroid/repo`**
 
-See [docs/ci-and-releases.md](docs/ci-and-releases.md) for versioning and workflow details.
+Debug builds only. GitHub Releases attach the **same APK** as the F-Droid repo.  
+If you installed a build from before signing was pinned (≤0.2.1), uninstall once, then reinstall — see [docs/ci-and-releases.md](docs/ci-and-releases.md).
 
 ## Build
 
@@ -30,17 +35,21 @@ git submodule update --init --recursive
 ./gradlew :app:assembleDebug
 ```
 
-Requires Android SDK API 35, NDK r26d, JDK 17. See [docs/reproducible-builds.md](docs/reproducible-builds.md).
+Requires Android SDK API 35, NDK r26d, JDK 17. Debug signing uses committed `keystore/debug.keystore`. See [docs/reproducible-builds.md](docs/reproducible-builds.md).
 
 ## Documentation
 
 | Doc | Contents |
 |-----|----------|
+| [**docs/AGENTS.md**](docs/AGENTS.md) | **Start here** (AI agents) — repo map, constraints, conventions |
+| [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) | Done vs missing vs original spec |
 | [docs/architecture.md](docs/architecture.md) | Layers, data flow, threading |
 | [docs/technical-risks.md](docs/technical-risks.md) | Risks and mitigations |
 | [docs/mixer-drivers.md](docs/mixer-drivers.md) | `Mixer` API, OSC maps |
 | [docs/hardware-assumptions.md](docs/hardware-assumptions.md) | What to verify on real gear |
 | [docs/control-api.md](docs/control-api.md) | Remote API draft |
+| [docs/ci-and-releases.md](docs/ci-and-releases.md) | CI, F-Droid repo, signing |
+| [docs/reproducible-builds.md](docs/reproducible-builds.md) | Toolchain pins |
 
 ## Hardware
 
@@ -48,13 +57,19 @@ Connect the mixer via **USB OTG** (powered hub recommended). Grant USB permissio
 
 ## F-Droid
 
-Fastlane metadata: [`fastlane/metadata`](fastlane/metadata). Draft recipe: [`fdroiddata/org.openmultitrack.yml`](fdroiddata/org.openmultitrack.yml).
+- Fastlane metadata: [`fastlane/metadata`](fastlane/metadata)
+- Self-hosted repo metadata: [`fdroid/metadata`](fdroid/metadata)
+- Draft upstream recipe (needs refresh): [`fdroiddata/org.openmultitrack.yml`](fdroiddata/org.openmultitrack.yml)
 
 ## Modules
 
-- `app` — Compose UI
-- `domain` — session/mixer models
-- `usb-audio` — USB enumeration
-- `audio-engine` — Oboe native probe (recording engine next)
-- `mixer-behringer` — X32/XR18 OSC (UDP `/info` ping)
-- `session-io` — 24-bit WAV read/write
+| Module | Role |
+|--------|------|
+| `app` | Compose UI, session record/playback wiring |
+| `domain` | Session/mixer models, `Mixer` interface |
+| `usb-audio` | USB enumeration, channel probe |
+| `audio-engine` | Oboe native probe, record, playback |
+| `mixer-behringer` | X32/XR18 OSC drivers (snapshots stubbed) |
+| `session-io` | 24-bit WAV read/write |
+
+Planned: `remote-server` (Ktor HTTP/WebSocket) — not created yet.
