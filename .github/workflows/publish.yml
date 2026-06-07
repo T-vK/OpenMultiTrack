@@ -91,6 +91,7 @@ jobs:
             site
             fdroid
             scripts
+            keystore
 
       - uses: actions/setup-python@v5
         with:
