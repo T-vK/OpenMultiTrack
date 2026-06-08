@@ -6,9 +6,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
-import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
-import android.os.Build
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
@@ -64,16 +62,13 @@ class Flow8BleScribbleImporter(
             val remaining = deadline - System.currentTimeMillis()
             if (remaining <= 0) break
 
-            adapter.bondedDevices
-                .firstOrNull { matchesFlowDevice(it.name) }
-                ?.let { return it }
-
             val burstMs = minOf(SCAN_BURST_MS, remaining)
             val msg = "BLE scan round $round (${burstMs / 1000}s) — enable pairing now if not visible"
             OmtLog.i("Flow8Ble", msg)
             AppLogBuffer.append("I", "Flow8Ble", msg)
 
-            // Open name scan covers the full ~15 s pairing advertisement window.
+            // Official app scans by service UUID and only connects when pairing flag is set.
+            scanBurst(adapter, filtered = true, timeoutMs = burstMs)?.let { return it }
             scanBurst(adapter, filtered = false, timeoutMs = burstMs)?.let { return it }
 
             delay(BETWEEN_ROUNDS_MS)
@@ -106,8 +101,9 @@ class Flow8BleScribbleImporter(
                     val dev = result?.device ?: return
                     val record = result.scanRecord
                     val name = dev.name ?: record?.deviceName
-                    OmtLog.i("Flow8Ble", "saw ${dev.address} name=$name")
-                    if (isFlowDevice(dev, result)) {
+                    val pairing = isInPairingMode(result)
+                    OmtLog.i("Flow8Ble", "saw ${dev.address} name=$name pairing=$pairing")
+                    if (isFlowDevice(dev, result) && pairing) {
                         LastKnownFlow8Store.save(context, dev.address)
                         mainHandler.post { runCatching { scanner.stopScan(this) } }
                         if (cont.isActive) cont.resume(dev)
@@ -164,6 +160,13 @@ class Flow8BleScribbleImporter(
         if (name.isNullOrBlank()) return false
         val upper = name.uppercase()
         return upper.contains("FLOW 8") || upper.contains("FLOW8") || upper == "FLOW"
+    }
+
+    /** Pairing-mode flag in BLE advertisement (Flow Mix app: scan record byte 24). */
+    private fun isInPairingMode(result: ScanResult?): Boolean {
+        val bytes = result?.scanRecord?.bytes ?: return false
+        return bytes.size > PAIRING_FLAG_BYTE_INDEX &&
+            (bytes[PAIRING_FLAG_BYTE_INDEX].toInt() and 0xFF) > 0
     }
 
     @SuppressLint("MissingPermission")
@@ -244,27 +247,11 @@ class Flow8BleScribbleImporter(
         private val mainHandler = Handler(Looper.getMainLooper())
         private val writeQueue = ArrayDeque<ByteArray>()
         private var writeInFlight = false
-        private var refreshAttempted = false
-        private var notifyRegistered = false
 
         @SuppressLint("MissingPermission")
         fun start(context: Context) {
-            val handler = Handler(Looper.getMainLooper())
-            gatt = when {
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ->
-                    device.connectGatt(
-                        context,
-                        false,
-                        gattCallback,
-                        BluetoothDevice.TRANSPORT_LE,
-                        BluetoothDevice.PHY_LE_1M_MASK,
-                        handler,
-                    )
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ->
-                    device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
-                else ->
-                    device.connectGatt(context, false, gattCallback)
-            }
+            // Match Flow Mix: connectGatt(context, false, callback) — no refresh(), no CCCD write.
+            gatt = device.connectGatt(context, false, gattCallback)
         }
 
         fun close() {
@@ -316,30 +303,12 @@ class Flow8BleScribbleImporter(
                     return
                 }
                 val char = characteristic!!
-                val props = char.properties
-                OmtLog.i(
-                    "Flow8Ble",
-                    "characteristic props=0x${"%02X".format(props)} write=${props and BluetoothGattCharacteristic.PROPERTY_WRITE != 0}",
-                )
-                if (char.descriptors.isEmpty() && !refreshAttempted) {
-                    refreshAttempted = true
-                    OmtLog.i("Flow8Ble", "GATT cache refresh — descriptor list empty")
-                    refreshGattCache(gatt)
-                    gatt.discoverServices()
+                if (!gatt.setCharacteristicNotification(char, true)) {
+                    fail("FLOW 8 notify subscription failed")
                     return
                 }
-                registerNotifications(gatt, char)
-            }
-
-            @SuppressLint("MissingPermission")
-            override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
-                if (gatt != this@Flow8BleSession.gatt) return
-                if (status == BluetoothGatt.GATT_SUCCESS) {
-                    OmtLog.i("Flow8Ble", "CCCD enabled")
-                } else {
-                    OmtLog.w("Flow8Ble", "CCCD write status=$status — continuing like official app")
-                }
-                beginHandshakeWait()
+                connectionState = ConnectionState.WaitingForHandshake
+                OmtLog.i("Flow8Ble", "waiting for HandshakeHost (0x35)")
             }
 
             @SuppressLint("MissingPermission")
@@ -432,42 +401,6 @@ class Flow8BleScribbleImporter(
                 }
             }
 
-            @SuppressLint("MissingPermission")
-            private fun registerNotifications(gatt: BluetoothGatt, char: BluetoothGattCharacteristic) {
-                if (!gatt.setCharacteristicNotification(char, true)) {
-                    fail("FLOW 8 notify subscription failed")
-                    return
-                }
-                val cccd = char.getDescriptor(CLIENT_CONFIG_UUID)
-                    ?: char.descriptors.firstOrNull { it.uuid == CLIENT_CONFIG_UUID }
-                if (cccd != null) {
-                    @Suppress("DEPRECATION")
-                    cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                    @Suppress("DEPRECATION")
-                    if (gatt.writeDescriptor(cccd)) {
-                        return
-                    }
-                    OmtLog.w("Flow8Ble", "CCCD write enqueue failed — continuing")
-                } else {
-                    OmtLog.i("Flow8Ble", "no CCCD in cache — setCharacteristicNotification only (official app path)")
-                }
-                beginHandshakeWait()
-            }
-
-            private fun beginHandshakeWait() {
-                if (notifyRegistered) return
-                notifyRegistered = true
-                connectionState = ConnectionState.WaitingForHandshake
-                OmtLog.i("Flow8Ble", "waiting for HandshakeHost (0x35) — enable pairing if needed")
-            }
-
-            @SuppressLint("DiscouragedPrivateApi")
-            private fun refreshGattCache(gatt: BluetoothGatt) {
-                runCatching {
-                    gatt.javaClass.getMethod("refresh").invoke(gatt)
-                }
-            }
-
             private fun fail(message: String) {
                 if (completed) return
                 completed = true
@@ -545,13 +478,13 @@ class Flow8BleScribbleImporter(
         const val DEFAULT_DISCOVERY_TIMEOUT_MS = 300_000L
         private const val SCAN_BURST_MS = 18_000L
         private const val BETWEEN_ROUNDS_MS = 100L
+        private const val PAIRING_FLAG_BYTE_INDEX = 24
 
         private const val CHANNEL_COUNT = 7
         private const val DEFAULT_MTU = 255
         private const val WRITE_GAP_MS = 200L
         private val SERVICE_UUID = UUID.fromString("14839ad4-8d7e-415c-9a42-167340cf2339")
         private val CHAR_UUID = UUID.fromString("0034594a-a8e7-4b1a-a6b1-cd5243059a57")
-        private val CLIENT_CONFIG_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
         private const val T_HANDSHAKE_HOST = 0x35
         private const val T_HANDSHAKE_REPLY = 0x36

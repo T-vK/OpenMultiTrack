@@ -21,7 +21,9 @@ The single characteristic is used **bidirectionally**:
 - **Notify (subscribe)** — responses and streamed state from the mixer.
 
 Scan for the peripheral by BLE advertised name containing `FLOW`, or by the service
-UUID above.
+UUID above. The Flow Mix app filters scan results with **advertisement byte 24 > 0**
+(`isInPairingProcess`) and only connects while that flag is set — connecting without
+it causes GATT write failures.
 
 ## Packet framing
 
