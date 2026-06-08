@@ -271,6 +271,12 @@ private fun SoundcheckWaveformStripList(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Spacer(Modifier.width(labelColumnWidth + innerPad))
+                    Text(
+                        formatDuration(viewWindow),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.width(36.dp),
+                    )
                     Box(modifier = Modifier.weight(1f).height(TimeRulerHeight)) {
                         androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
                             drawTimeRuler(
