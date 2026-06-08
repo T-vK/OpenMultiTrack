@@ -13,23 +13,30 @@ class MixerDeviceStore(context: Context) {
 
     fun listMixers(): List<MixerProfile> {
         val raw = prefs.getString(KEY_MIXERS, null) ?: return emptyList()
-        return runCatching {
+        val parsed = runCatching {
             val arr = JSONArray(raw)
             (0 until arr.length()).map { i -> fromJson(arr.getJSONObject(i)) }
         }.getOrDefault(emptyList())
+        val deduped = deduplicate(parsed)
+        if (deduped.size != parsed.size) {
+            persist(deduped)
+        }
+        return deduped
     }
 
+    fun isAlreadyAdded(descriptor: UsbAudioDeviceDescriptor): Boolean =
+        findMatchingMixer(descriptor) != null
+
+    fun findMatchingMixer(descriptor: UsbAudioDeviceDescriptor): MixerProfile? =
+        listMixers().firstOrNull { matchesSameDevice(it, descriptor) }
+
     fun addMixer(descriptor: UsbAudioDeviceDescriptor, displayName: String? = null): MixerProfile {
-        val existing = listMixers().firstOrNull {
-            it.vendorId == descriptor.vendorId &&
-                it.productId == descriptor.productId &&
-                it.serialNumber != null &&
-                it.serialNumber == descriptor.serialNumber
-        }
+        val existing = listMixers().firstOrNull { matchesSameDevice(it, descriptor) }
         if (existing != null) {
             val updated = existing.copy(
                 usbDeviceName = descriptor.deviceName,
                 productName = descriptor.productName,
+                serialNumber = existing.serialNumber ?: descriptor.serialNumber,
             )
             saveMixer(updated)
             return updated
@@ -49,7 +56,7 @@ class MixerDeviceStore(context: Context) {
 
     fun saveMixer(profile: MixerProfile) {
         val list = listMixers().filter { it.id != profile.id } + profile
-        persist(list)
+        persist(deduplicate(list))
     }
 
     fun removeMixer(id: String) {
@@ -59,6 +66,39 @@ class MixerDeviceStore(context: Context) {
     fun isBehringerAudioInterface(descriptor: UsbAudioDeviceDescriptor): Boolean {
         if (descriptor.isLikelyBehringerMixer) return true
         return descriptor.vendorId == 0x1397
+    }
+
+    private fun matchesSameDevice(profile: MixerProfile, descriptor: UsbAudioDeviceDescriptor): Boolean {
+        if (profile.vendorId != descriptor.vendorId || profile.productId != descriptor.productId) {
+            return false
+        }
+        val profileSerial = profile.serialNumber
+        val descriptorSerial = descriptor.serialNumber
+        if (profileSerial != null && descriptorSerial != null) {
+            return profileSerial == descriptorSerial
+        }
+        if (profile.usbDeviceName != null && profile.usbDeviceName == descriptor.deviceName) {
+            return true
+        }
+        return profileSerial == null && descriptorSerial == null
+    }
+
+    private fun deduplicate(list: List<MixerProfile>): List<MixerProfile> {
+        val seen = LinkedHashSet<String>()
+        val result = ArrayList<MixerProfile>(list.size)
+        for (profile in list) {
+            val key = deviceKey(profile)
+            if (seen.add(key)) {
+                result.add(profile)
+            }
+        }
+        return result
+    }
+
+    private fun deviceKey(profile: MixerProfile): String = when {
+        profile.serialNumber != null -> "s:${profile.vendorId}:${profile.productId}:${profile.serialNumber}"
+        profile.usbDeviceName != null -> "n:${profile.vendorId}:${profile.productId}:${profile.usbDeviceName}"
+        else -> "p:${profile.vendorId}:${profile.productId}"
     }
 
     private fun persist(list: List<MixerProfile>) {

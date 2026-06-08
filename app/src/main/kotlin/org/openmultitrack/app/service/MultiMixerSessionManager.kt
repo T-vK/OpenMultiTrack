@@ -34,6 +34,13 @@ class MultiMixerSessionManager(
         _activeMixerId.value = id
     }
 
+    fun unregisterMixer(id: String) {
+        controllers.remove(id)?.shutdown()
+        if (_activeMixerId.value == id) {
+            _activeMixerId.value = controllers.keys.firstOrNull()
+        }
+    }
+
     fun mixerIds(): List<String> = controllers.keys.toList()
 
     fun onProbeComplete(

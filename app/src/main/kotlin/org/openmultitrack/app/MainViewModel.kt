@@ -42,6 +42,7 @@ data class DawUiState(
     val sessionByMixer: Map<String, MixerSessionUiState> = emptyMap(),
     val outputDevices: List<LabeledAudioDevice> = emptyList(),
     val availableUsbDevices: List<UsbAudioDeviceDescriptor> = emptyList(),
+    val addableUsbDevices: List<UsbAudioDeviceDescriptor> = emptyList(),
     val showAddMixerDialog: Boolean = false,
     val showSettings: Boolean = false,
     val showLogViewer: Boolean = false,
@@ -102,7 +103,10 @@ class MainViewModel(
             val outputs = withContext(Dispatchers.IO) {
                 AudioOutputDeviceLabel.labelAll(enumerator.listAudioOutputDevices())
             }
-            _uiState.update { it.copy(availableUsbDevices = usb, outputDevices = outputs) }
+            val addable = usb.filter { !mixerStore.isAlreadyAdded(it) }
+            _uiState.update {
+                it.copy(availableUsbDevices = usb, addableUsbDevices = addable, outputDevices = outputs)
+            }
             syncMixerUsbNames(usb)
             sessionClient.withManager { mgr ->
                 _uiState.value.mixers.forEach { autoProbeMixer(it, mgr) }
@@ -120,6 +124,18 @@ class MainViewModel(
             _uiState.update { it.copy(globalStatus = "Not a supported audio interface.") }
             return
         }
+        val existing = mixerStore.findMatchingMixer(descriptor)
+        if (existing != null) {
+            _uiState.update {
+                it.copy(
+                    showAddMixerDialog = false,
+                    activeMixerId = existing.id,
+                    globalStatus = "${existing.displayName} is already added.",
+                )
+            }
+            setActiveMixer(existing.id)
+            return
+        }
         val profile = mixerStore.addMixer(descriptor)
         loadMixers()
         sessionClient.withManager { mgr ->
@@ -131,8 +147,24 @@ class MainViewModel(
     }
 
     fun removeMixer(id: String) {
+        val removed = _uiState.value.mixers.firstOrNull { it.id == id } ?: return
         mixerStore.removeMixer(id)
+        observedMixerIds.remove(id)
+        sessionClient.withManager { it.unregisterMixer(id) }
         loadMixers()
+        val remaining = _uiState.value.mixers
+        val nextActive = if (_uiState.value.activeMixerId == id) {
+            remaining.firstOrNull()?.id
+        } else {
+            _uiState.value.activeMixerId
+        }
+        _uiState.update {
+            it.copy(
+                sessionByMixer = it.sessionByMixer - id,
+                activeMixerId = nextActive,
+                globalStatus = if (remaining.isEmpty()) null else "Removed ${removed.displayName}.",
+            )
+        }
     }
 
     fun setActiveMixer(id: String) {
@@ -305,7 +337,14 @@ class MainViewModel(
                     ).fetchChannelLabels().map { profile to it }
                 }
                 supportsOscScribble(profile) -> {
-                    val host = profile.oscHost ?: OscLanDiscovery.discoverMixerIp(appContext)
+                    val host = withContext(Dispatchers.IO) {
+                        profile.oscHost?.let { saved ->
+                            OscLanDiscovery.probeMixerAt(appContext, saved, timeoutMs = 3000)
+                        } ?: OscLanDiscovery.discoverMixerIp(
+                            appContext,
+                            preferHost = profile.oscHost,
+                        )
+                    }
                     if (host == null) {
                         _uiState.update {
                             it.copy(globalStatus = "Mixer not found on network. Connect device and mixer to the same LAN.")

@@ -210,7 +210,7 @@ class OscUdpClient(
                     val packet = DatagramPacket(buf, buf.size)
                     socket.receive(packet)
                     val msg = OscMessageDecoder.decode(buf.copyOf(packet.length)) ?: continue
-                    if (msg.path == "/xinfo" && msg.args.isNotEmpty()) {
+                    if (msg.path == "/xinfo" || msg.path == "/info") {
                         return packet.address.hostAddress
                     }
                 } catch (_: java.net.SocketTimeoutException) {

@@ -93,6 +93,7 @@ fun DawMainScreen(
     waveformNormalized: Boolean,
     onAddMixer: () -> Unit,
     onSelectMixer: (String) -> Unit,
+    onRemoveMixer: (String) -> Unit,
     onAddMixerDevice: (UsbAudioDeviceDescriptor) -> Unit,
     onDismissAddMixer: () -> Unit,
     onToggleArm: (String, Int) -> Unit,
@@ -150,6 +151,7 @@ fun DawMainScreen(
                         session = session,
                         outputDevices = state.outputDevices,
                         onSelectMixer = onSelectMixer,
+                        onRemoveMixer = onRemoveMixer,
                         onSetAppMode = onSetAppMode,
                         onSetMonitorOutput = { onSetMonitorOutput(activeId, it) },
                         onStartMonitor = { onStartMonitor(activeId) },
@@ -210,7 +212,8 @@ fun DawMainScreen(
 
     if (state.showAddMixerDialog) {
         AddMixerDialog(
-            devices = state.availableUsbDevices,
+            devices = state.addableUsbDevices,
+            alreadyAddedCount = state.mixers.size,
             onAdd = onAddMixerDevice,
             onDismiss = onDismissAddMixer,
         )
@@ -301,6 +304,7 @@ private fun TransportToolbar(
     session: MixerSessionUiState,
     outputDevices: List<LabeledAudioDevice>,
     onSelectMixer: (String) -> Unit,
+    onRemoveMixer: (String) -> Unit,
     onSetAppMode: (String, AppMode) -> Unit,
     onSetMonitorOutput: (Int) -> Unit,
     onStartMonitor: () -> Unit,
@@ -309,9 +313,33 @@ private fun TransportToolbar(
     onStopRecord: () -> Unit,
 ) {
     var mixerMenuOpen by remember { mutableStateOf(false) }
+    var removeMixerConfirm by remember { mutableStateOf<MixerProfile?>(null) }
     var monitorDeviceMenuOpen by remember { mutableStateOf(false) }
     val activeMixer = mixers.firstOrNull { it.id == activeMixerId }
     val selectedOutput = outputDevices.firstOrNull { it.device.id == session.monitorOutputDeviceId }
+
+    removeMixerConfirm?.let { mixer ->
+        AlertDialog(
+            onDismissRequest = { removeMixerConfirm = null },
+            title = { Text("Remove mixer?") },
+            text = {
+                Text("Remove ${mixer.displayName} from this app? USB recording settings for this device will be cleared.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        removeMixerConfirm = null
+                        onRemoveMixer(mixer.id)
+                    },
+                ) {
+                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { removeMixerConfirm = null }) { Text("Cancel") }
+            },
+        )
+    }
 
     BoxWithConstraints {
         val showLabels = maxWidth >= 720.dp
@@ -344,6 +372,20 @@ private fun TransportToolbar(
                                     onClick = {
                                         mixerMenuOpen = false
                                         onSelectMixer(m.id)
+                                    },
+                                )
+                            }
+                            if (activeMixer != null) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            "Remove ${activeMixer.displayName}",
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    },
+                                    onClick = {
+                                        mixerMenuOpen = false
+                                        removeMixerConfirm = activeMixer
                                     },
                                 )
                             }
@@ -747,6 +789,7 @@ private fun WaveformView(
 @Composable
 private fun AddMixerDialog(
     devices: List<UsbAudioDeviceDescriptor>,
+    alreadyAddedCount: Int,
     onAdd: (UsbAudioDeviceDescriptor) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -756,7 +799,13 @@ private fun AddMixerDialog(
         text = {
             Column {
                 if (devices.isEmpty()) {
-                    Text("No USB devices found.")
+                    Text(
+                        if (alreadyAddedCount > 0) {
+                            "All connected USB mixers are already added."
+                        } else {
+                            "No USB devices found."
+                        },
+                    )
                 } else {
                     devices.forEach { d ->
                         TextButton(onClick = { onAdd(d) }) {

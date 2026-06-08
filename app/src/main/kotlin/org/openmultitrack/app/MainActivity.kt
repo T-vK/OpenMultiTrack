@@ -87,6 +87,7 @@ class MainActivity : ComponentActivity() {
                         waveformNormalized = settings.waveformNormalized,
                         onAddMixer = { viewModel.showAddMixerDialog(true) },
                         onSelectMixer = viewModel::setActiveMixer,
+                        onRemoveMixer = viewModel::removeMixer,
                         onAddMixerDevice = viewModel::addMixer,
                         onDismissAddMixer = { viewModel.showAddMixerDialog(false) },
                         onToggleArm = viewModel::toggleArm,
