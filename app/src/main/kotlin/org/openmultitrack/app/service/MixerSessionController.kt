@@ -121,6 +121,7 @@ class MixerSessionController(
     private var soundcheckWaveformJob: Job? = null
     private var playbackStatusJob: Job? = null
     private var profile: MixerProfile? = null
+    private var lastVuLogNs = 0L
 
     private val storageRoot: File
         get() = settings.storageRootPath?.let { File(it) }
@@ -919,6 +920,20 @@ class MixerSessionController(
             while (isActive) {
                 if (captureEngine.isCaptureActive) {
                     val levels = captureEngine.captureMeterLevels()
+                    val nowNs = System.nanoTime()
+                    if (nowNs - lastVuLogNs >= 2_000_000_000L) {
+                        lastVuLogNs = nowNs
+                        val ch1 = levels[0]
+                        if (ch1 != null || levels.isNotEmpty()) {
+                            OmtLog.i(
+                                "VuMeter",
+                                "ch1=${"%.3f".format(ch1 ?: 0f)} " +
+                                    "channels=${levels.size} " +
+                                    "monitoring=${_state.value.isMonitoring} " +
+                                    "recording=${_state.value.isRecording}",
+                            )
+                        }
+                    }
                     _state.update { s ->
                         when {
                             s.isRecording -> s.copy(
