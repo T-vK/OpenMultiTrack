@@ -23,15 +23,24 @@ class UsbAudioStreamHandle private constructor(
             ?: ownedPfd?.fd
             ?: -1
 
-    fun claimInterface(device: UsbDevice, interfaceNumber: Int): Boolean {
+    fun claimInterface(device: UsbDevice, interfaceNumber: Int, alternateSetting: Int = -1): Boolean {
         val conn = connection ?: return false
         for (i in 0 until device.interfaceCount) {
             val iface = device.getInterface(i)
-            if (iface.id == interfaceNumber) {
-                val ok = conn.claimInterface(iface, true)
-                OmtLog.i("UsbStream", "claimInterface $interfaceNumber → $ok")
-                return ok
+            if (iface.id != interfaceNumber) continue
+            if (alternateSetting >= 0 && iface.alternateSetting != alternateSetting) continue
+            val claimed = runCatching { conn.claimInterface(iface, true) }
+                .onFailure { OmtLog.w("UsbStream", "claimInterface exception iface=$interfaceNumber", it) }
+                .getOrDefault(false)
+            if (!claimed) {
+                OmtLog.i("UsbStream", "claimInterface $interfaceNumber → false")
+                return false
             }
+            val altOk = runCatching { conn.setInterface(iface) }
+                .onFailure { OmtLog.w("UsbStream", "setInterface exception iface=$interfaceNumber", it) }
+                .getOrDefault(false)
+            OmtLog.i("UsbStream", "claimInterface $interfaceNumber alt=${iface.alternateSetting} → $altOk")
+            return altOk
         }
         OmtLog.w("UsbStream", "interface $interfaceNumber not found on ${device.deviceName}")
         return false
@@ -52,17 +61,17 @@ class UsbAudioStreamHandle private constructor(
                     "hasPermission=$hasPermission",
             )
 
+            val nodePath = device.deviceName.takeIf { it.startsWith("/dev/bus/usb/") }
+            if (nodePath != null) {
+                openDeviceNode(nodePath)?.let { return it }
+            }
+
             val connection = runCatching { usbManager.openDevice(device) }
                 .onFailure { OmtLog.w("UsbStream", "openDevice exception for ${device.deviceName}", it) }
                 .getOrNull()
             if (connection != null) {
                 OmtLog.i("UsbStream", "openDevice ok fd=${connection.fileDescriptor}")
                 return UsbAudioStreamHandle(connection, null)
-            }
-
-            val nodePath = device.deviceName.takeIf { it.startsWith("/dev/bus/usb/") }
-            if (nodePath != null) {
-                openDeviceNode(nodePath)?.let { return it }
             }
 
             OmtLog.w("UsbStream", "all open paths failed for ${device.deviceName}")

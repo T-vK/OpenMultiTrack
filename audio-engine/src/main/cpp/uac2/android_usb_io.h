@@ -16,6 +16,9 @@ struct UsbIoStatus {
 /** Claim AS interface and select alternate setting on an open usbfs fd. */
 UsbIoStatus claimAndSetAlt(int usb_fd, const Uac2AltSetting& alt);
 
+/** claimAndSetAlt with kernel driver detach (physical OTG hosts). */
+UsbIoStatus claimAndSetAltWithDriverDetach(int usb_fd, const Uac2AltSetting& alt);
+
 /** Select alt setting when Java already called UsbDeviceConnection.claimInterface. */
 UsbIoStatus setAltOnClaimedInterface(int usb_fd, const Uac2AltSetting& alt);
 

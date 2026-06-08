@@ -51,8 +51,6 @@ bool libusbPrepareStreaming(int usb_fd,
         return false;
     }
 
-    detachForeignDrivers(usb_fd, alt.interface_number);
-
     if (java_interface_claimed) {
         const UsbIoStatus alt_status = setAltOnClaimedInterface(usb_fd, alt);
         if (!alt_status.ok) {
@@ -70,6 +68,7 @@ bool libusbPrepareStreaming(int usb_fd,
     }
 
     if (!java_interface_claimed) {
+        detachForeignDrivers(usb_fd, alt.interface_number);
         if (libusb_kernel_driver_active(handle, alt.interface_number) == 1) {
             const int detach_r = libusb_detach_kernel_driver(handle, alt.interface_number);
             if (detach_r != 0) {

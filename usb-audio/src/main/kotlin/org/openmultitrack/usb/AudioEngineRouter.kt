@@ -158,14 +158,8 @@ object AudioEngineRouter {
             AudioBackend.UAC2 -> {
                 val stream = route.usbStream ?: return failed("missing usb stream")
                 val alt = route.uac2Alt ?: return failed("missing uac2 alt")
-                var status = NativeUac2Engine.startCapture(stream.fd, alt, javaInterfaceClaimed = false)
-                if (!status.active && usbDevice != null) {
-                    val javaClaimed = claimUac2Interface(stream, usbDevice, alt.interfaceNumber)
-                    if (javaClaimed) {
-                        status = NativeUac2Engine.startCapture(stream.fd, alt, javaInterfaceClaimed = true)
-                    }
-                }
-                status
+                val javaClaimed = claimUac2Interface(stream, usbDevice, alt)
+                NativeUac2Engine.startCapture(stream.fd, alt, javaClaimed)
             }
         }
     }
@@ -195,14 +189,8 @@ object AudioEngineRouter {
             AudioBackend.UAC2 -> {
                 val stream = route.usbStream ?: return failed("missing usb stream")
                 val alt = route.uac2Alt ?: return failed("missing uac2 alt")
-                var status = NativeUac2Engine.startPlayback(stream.fd, alt, javaInterfaceClaimed = false)
-                if (!status.active && usbDevice != null) {
-                    val javaClaimed = claimUac2Interface(stream, usbDevice, alt.interfaceNumber)
-                    if (javaClaimed) {
-                        status = NativeUac2Engine.startPlayback(stream.fd, alt, javaInterfaceClaimed = true)
-                    }
-                }
-                status
+                val javaClaimed = claimUac2Interface(stream, usbDevice, alt)
+                NativeUac2Engine.startPlayback(stream.fd, alt, javaClaimed)
             }
         }
     }
@@ -227,11 +215,15 @@ object AudioEngineRouter {
     private fun claimUac2Interface(
         stream: UsbAudioStreamHandle,
         usbDevice: android.hardware.usb.UsbDevice?,
-        interfaceNumber: Int,
+        alt: org.openmultitrack.audio.NativeUac2AltSetting,
     ): Boolean {
         if (usbDevice == null) return false
-        val ok = stream.claimInterface(usbDevice, interfaceNumber)
-        OmtLog.i("Router", "Java claimInterface $interfaceNumber → $ok")
+        val ok = stream.claimInterface(
+            usbDevice,
+            alt.interfaceNumber,
+            alternateSetting = alt.alternateSetting,
+        )
+        OmtLog.i("Router", "Java claimInterface ${alt.interfaceNumber} alt=${alt.alternateSetting} → $ok")
         return ok
     }
 

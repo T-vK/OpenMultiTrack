@@ -48,9 +48,11 @@ CaptureStatus Uac2Capture::open(int usb_fd, const Uac2AltSetting& alt, bool java
     sample_rate_ = static_cast<int32_t>(alt.format.sample_rate_hz);
     ring_ = std::make_unique<openmultitrack::SpscRingBuffer>(48'000, channel_count_);
 
-    bool opened = tryOpenLibusb(usb_fd, alt, java_interface_claimed);
+    // Prefer usbdevfs (emulator / hosts where SUBMITURB works). Fall back to libusb
+    // when claim or isoch submit fails (e.g. XR18 on Samsung tablets).
+    bool opened = tryOpenUsbdevfs(usb_fd, alt, java_interface_claimed);
     if (!opened) {
-        opened = tryOpenUsbdevfs(usb_fd, alt, java_interface_claimed);
+        opened = tryOpenLibusb(usb_fd, alt, java_interface_claimed);
     }
 
     if (!opened) {
@@ -129,9 +131,14 @@ bool Uac2Capture::tryOpenLibusb(int usb_fd,
 bool Uac2Capture::tryOpenUsbdevfs(int usb_fd,
                                   const Uac2AltSetting& alt,
                                   bool java_interface_claimed) {
-    const UsbIoStatus io = java_interface_claimed
+    UsbIoStatus io = java_interface_claimed
         ? setAltOnClaimedInterface(usb_fd, alt)
         : claimAndSetAlt(usb_fd, alt);
+    if (!io.ok && !java_interface_claimed) {
+        OMT_LOGW("uac2 capture usbdevfs claim failed (%s), trying driver detach",
+                 io.error.c_str());
+        io = claimAndSetAltWithDriverDetach(usb_fd, alt);
+    }
     if (!io.ok) {
         OMT_LOGE("uac2 capture usbdevfs setup failed: %s", io.error.c_str());
         return false;

@@ -90,16 +90,17 @@ sync_usb_package_uids() {
   local app_uid test_uid uid_marker current_uids
   # pm list FILTER is substring match — anchor package names so .test is not included.
   app_uid="$("${ADB[@]}" "${ADB_FLAGS[@]}" shell pm list packages -U 2>/dev/null \
-    | grep "^package:${PACKAGE} uid:" | sed -n 's/.*uid://p' | head -1 | tr -d '\r')"
+    | grep "^package:${PACKAGE} uid:" | sed -n 's/.*uid://p' | head -1 | tr -d '\r' || true)"
   test_uid="$("${ADB[@]}" "${ADB_FLAGS[@]}" shell pm list packages -U 2>/dev/null \
-    | grep "^package:${TEST_PACKAGE} uid:" | sed -n 's/.*uid://p' | head -1 | tr -d '\r')"
-  grant_usb_uid_in_xml "$app_uid"
-  grant_usb_uid_in_xml "$test_uid"
+    | grep "^package:${TEST_PACKAGE} uid:" | sed -n 's/.*uid://p' | head -1 | tr -d '\r' || true)"
+  [[ -n "$app_uid" ]] && grant_usb_uid_in_xml "$app_uid"
+  [[ -n "$test_uid" ]] && grant_usb_uid_in_xml "$test_uid"
   current_uids="${app_uid}:${test_uid}"
   uid_marker="/data/local/tmp/omt_usb_granted_uids"
   local applied_uids
   applied_uids="$("${ADB[@]}" "${ADB_FLAGS[@]}" shell "cat '$uid_marker' 2>/dev/null || true" | tr -d '\r')"
-  if [[ -n "$current_uids" && "$current_uids" != "$applied_uids" ]]; then
+  # Skip system_server restart until both packages are installed (prepare_guest runs before androidTest APK).
+  if [[ -n "$app_uid" && -n "$test_uid" && "$current_uids" != "$applied_uids" ]]; then
     echo "Refreshing USB permissions for app uid=$app_uid test uid=$test_uid..."
     "${ADB[@]}" "${ADB_FLAGS[@]}" shell killall system_server 2>/dev/null || true
     wait_for_boot
@@ -173,15 +174,13 @@ FLOW8_NODE="${FLOW8_NODE:-/dev/bus/usb/001/002}"
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell cmd overlay fabricate --target android --name "$OVERLAY_NAME" \
   android:bool/config_disableUsbPermissionDialogs 0x12 0x1 >/dev/null 2>&1 || true
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell cmd overlay enable --user 0 "com.android.shell:${OVERLAY_NAME}" >/dev/null 2>&1 || true
-# Restart system_server once per emulator boot so the USB permission overlay takes effect.
-MARKER="/data/local/tmp/omt_usb_overlay_boot_id"
-BOOT_ID="$("${ADB[@]}" "${ADB_FLAGS[@]}" shell settings get global boot_count 2>/dev/null | tr -d '\r')"
-MARKER_BOOT="$("${ADB[@]}" "${ADB_FLAGS[@]}" shell "cat '$MARKER' 2>/dev/null || true" | tr -d '\r')"
-if [[ -n "$BOOT_ID" && "$BOOT_ID" != "null" && "$BOOT_ID" != "$MARKER_BOOT" ]]; then
-  echo "Restarting system_server once to apply USB permission overlay (boot_count=$BOOT_ID)..."
+# Restart system_server once so the USB permission overlay takes effect.
+OVERLAY_MARKER="/data/local/tmp/omt_usb_overlay_applied"
+if ! "${ADB[@]}" "${ADB_FLAGS[@]}" shell "test -f '$OVERLAY_MARKER'" 2>/dev/null; then
+  echo "Restarting system_server once to apply USB permission overlay..."
   "${ADB[@]}" "${ADB_FLAGS[@]}" shell killall system_server 2>/dev/null || true
   wait_for_boot
-  "${ADB[@]}" "${ADB_FLAGS[@]}" shell "echo '$BOOT_ID' > '$MARKER'" 2>/dev/null || true
+  "${ADB[@]}" "${ADB_FLAGS[@]}" shell "touch '$OVERLAY_MARKER'" 2>/dev/null || true
   "${ADB[@]}" "${ADB_FLAGS[@]}" shell "setenforce 0 2>/dev/null || true"
   "${ADB[@]}" "${ADB_FLAGS[@]}" shell "chmod 666 '$FLOW8_NODE' 2>/dev/null || true"
 fi

@@ -50,9 +50,9 @@ PlaybackStatus Uac2Playback::open(int usb_fd, const Uac2AltSetting& alt, bool ja
     ring_ = std::make_unique<openmultitrack::SpscRingBuffer>(48'000, channel_count_);
     urb_layout_ = layoutForAlt(alt, false);
 
-    bool opened = tryOpenLibusb(usb_fd, alt, java_interface_claimed);
+    bool opened = tryOpenUsbdevfs(usb_fd, alt, java_interface_claimed);
     if (!opened) {
-        opened = tryOpenUsbdevfs(usb_fd, alt, java_interface_claimed);
+        opened = tryOpenLibusb(usb_fd, alt, java_interface_claimed);
     }
 
     if (!opened) {
@@ -120,9 +120,14 @@ bool Uac2Playback::tryOpenLibusb(int usb_fd,
 bool Uac2Playback::tryOpenUsbdevfs(int usb_fd,
                                    const Uac2AltSetting& alt,
                                    bool java_interface_claimed) {
-    const UsbIoStatus io = java_interface_claimed
+    UsbIoStatus io = java_interface_claimed
         ? setAltOnClaimedInterface(usb_fd, alt)
         : claimAndSetAlt(usb_fd, alt);
+    if (!io.ok && !java_interface_claimed) {
+        OMT_LOGW("uac2 playback usbdevfs claim failed (%s), trying driver detach",
+                 io.error.c_str());
+        io = claimAndSetAltWithDriverDetach(usb_fd, alt);
+    }
     if (!io.ok) {
         OMT_LOGE("uac2 playback usbdevfs setup failed: %s", io.error.c_str());
         return false;

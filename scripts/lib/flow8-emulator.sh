@@ -19,7 +19,7 @@ flow8__adb() {
   fi
 }
 
-flow8__log()  { echo "[flow8] $*"; }
+flow8__log()  { echo "[flow8] $*" >&2; }
 flow8__warn() { echo "[flow8] WARNING: $*" >&2; }
 flow8__die()  { echo "[flow8] ERROR: $*" >&2; exit "${2:-1}"; }
 

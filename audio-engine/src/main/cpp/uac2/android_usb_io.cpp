@@ -23,18 +23,16 @@ void logDriver(int usb_fd, uint8_t interface_number) {
     gd.interface = interface_number;
     if (ioctl(usb_fd, USBDEVFS_GETDRIVER, &gd) == 0) {
         OMT_LOGI("usb_io iface=%u kernel driver=%s", interface_number, gd.driver);
-    } else {
-        OMT_LOGI("usb_io iface=%u kernel driver=(none) errno=%s",
-                 interface_number,
-                 std::strerror(errno));
     }
 }
 
-void logCapabilities(int usb_fd) {
-    unsigned int caps = 0;
-    if (ioctl(usb_fd, USBDEVFS_GET_CAPABILITIES, &caps) == 0) {
-        OMT_LOGI("usb_io capabilities=0x%x", caps);
+bool usbdevfsSupportsDriverDetach(int usb_fd) {
+    usbdevfs_getdriver gd{};
+    gd.interface = 0;
+    if (ioctl(usb_fd, USBDEVFS_GETDRIVER, &gd) == 0) {
+        return true;
     }
+    return errno != ENOTTY && errno != EINVAL;
 }
 
 UsbIoStatus tryDisconnectClaim(int usb_fd, uint8_t interface_number, const char* driver) {
@@ -70,9 +68,6 @@ UsbIoStatus detachKernelDriver(int usb_fd, uint8_t interface_number) {
                      driver != nullptr ? driver : "(except)");
             return dc;
         }
-        OMT_LOGW("usb_io DISCONNECT_CLAIM driver=%s failed (%s)",
-                 driver != nullptr ? driver : "(except)",
-                 dc.error.c_str());
     }
 
     return fail("DISCONNECT_CLAIM", EBUSY);
@@ -91,6 +86,9 @@ UsbIoStatus clearEndpointHalt(int usb_fd, uint8_t endpoint_address) {
 }  // namespace
 
 void detachForeignDrivers(int usb_fd, uint8_t keep_iface) {
+    if (!usbdevfsSupportsDriverDetach(usb_fd)) {
+        return;
+    }
     for (unsigned int ifno = 0; ifno < 16; ++ifno) {
         if (static_cast<uint8_t>(ifno) == keep_iface) {
             continue;
@@ -111,6 +109,17 @@ UsbIoStatus setAltOnClaimedInterface(int usb_fd, const Uac2AltSetting& alt) {
     }
     if (!alt.format.valid || alt.endpoint_address == 0) {
         return fail("invalid alt", EINVAL);
+    }
+
+    // Emulator UsbDeviceConnection fds reject usbdevfs SETINTERFACE (EHOSTUNREACH).
+    // When Java already claimed + setInterface, skip ioctl and submit URBs directly.
+    if (!usbdevfsSupportsDriverDetach(usb_fd)) {
+        OMT_LOGI("usb_io Java-claimed iface=%u alt=%u (skip ioctl set alt)",
+                 alt.interface_number,
+                 alt.alternate_setting);
+        UsbIoStatus ok;
+        ok.ok = true;
+        return ok;
     }
 
     detachForeignDrivers(usb_fd, alt.interface_number);
@@ -146,9 +155,67 @@ UsbIoStatus claimAndSetAlt(int usb_fd, const Uac2AltSetting& alt) {
         return fail("invalid alt", EINVAL);
     }
 
-    logCapabilities(usb_fd);
-    detachForeignDrivers(usb_fd, alt.interface_number);
+    bool native_claimed = false;
+    unsigned int iface = alt.interface_number;
+    if (ioctl(usb_fd, USBDEVFS_CLAIMINTERFACE, &iface) < 0) {
+        const int claim_err = errno;
+        if (claim_err == EBUSY) {
+            OMT_LOGI("usb_io iface=%u already claimed, continuing", alt.interface_number);
+        } else {
+            OMT_LOGW("usb_io CLAIMINTERFACE failed (%s), trying DISCONNECT_CLAIM",
+                     std::strerror(claim_err));
+            const UsbIoStatus dc = tryDisconnectClaim(usb_fd, alt.interface_number, nullptr);
+            if (!dc.ok) {
+                OMT_LOGW("usb_io DISCONNECT_CLAIM failed, attempting SET_INTERFACE anyway");
+            } else if (ioctl(usb_fd, USBDEVFS_CLAIMINTERFACE, &iface) == 0) {
+                native_claimed = true;
+            }
+        }
+    } else {
+        native_claimed = true;
+    }
 
+    usbdevfs_setinterface si{};
+    si.interface = alt.interface_number;
+    si.altsetting = alt.alternate_setting;
+    if (ioctl(usb_fd, USBDEVFS_SETINTERFACE, &si) < 0) {
+        const int alt_err = errno;
+        if (alt_err == EHOSTUNREACH || alt_err == ENOENT || alt_err == ENOTTY) {
+            OMT_LOGW("usb_io SETINTERFACE failed (%s), continuing to isoch",
+                     std::strerror(alt_err));
+        } else {
+            if (native_claimed) {
+                releaseInterface(usb_fd, alt.interface_number);
+            }
+            return fail("SETINTERFACE", alt_err);
+        }
+    }
+
+    const UsbIoStatus halt = clearEndpointHalt(usb_fd, alt.endpoint_address);
+    if (!halt.ok) {
+        OMT_LOGW("usb_io CLEAR_HALT ep=0x%02x failed (%s)",
+                 alt.endpoint_address,
+                 halt.error.c_str());
+    }
+
+    OMT_LOGI("usb_io claimed iface=%u alt=%u ep=0x%02x",
+             alt.interface_number,
+             alt.alternate_setting,
+             alt.endpoint_address);
+    UsbIoStatus ok;
+    ok.ok = true;
+    return ok;
+}
+
+UsbIoStatus claimAndSetAltWithDriverDetach(int usb_fd, const Uac2AltSetting& alt) {
+    if (usb_fd < 0 || !alt.format.valid || alt.endpoint_address == 0) {
+        return fail("invalid fd or alt", EINVAL);
+    }
+    if (!usbdevfsSupportsDriverDetach(usb_fd)) {
+        return fail("driver detach unsupported", ENOTSUP);
+    }
+
+    detachForeignDrivers(usb_fd, alt.interface_number);
     const UsbIoStatus detach = detachKernelDriver(usb_fd, alt.interface_number);
     if (!detach.ok) {
         OMT_LOGW("usb_io kernel detach failed (%s), trying CLAIMINTERFACE anyway",
@@ -168,15 +235,8 @@ UsbIoStatus claimAndSetAlt(int usb_fd, const Uac2AltSetting& alt) {
         return fail("SETINTERFACE", errno);
     }
 
-    const UsbIoStatus halt = clearEndpointHalt(usb_fd, alt.endpoint_address);
-    if (!halt.ok) {
-        OMT_LOGW("usb_io CLEAR_HALT ep=0x%02x failed (%s)",
-                 alt.endpoint_address,
-                 halt.error.c_str());
-    }
-
-    logDriver(usb_fd, alt.interface_number);
-    OMT_LOGI("usb_io claimed iface=%u alt=%u ep=0x%02x",
+    (void)clearEndpointHalt(usb_fd, alt.endpoint_address);
+    OMT_LOGI("usb_io claimed iface=%u alt=%u ep=0x%02x (driver detach)",
              alt.interface_number,
              alt.alternate_setting,
              alt.endpoint_address);
