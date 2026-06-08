@@ -45,6 +45,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -106,6 +107,11 @@ fun DawMainScreen(
     onCloseLog: () -> Unit,
     onMonitorGainChange: (Float) -> Unit,
     onRefreshUsb: () -> Unit,
+    onRefreshScribble: (String) -> Unit,
+    onHideArmChange: (Boolean) -> Unit,
+    onHideMonitorChange: (Boolean) -> Unit,
+    onHideSoloChange: (Boolean) -> Unit,
+    onShowWaveformsChange: (Boolean) -> Unit,
 ) {
     val activeId = state.activeMixerId
     val session = activeId?.let { state.sessionByMixer[it] }
@@ -156,6 +162,7 @@ fun DawMainScreen(
             if (state.mixers.isEmpty()) {
                 EmptyMixersPrompt(onAddMixer = onAddMixer, onRefresh = onRefreshUsb)
             } else {
+                state.globalStatus?.let { StatusBanner(it) }
                 session?.warningMessage?.let { WarningBanner(it) }
                 session?.statusMessage?.let { msg ->
                     if (session.warningMessage == null) {
@@ -175,6 +182,10 @@ fun DawMainScreen(
                             strips = s.channelStrips,
                             normalized = waveformNormalized,
                             waveformPeaks = s.waveformPeaks,
+                            showWaveforms = state.showWaveforms,
+                            hideArm = state.hideArmButton,
+                            hideMonitor = state.hideMonitorButton,
+                            hideSolo = state.hideSoloButton,
                             onArm = { onToggleArm(s.mixerId, it) },
                             onMonitor = { onToggleMonitor(s.mixerId, it) },
                             onSolo = { onToggleSolo(s.mixerId, it) },
@@ -201,6 +212,11 @@ fun DawMainScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     TextButton(onClick = { menuOpen = false; onOpenSettings() }) { Text("Settings") }
                     TextButton(onClick = { menuOpen = false; onOpenLog() }) { Text("Log viewer") }
+                    activeId?.let { id ->
+                        TextButton(onClick = { menuOpen = false; onRefreshScribble(id) }) {
+                            Text("Import scribble strip")
+                        }
+                    }
                     TextButton(onClick = { menuOpen = false; onRefreshUsb() }) { Text("Refresh USB") }
                 }
             },
@@ -215,6 +231,11 @@ fun DawMainScreen(
                 Text("Monitor gain")
                 Slider(value = monitorGain, onValueChange = onMonitorGainChange, valueRange = 0.5f..8f)
                 Text("Gain: ${"%.1f".format(monitorGain)}×")
+                Text("Channel strip buttons", style = MaterialTheme.typography.titleMedium)
+                SettingsSwitch("Hide record arm button", state.hideArmButton, onHideArmChange)
+                SettingsSwitch("Hide monitor button", state.hideMonitorButton, onHideMonitorChange)
+                SettingsSwitch("Hide solo button", state.hideSoloButton, onHideSoloChange)
+                SettingsSwitch("Show waveforms", state.showWaveforms, onShowWaveformsChange)
                 Spacer(Modifier.height(32.dp))
             }
         }
@@ -477,6 +498,32 @@ private fun EmptyMixersPrompt(onAddMixer: () -> Unit, onRefresh: () -> Unit) {
 }
 
 @Composable
+private fun SettingsSwitch(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+private fun StatusBanner(message: String) {
+    Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primaryContainer) {
+        Text(
+            message,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
 private fun WarningBanner(message: String) {
     Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.errorContainer) {
         Text(
@@ -493,6 +540,10 @@ private fun ChannelStripList(
     strips: List<ChannelStripState>,
     normalized: Boolean,
     waveformPeaks: Map<Int, FloatArray>,
+    showWaveforms: Boolean,
+    hideArm: Boolean,
+    hideMonitor: Boolean,
+    hideSolo: Boolean,
     onArm: (Int) -> Unit,
     onMonitor: (Int) -> Unit,
     onSolo: (Int) -> Unit,
@@ -519,8 +570,12 @@ private fun ChannelStripList(
                     stripHeight = stripHeight,
                     buttonSize = buttonSize,
                     innerPad = innerPad,
-                    peaks = waveformPeaks[strip.index],
+                    peaks = if (showWaveforms) waveformPeaks[strip.index] else null,
                     normalized = normalized,
+                    showWaveform = showWaveforms,
+                    hideArm = hideArm,
+                    hideMonitor = hideMonitor,
+                    hideSolo = hideSolo,
                     onArm = { onArm(strip.index) },
                     onMonitor = { onMonitor(strip.index) },
                     onSolo = { onSolo(strip.index) },
@@ -538,6 +593,10 @@ private fun ChannelStripRow(
     innerPad: Dp,
     peaks: FloatArray?,
     normalized: Boolean,
+    showWaveform: Boolean,
+    hideArm: Boolean,
+    hideMonitor: Boolean,
+    hideSolo: Boolean,
     onArm: () -> Unit,
     onMonitor: () -> Unit,
     onSolo: () -> Unit,
@@ -566,43 +625,62 @@ private fun ChannelStripRow(
             fontSize = (stripHeight.value * 0.32f).coerceIn(10f, 14f).sp,
             fontWeight = FontWeight.Bold,
         )
-        StripChannelToggle(
-            checked = strip.armed,
-            icon = Icons.Filled.FiberManualRecord,
-            activeColor = RecordRed,
-            iconTintWhenOff = RecordRed,
-            contentDescription = "Arm",
-            size = buttonSize,
-            onClick = onArm,
-        )
-        StripChannelToggle(
-            checked = strip.monitoring,
-            icon = Icons.Filled.Headphones,
-            activeColor = MonitorBlue,
-            iconTintWhenOff = MaterialTheme.colorScheme.onSurfaceVariant,
-            contentDescription = "Monitor",
-            size = buttonSize,
-            onClick = onMonitor,
-        )
-        StripChannelToggle(
-            checked = strip.solo,
-            icon = Icons.Filled.VolumeUp,
-            activeColor = SoloAmber,
-            iconTintWhenOff = MaterialTheme.colorScheme.onSurfaceVariant,
-            contentDescription = "Solo",
-            size = buttonSize,
-            onClick = onSolo,
-        )
-        WaveformView(
-            peaks = peaks,
-            color = Color(strip.colorArgb),
-            normalized = normalized,
-            modifier = Modifier
-                .weight(1f)
-                .height(stripHeight - innerPad * 2)
-                .clip(RoundedCornerShape(3.dp))
-                .background(MaterialTheme.colorScheme.surface),
-        )
+        if (strip.label.isNotBlank()) {
+            Text(
+                strip.label,
+                modifier = Modifier.widthIn(max = 72.dp),
+                fontSize = (stripHeight.value * 0.28f).coerceIn(9f, 12f).sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (!hideArm) {
+            StripChannelToggle(
+                checked = strip.armed,
+                icon = Icons.Filled.FiberManualRecord,
+                activeColor = RecordRed,
+                iconTintWhenOff = RecordRed,
+                contentDescription = "Arm",
+                size = buttonSize,
+                onClick = onArm,
+            )
+        }
+        if (!hideMonitor) {
+            StripChannelToggle(
+                checked = strip.monitoring,
+                icon = Icons.Filled.Headphones,
+                activeColor = MonitorBlue,
+                iconTintWhenOff = MaterialTheme.colorScheme.onSurfaceVariant,
+                contentDescription = "Monitor",
+                size = buttonSize,
+                onClick = onMonitor,
+            )
+        }
+        if (!hideSolo) {
+            StripChannelToggle(
+                checked = strip.solo,
+                icon = Icons.Filled.VolumeUp,
+                activeColor = SoloAmber,
+                iconTintWhenOff = MaterialTheme.colorScheme.onSurfaceVariant,
+                contentDescription = "Solo",
+                size = buttonSize,
+                onClick = onSolo,
+            )
+        }
+        if (showWaveform) {
+            WaveformView(
+                peaks = peaks,
+                color = Color(strip.colorArgb),
+                normalized = normalized,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(stripHeight - innerPad * 2)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(MaterialTheme.colorScheme.surface),
+            )
+        } else {
+            Spacer(Modifier.weight(1f))
+        }
     }
 }
 

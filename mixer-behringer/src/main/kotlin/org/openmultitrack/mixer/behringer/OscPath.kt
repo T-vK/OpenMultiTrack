@@ -11,5 +11,7 @@ object OscPath {
 
     fun info(): String = "/info"
 
+    fun xinfo(): String = "/xinfo"
+
     fun xremote(): String = "/xremote"
 }

@@ -104,6 +104,11 @@ class MainActivity : ComponentActivity() {
                         onCloseLog = { viewModel.showLogViewer(false) },
                         onMonitorGainChange = viewModel::setMonitorGain,
                         onRefreshUsb = viewModel::refreshUsbAndOutputs,
+                        onRefreshScribble = viewModel::refreshScribble,
+                        onHideArmChange = viewModel::setHideArmButton,
+                        onHideMonitorChange = viewModel::setHideMonitorButton,
+                        onHideSoloChange = viewModel::setHideSoloButton,
+                        onShowWaveformsChange = viewModel::setShowWaveforms,
                     )
                 }
             }

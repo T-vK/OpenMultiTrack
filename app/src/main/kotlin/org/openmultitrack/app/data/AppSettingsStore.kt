@@ -33,6 +33,22 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_DEBUG_LOG, true)
         set(value) = prefs.edit().putBoolean(KEY_DEBUG_LOG, value).apply()
 
+    var hideArmButton: Boolean
+        get() = prefs.getBoolean(KEY_HIDE_ARM, false)
+        set(value) = prefs.edit().putBoolean(KEY_HIDE_ARM, value).apply()
+
+    var hideMonitorButton: Boolean
+        get() = prefs.getBoolean(KEY_HIDE_MONITOR, false)
+        set(value) = prefs.edit().putBoolean(KEY_HIDE_MONITOR, value).apply()
+
+    var hideSoloButton: Boolean
+        get() = prefs.getBoolean(KEY_HIDE_SOLO, false)
+        set(value) = prefs.edit().putBoolean(KEY_HIDE_SOLO, value).apply()
+
+    var showWaveforms: Boolean
+        get() = prefs.getBoolean(KEY_SHOW_WAVEFORMS, true)
+        set(value) = prefs.edit().putBoolean(KEY_SHOW_WAVEFORMS, value).apply()
+
     fun exportJson(): String = prefs.all.entries.joinToString(prefix = "{", postfix = "}") { (k, v) ->
         """"$k":${if (v is String) "\"$v\"" else v}"""
     }
@@ -46,5 +62,9 @@ class AppSettingsStore(context: Context) {
         private const val KEY_USB_DEBOUNCE_MS = "usb_debounce_ms"
         private const val KEY_WAVEFORM_NORMALIZED = "waveform_normalized"
         private const val KEY_DEBUG_LOG = "debug_log"
+        private const val KEY_HIDE_ARM = "hide_arm_button"
+        private const val KEY_HIDE_MONITOR = "hide_monitor_button"
+        private const val KEY_HIDE_SOLO = "hide_solo_button"
+        private const val KEY_SHOW_WAVEFORMS = "show_waveforms"
     }
 }

@@ -6,7 +6,6 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.nio.charset.StandardCharsets
-
 /** Minimal OSC-over-UDP client (no external deps). */
 class OscUdpClient(
     private val host: String,
@@ -21,11 +20,70 @@ class OscUdpClient(
         socket.send(packet)
     }
 
+    /** Query OSC paths; returns path → argument list for replies received within [timeoutMs]. */
+    suspend fun query(paths: List<String>, timeoutMs: Long = 2500, rounds: Int = 4): Map<String, List<Any>> =
+        withContext(Dispatchers.IO) {
+            val pending = paths.toMutableSet()
+            val replies = LinkedHashMap<String, List<Any>>()
+            socket.soTimeout = 250
+            repeat(rounds) {
+                if (pending.isEmpty()) return@repeat
+                for (path in pending.toList()) {
+                    send(path)
+                }
+                val deadline = System.nanoTime() + timeoutMs * 1_000_000
+                while (pending.isNotEmpty() && System.nanoTime() < deadline) {
+                    try {
+                        val buf = ByteArray(4096)
+                        val packet = DatagramPacket(buf, buf.size)
+                        socket.receive(packet)
+                        val msg = OscMessageDecoder.decode(buf.copyOf(packet.length)) ?: continue
+                        if (msg.path in pending && msg.args.isNotEmpty()) {
+                            replies[msg.path] = msg.args
+                            pending.remove(msg.path)
+                        }
+                    } catch (_: java.net.SocketTimeoutException) {
+                        break
+                    }
+                }
+            }
+            replies
+        }
+
     override fun close() {
         socket.close()
     }
 
     companion object {
+        fun discoverMixer(timeoutMs: Long = 3000, port: Int = Xr18Mixer.DEFAULT_PORT): String? {
+            val socket = DatagramSocket()
+            socket.soTimeout = 500
+            socket.broadcast = true
+            socket.reuseAddress = true
+            return try {
+                val payload = encodeOscMessage(OscPath.xinfo(), emptyList())
+                val broadcast = InetAddress.getByName("255.255.255.255")
+                socket.send(DatagramPacket(payload, payload.size, broadcast, port))
+                val deadline = System.nanoTime() + timeoutMs * 1_000_000
+                while (System.nanoTime() < deadline) {
+                    try {
+                        val buf = ByteArray(4096)
+                        val packet = DatagramPacket(buf, buf.size)
+                        socket.receive(packet)
+                        val msg = OscMessageDecoder.decode(buf.copyOf(packet.length)) ?: continue
+                        if (msg.path == "/xinfo" && msg.args.isNotEmpty()) {
+                            return packet.address.hostAddress
+                        }
+                    } catch (_: java.net.SocketTimeoutException) {
+                        continue
+                    }
+                }
+                null
+            } finally {
+                socket.close()
+            }
+        }
+
         fun encodeOscMessage(path: String, args: List<OscArgument>): ByteArray {
             val out = ArrayList<Byte>()
             writePaddedString(out, path)

@@ -23,6 +23,7 @@ import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.usb.AudioOutputDeviceLabel
 import org.openmultitrack.usb.LabeledAudioDevice
+import org.openmultitrack.mixer.behringer.Xr18ScribbleImporter
 import org.openmultitrack.usb.UsbAudioEnumerator
 import org.openmultitrack.usb.UsbAudioProbeService
 
@@ -36,6 +37,10 @@ data class DawUiState(
     val showSettings: Boolean = false,
     val showLogViewer: Boolean = false,
     val globalStatus: String? = null,
+    val hideArmButton: Boolean = false,
+    val hideMonitorButton: Boolean = false,
+    val hideSoloButton: Boolean = false,
+    val showWaveforms: Boolean = true,
 )
 
 class MainViewModel(
@@ -46,7 +51,14 @@ class MainViewModel(
     private val settings: AppSettingsStore,
     private val sessionClient: AudioSessionClient,
 ) : ViewModel() {
-    private val _uiState = MutableStateFlow(DawUiState())
+    private val _uiState = MutableStateFlow(
+        DawUiState(
+            hideArmButton = settings.hideArmButton,
+            hideMonitorButton = settings.hideMonitorButton,
+            hideSoloButton = settings.hideSoloButton,
+            showWaveforms = settings.showWaveforms,
+        ),
+    )
     val uiState: StateFlow<DawUiState> = _uiState.asStateFlow()
 
     private val observedMixerIds = mutableSetOf<String>()
@@ -190,6 +202,61 @@ class MainViewModel(
         }
     }
 
+    fun setHideArmButton(hide: Boolean) {
+        settings.hideArmButton = hide
+        _uiState.update { it.copy(hideArmButton = hide) }
+    }
+
+    fun setHideMonitorButton(hide: Boolean) {
+        settings.hideMonitorButton = hide
+        _uiState.update { it.copy(hideMonitorButton = hide) }
+    }
+
+    fun setHideSoloButton(hide: Boolean) {
+        settings.hideSoloButton = hide
+        _uiState.update { it.copy(hideSoloButton = hide) }
+    }
+
+    fun setShowWaveforms(show: Boolean) {
+        settings.showWaveforms = show
+        _uiState.update { it.copy(showWaveforms = show) }
+    }
+
+    fun refreshScribble(mixerId: String) {
+        val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
+        if (!supportsOscScribble(profile)) {
+            _uiState.update { it.copy(globalStatus = "Scribble import is not available for this mixer yet.") }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(globalStatus = "Importing scribble strip…") }
+            val importer = Xr18ScribbleImporter()
+            val host = profile.oscHost ?: withContext(Dispatchers.IO) { importer.discoverMixerIp() }
+            if (host == null) {
+                _uiState.update {
+                    it.copy(globalStatus = "Mixer not found on network. Connect tablet and XR18 to the same LAN.")
+                }
+                return@launch
+            }
+            val result = withContext(Dispatchers.IO) { importer.fetchUsbLabels(host) }
+            result.onSuccess { labels ->
+                sessionClient.withManager { mgr ->
+                    mgr.getOrCreate(mixerId).applyScribbleLabels(labels)
+                }
+                val updated = profile.copy(oscHost = host, scribbleImported = true)
+                mixerStore.saveMixer(updated)
+                loadMixers()
+                val named = labels.count { !it.name.isNullOrBlank() }
+                AppLogBuffer.append("I", "Scribble", "Imported $named channel labels from $host")
+                _uiState.update { it.copy(globalStatus = "Scribble: $named channel labels from $host") }
+                OmtLog.i("ViewModel", "scribble imported $named labels from $host")
+            }.onFailure { e ->
+                OmtLog.e("ViewModel", "scribble import failed", e)
+                _uiState.update { it.copy(globalStatus = "Scribble import failed: ${e.message}") }
+            }
+        }
+    }
+
     override fun onCleared() {
         sessionClient.unbind()
         super.onCleared()
@@ -248,10 +315,22 @@ class MainViewModel(
             val result = withContext(Dispatchers.IO) { probeService.probe(usb) }
             manager.onProbeComplete(profile.id, usb, result)
             OmtLog.i("ViewModel", "auto-probed ${profile.displayName}")
+            if (supportsOscScribble(profile) && !profile.scribbleImported) {
+                refreshScribble(profile.id)
+            }
         }
     }
 
+    private fun supportsOscScribble(profile: MixerProfile): Boolean {
+        if (profile.productId == XR18_PRODUCT_ID) return true
+        val name = "${profile.productName} ${profile.displayName}"
+        return name.contains("XR18", ignoreCase = true) ||
+            name.contains("X18", ignoreCase = true) ||
+            name.contains("X32", ignoreCase = true)
+    }
+
     companion object {
+        private const val XR18_PRODUCT_ID = 0x00d4
         fun factory(context: Context): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")

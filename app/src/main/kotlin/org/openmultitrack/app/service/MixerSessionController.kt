@@ -37,6 +37,7 @@ import org.openmultitrack.sessionio.wav.WavReader
 import org.openmultitrack.usb.AudioEngineRouter
 import org.openmultitrack.usb.FullUsbProbeResult
 import org.openmultitrack.usb.UsbAudioEnumerator
+import org.openmultitrack.mixer.behringer.UsbChannelScribble
 import org.openmultitrack.usb.UsbAudioStreamHandle
 import java.io.File
 
@@ -123,6 +124,21 @@ class MixerSessionController(
 
     fun setAppMode(mode: AppMode) {
         _state.update { it.copy(appMode = mode) }
+    }
+
+    fun applyScribbleLabels(labels: List<UsbChannelScribble>) {
+        val byIndex = labels.associateBy { it.stripIndex }
+        _state.update { s ->
+            s.copy(
+                channelStrips = s.channelStrips.map { strip ->
+                    val scribble = byIndex[strip.index] ?: return@map strip
+                    strip.copy(
+                        label = scribble.name?.takeIf { it.isNotBlank() } ?: strip.label,
+                        colorArgb = scribble.colorArgb ?: strip.colorArgb,
+                    )
+                },
+            )
+        }
     }
 
     fun updateChannelStrip(index: Int, transform: (ChannelStripState) -> ChannelStripState) {
