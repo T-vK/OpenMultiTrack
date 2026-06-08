@@ -52,7 +52,7 @@ private val RecordRed = Color(0xFFE53935)
 private val MonitorBlue = Color(0xFF1E88E5)
 private val SoloAmber = Color(0xFFFFB300)
 
-private val ColorBarIconGap = 6.dp
+private val ColorBarIconGap = 12.dp
 
 private fun iconContainerSize(colorBarHeight: Dp): Dp =
     (colorBarHeight * 0.68f).coerceIn(24.dp, 44.dp)
@@ -74,7 +74,7 @@ internal fun stripLabelColumnWidth(
 
     val textMeasurer = rememberTextMeasurer()
     val density = LocalDensity.current
-    val textStyle = TextStyle(fontSize = labelFontSize.sp, fontWeight = FontWeight.Medium)
+    val textStyle = TextStyle(fontSize = labelFontSize.sp, fontWeight = FontWeight.Normal)
     val maxTextPx = strips.maxOfOrNull { strip ->
         val line = buildStripLine(strip, numberMode, iconMode)
         if (line.isEmpty()) 0 else textMeasurer.measure(line, textStyle).size.width
@@ -164,7 +164,7 @@ internal fun StripIdentityCell(
                 Text(
                     lineText,
                     fontSize = labelFontSize.sp,
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.Normal,
                     maxLines = 1,
                     softWrap = false,
                     overflow = TextOverflow.Clip,
