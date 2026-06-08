@@ -138,27 +138,27 @@ class OscUdpClient(
             port: Int = Xr18Mixer.DEFAULT_PORT,
             setup: OscSocketSetup? = null,
             subnetPrefixes: List<String>,
+            priorityHosts: List<String> = emptyList(),
         ): String? {
             if (timeoutMs <= 0 || subnetPrefixes.isEmpty()) return null
             val socket = try {
-                openUdpSocket(setup).apply { soTimeout = 25 }
+                openUdpSocket(setup).apply { soTimeout = 30 }
             } catch (_: Exception) {
                 return null
             }
-            val perHostMs = 25L
+            val perHostMs = 30L
             val deadline = System.nanoTime() + timeoutMs * 1_000_000
+            val payload = encodeOscMessage(OscPath.xinfo(), emptyList())
+            val hosts = buildScanHostOrder(subnetPrefixes, priorityHosts)
             return try {
-                for (prefix in subnetPrefixes) {
-                    for (last in 1..254) {
-                        if (System.nanoTime() > deadline) return null
-                        val host = "$prefix.$last"
-                        val target = runCatching { InetAddress.getByName(host) }.getOrNull() ?: continue
-                        for (path in listOf(OscPath.xinfo(), OscPath.info())) {
-                            val payload = encodeOscMessage(path, emptyList())
-                            socket.send(DatagramPacket(payload, payload.size, target, port))
-                            waitForMixerReply(socket, perHostMs, host)?.let { return it }
-                        }
+                for ((index, host) in hosts.withIndex()) {
+                    if (System.nanoTime() > deadline) {
+                        OscDiscoveryLog.debug("scan port $port timed out after $index/${hosts.size} hosts")
+                        return null
                     }
+                    val target = runCatching { InetAddress.getByName(host) }.getOrNull() ?: continue
+                    socket.send(DatagramPacket(payload, payload.size, target, port))
+                    waitForMixerReply(socket, perHostMs, host)?.let { return it }
                 }
                 null
             } catch (e: Exception) {
@@ -167,6 +167,22 @@ class OscUdpClient(
             } finally {
                 runCatching { socket.close() }
             }
+        }
+
+        private fun buildScanHostOrder(
+            subnetPrefixes: List<String>,
+            priorityHosts: List<String>,
+        ): List<String> {
+            val ordered = LinkedHashSet<String>()
+            priorityHosts.forEach { host ->
+                if (host.isNotBlank()) ordered.add(host)
+            }
+            for (prefix in subnetPrefixes) {
+                for (last in 1..254) {
+                    ordered.add("$prefix.$last")
+                }
+            }
+            return ordered.toList()
         }
 
         private fun discoverViaBroadcast(
@@ -190,10 +206,12 @@ class OscUdpClient(
             if (targets.isEmpty()) return null
             return try {
                 val payload = encodeOscMessage(OscPath.xinfo(), emptyList())
+                val resendTargets = targets.map { it to port }
                 for (target in targets) {
                     socket.send(DatagramPacket(payload, payload.size, target, port))
                 }
-                waitForXinfoReply(socket, timeoutMs)
+                OscDiscoveryLog.debug("broadcast /xinfo to ${targets.map { it.hostAddress }} port=$port for ${timeoutMs}ms")
+                waitForXinfoReply(socket, timeoutMs, payload, resendTargets)
             } catch (e: Exception) {
                 OscDiscoveryLog.sendFailed("broadcast", e)
                 null
@@ -272,9 +290,24 @@ class OscUdpClient(
             return null
         }
 
-        private fun waitForXinfoReply(socket: DatagramSocket, timeoutMs: Long): String? {
+        private fun waitForXinfoReply(
+            socket: DatagramSocket,
+            timeoutMs: Long,
+            resendPayload: ByteArray? = null,
+            resendTargets: List<Pair<InetAddress, Int>>? = null,
+        ): String? {
             val deadline = System.nanoTime() + timeoutMs * 1_000_000
+            var lastResend = System.nanoTime()
             while (System.nanoTime() < deadline) {
+                if (resendPayload != null && resendTargets != null) {
+                    val now = System.nanoTime()
+                    if (now - lastResend >= 400_000_000L) {
+                        lastResend = now
+                        for ((target, port) in resendTargets) {
+                            socket.send(DatagramPacket(resendPayload, resendPayload.size, target, port))
+                        }
+                    }
+                }
                 val remainingMs = ((deadline - System.nanoTime()) / 1_000_000).toInt().coerceIn(20, 500)
                 socket.soTimeout = remainingMs
                 try {

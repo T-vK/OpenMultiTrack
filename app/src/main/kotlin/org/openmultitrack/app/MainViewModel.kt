@@ -346,17 +346,27 @@ class MainViewModel(
                     ).fetchChannelLabels().map { profile to it }
                 }
                 supportsOscScribble(profile) -> {
+                    _uiState.update { it.copy(globalStatus = "Searching for mixer on LAN…") }
                     val host = withContext(Dispatchers.IO) {
                         val saved = profile.oscHost
-                        saved?.let { OscLanDiscovery.probeMixerAt(appContext, it, timeoutMs = 3000) }
-                            ?: OscLanDiscovery.discoverMixerIp(appContext, preferHost = saved)
+                        saved?.let { OscLanDiscovery.probeMixerAt(appContext, it, timeoutMs = 2000) }
+                            ?: OscLanDiscovery.discoverMixerIp(
+                                appContext,
+                                preferHost = saved,
+                                timeoutMs = 20_000,
+                            )
                     }
                     if (host == null) {
+                        OmtLog.w("ViewModel", "OSC discovery failed for ${profile.displayName}")
                         _uiState.update {
-                            it.copy(globalStatus = "Mixer not found on network. Connect device and mixer to the same LAN.")
+                            it.copy(
+                                globalStatus = "Mixer not found on LAN (OSC). Same Wi‑Fi as mixer? " +
+                                    "Check Menu → Log viewer for OscDiscovery lines.",
+                            )
                         }
                         return
                     }
+                    OmtLog.i("ViewModel", "OSC discovery found $host for ${profile.displayName}")
                     withContext(Dispatchers.IO) {
                         Xr18ScribbleImporter().fetchUsbLabels(host).map { labels ->
                             profile.copy(oscHost = host) to labels

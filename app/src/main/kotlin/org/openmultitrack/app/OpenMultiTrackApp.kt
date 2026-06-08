@@ -10,6 +10,9 @@ class OpenMultiTrackApp : Application() {
         OscDiscoveryLog.onSendFailed = { context, error ->
             OmtLog.w("OscDiscovery", "$context: ${error.javaClass.simpleName}: ${error.message}", error)
         }
+        OscDiscoveryLog.onDebug = { message ->
+            OmtLog.d("OscDiscovery", message)
+        }
         OmtLog.i("App", "OpenMultiTrack ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) starting")
     }
 }

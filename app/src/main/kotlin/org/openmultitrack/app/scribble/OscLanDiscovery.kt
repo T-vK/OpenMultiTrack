@@ -4,8 +4,10 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.LinkAddress
 import android.net.NetworkCapabilities
+import android.net.RouteInfo
 import android.net.wifi.WifiManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -18,12 +20,12 @@ import java.net.InetAddress
 
 /** Android-aware OSC mixer discovery (multicast lock + directed subnet broadcast). */
 object OscLanDiscovery {
-    private val OSC_PORTS = listOf(Xr18Mixer.DEFAULT_PORT, X32Mixer.DEFAULT_PORT)
     private val discoveryMutex = Mutex()
 
     private data class LanSubnet(
         val prefix: String,
         val broadcast: InetAddress,
+        val gateway: String?,
     )
 
     suspend fun probeMixerAt(
@@ -33,7 +35,7 @@ object OscLanDiscovery {
         port: Int = Xr18Mixer.DEFAULT_PORT,
     ): String? = withContext(Dispatchers.IO) {
         withMulticastLock(context) {
-            val lan = collectLanSubnets(context)
+            OmtLog.i("OscDiscovery", "probe $host port=$port timeout=${timeoutMs}ms")
             probeMixerOnPorts(host, timeoutMs, listOf(port))
         }
     }
@@ -41,61 +43,112 @@ object OscLanDiscovery {
     suspend fun discoverMixerIp(
         context: Context,
         preferHost: String? = null,
-        timeoutMs: Long = 12_000,
+        timeoutMs: Long = 20_000,
     ): String? = withContext(Dispatchers.IO) {
         discoveryMutex.withLock {
             withMulticastLock(context) {
                 val lan = collectLanSubnets(context)
-                discoverMixerIpLocked(preferHost, timeoutMs, lan)
+                if (lan.isEmpty()) {
+                    OmtLog.w("OscDiscovery", "no LAN subnets detected — check Wi-Fi/Ethernet")
+                    return@withMulticastLock null
+                }
+                val attempts = 3
+                val perAttemptMs = timeoutMs / attempts
+                repeat(attempts) { attempt ->
+                    OmtLog.i("OscDiscovery", "discovery attempt ${attempt + 1}/$attempts")
+                    discoverMixerIpOnce(preferHost, perAttemptMs, lan)?.let { found ->
+                        OmtLog.i("OscDiscovery", "found mixer at $found")
+                        return@withMulticastLock found
+                    }
+                    if (attempt < attempts - 1) {
+                        delay(400)
+                    }
+                }
+                OmtLog.w("OscDiscovery", "mixer not found on LAN after $attempts attempts")
+                null
             }
         }
     }
 
-    private fun discoverMixerIpLocked(
+    private fun discoverMixerIpOnce(
         preferHost: String?,
         timeoutMs: Long,
         lan: List<LanSubnet>,
     ): String? {
         preferHost?.let { saved ->
-            probeMixerOnPorts(saved, timeoutMs = 2500, ports = OSC_PORTS)?.let {
+            probeMixerOnPorts(saved, timeoutMs = 2000, ports = listOf(Xr18Mixer.DEFAULT_PORT, X32Mixer.DEFAULT_PORT))?.let {
                 OmtLog.i("OscDiscovery", "found mixer at saved host $it")
                 return it
             }
+            OmtLog.i("OscDiscovery", "saved host $saved did not respond")
         }
 
         val prefixes = orderedSubnetPrefixes(lan, preferHost)
         val broadcastAddrs = lan.map { it.broadcast }.distinct()
+        val priorityHosts = buildPriorityHosts(lan, preferHost)
         OmtLog.i(
             "OscDiscovery",
-            "scanning prefixes=$prefixes broadcasts=${broadcastAddrs.map { it.hostAddress }} ports=$OSC_PORTS timeout=${timeoutMs}ms",
+            "scan prefixes=$prefixes broadcasts=${broadcastAddrs.map { it.hostAddress }} " +
+                "priority=$priorityHosts timeout=${timeoutMs}ms",
         )
 
-        val perPortBudget = timeoutMs / OSC_PORTS.size
-        for (port in OSC_PORTS) {
-            val broadcastBudget = minOf(perPortBudget / 2, 3000L)
-            OscUdpClient.discoverMixer(
-                timeoutMs = broadcastBudget,
-                port = port,
-                subnetPrefixes = emptyList(),
-                broadcastAddrs = broadcastAddrs,
-            )?.let {
-                OmtLog.i("OscDiscovery", "found mixer via broadcast at $it port=$port")
-                return it
-            }
+        val xr18Budget = (timeoutMs * 0.75).toLong()
+        findOnPort(
+            port = Xr18Mixer.DEFAULT_PORT,
+            budgetMs = xr18Budget,
+            prefixes = prefixes,
+            broadcastAddrs = broadcastAddrs,
+            priorityHosts = priorityHosts,
+        )?.let { return it }
 
-            val scanBudget = perPortBudget - broadcastBudget
-            if (scanBudget <= 0 || prefixes.isEmpty()) continue
-            OscUdpClient.scanSubnetsForMixer(
-                timeoutMs = scanBudget,
-                port = port,
-                subnetPrefixes = prefixes,
-            )?.let {
-                OmtLog.i("OscDiscovery", "found mixer via scan at $it port=$port")
-                return it
-            }
+        val x32Budget = timeoutMs - xr18Budget
+        return findOnPort(
+            port = X32Mixer.DEFAULT_PORT,
+            budgetMs = x32Budget,
+            prefixes = prefixes,
+            broadcastAddrs = broadcastAddrs,
+            priorityHosts = priorityHosts,
+        )
+    }
+
+    private fun findOnPort(
+        port: Int,
+        budgetMs: Long,
+        prefixes: List<String>,
+        broadcastAddrs: List<InetAddress>,
+        priorityHosts: List<String>,
+    ): String? {
+        if (budgetMs <= 0) return null
+        val broadcastBudget = minOf(budgetMs / 2, 5000L)
+        OscUdpClient.discoverMixer(
+            timeoutMs = broadcastBudget,
+            port = port,
+            subnetPrefixes = emptyList(),
+            broadcastAddrs = broadcastAddrs,
+        )?.let {
+            OmtLog.i("OscDiscovery", "found mixer via broadcast at $it port=$port")
+            return it
         }
-        OmtLog.w("OscDiscovery", "mixer not found on LAN")
+
+        val scanBudget = budgetMs - broadcastBudget
+        if (scanBudget <= 0 || prefixes.isEmpty()) return null
+        OscUdpClient.scanSubnetsForMixer(
+            timeoutMs = scanBudget,
+            port = port,
+            subnetPrefixes = prefixes,
+            priorityHosts = priorityHosts,
+        )?.let {
+            OmtLog.i("OscDiscovery", "found mixer via unicast scan at $it port=$port")
+            return it
+        }
         return null
+    }
+
+    private fun buildPriorityHosts(lan: List<LanSubnet>, preferHost: String?): List<String> {
+        val hosts = LinkedHashSet<String>()
+        preferHost?.let { hosts.add(it) }
+        lan.mapNotNull { it.gateway }.forEach { hosts.add(it) }
+        return hosts.toList()
     }
 
     private fun probeMixerOnPorts(
@@ -118,6 +171,7 @@ object OscLanDiscovery {
             setReferenceCounted(true)
             acquire()
         }
+        OmtLog.d("OscDiscovery", "multicast lock acquired=${lock != null}")
         return try {
             block()
         } finally {
@@ -136,10 +190,11 @@ object OscLanDiscovery {
                 continue
             }
             val props = cm.getLinkProperties(network) ?: continue
+            val gateway = props.routes.firstGatewayHost()
             for (link in props.linkAddresses) {
                 val broadcast = ipv4Broadcast(link) ?: continue
                 val prefix = ipv4Prefix(link.address) ?: continue
-                subnets.add(LanSubnet(prefix, broadcast))
+                subnets.add(LanSubnet(prefix, broadcast, gateway))
             }
         }
         if (subnets.isNotEmpty()) return subnets.toList()
@@ -147,10 +202,22 @@ object OscLanDiscovery {
         legacyWifiPrefix(context)?.let { prefix ->
             runCatching {
                 val broadcast = InetAddress.getByName("$prefix.255")
-                subnets.add(LanSubnet(prefix, broadcast))
+                subnets.add(LanSubnet(prefix, broadcast, gateway = "$prefix.1"))
             }
         }
         return subnets.toList()
+    }
+
+    private fun List<RouteInfo>.firstGatewayHost(): String? {
+        for (route in this) {
+            val gateway = route.gateway as? Inet4Address ?: continue
+            if (gateway.isLoopbackAddress) continue
+            val dest = route.destination?.address as? Inet4Address ?: continue
+            if (dest.hostAddress == "0.0.0.0") {
+                return gateway.hostAddress
+            }
+        }
+        return null
     }
 
     private fun orderedSubnetPrefixes(lan: List<LanSubnet>, preferHost: String?): List<String> {
