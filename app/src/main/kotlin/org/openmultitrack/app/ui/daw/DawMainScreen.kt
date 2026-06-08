@@ -617,8 +617,6 @@ private fun ChannelStripList(
     onSolo: (Int) -> Unit,
 ) {
     var overlayIndex by remember { mutableStateOf<Int?>(null) }
-    val labelColumnWidth = stripLabelColumnWidth(strips, numberMode)
-
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
@@ -630,6 +628,7 @@ private fun ChannelStripList(
         val stripHeight = ((maxHeight - totalGaps) / count).coerceIn(MinStripHeight, MaxStripHeight)
         val innerPad = (stripHeight * 0.12f).coerceIn(3.dp, 8.dp)
         val labelFontSize = (stripHeight.value * 0.30f).coerceIn(10f, 13f)
+        val labelColumnWidth = stripLabelColumnWidth(strips, numberMode, iconMode, labelFontSize)
 
         Column(
             modifier = Modifier.fillMaxSize(),

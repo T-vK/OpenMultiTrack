@@ -52,9 +52,13 @@ in `02-sysex-dump-format.md`, and it is always triggered out-of-band over BLE.
 ## Channel addressing
 
 Input channels and buses are addressed by **MIDI channel** (1–7 for the input
-channels Ch1–Ch7; buses use their own channels in the reference client). The CC
-number selects *which parameter* on that channel. Values are standard 7-bit
-(`0–127`).
+strips Ch1–Ch6 plus the USB/BT return on Ch7; buses use their own channels in the
+reference client). The CC number selects *which parameter* on that channel. Values
+are standard 7-bit (`0–127`).
+
+> **Names vs MIDI channels:** BLE/SysEx expose **six** custom strip names (Ch1–4,
+> Ch5+6, Ch7+8). USB capture channels 9–10 are Main L/R and are not named by the
+> mixer. See [`04-channel-name-extraction.md`](./04-channel-name-extraction.md).
 
 ## Control Change map
 

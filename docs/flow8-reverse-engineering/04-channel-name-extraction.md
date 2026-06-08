@@ -81,28 +81,59 @@ while i < len(buf):
     i += 1
 ```
 
-The first 7 names found correspond to **Ch1–Ch7** in order (Ch7 is the USB/BT
-return channel and may be empty or contain a fixed name).
+The mixer **always returns exactly six names**, in scan order:
 
-### Verified offsets (firmware v11749)
+| # | Mixer strip | USB capture channels |
+| - | ----------- | -------------------- |
+| 1 | Ch1 | USB 1 |
+| 2 | Ch2 | USB 2 |
+| 3 | Ch3 | USB 3 |
+| 4 | Ch4 | USB 4 |
+| 5 | Ch5+6 (one shared label) | USB 5 **and** USB 6 |
+| 6 | Ch7+8 (one shared label) | USB 7 **and** USB 8 |
 
-The channel names appear in the reassembled buffer at these positions if you want
-to read them directly instead of scanning:
+USB **9** and **10** are not named by the mixer — label them **Main L** and
+**Main R** (the pre-fader main bus tap described in the FLOW 8 manual).
 
-| Ch | Offset in buf |
-| -- | ------------- |
-| 1  | `0x0554`      |
-| 2  | `0x0572`      |
-| 3  | `0x0590`      |
-| 4  | `0x05AE`      |
-| 5  | `0x05CC`      |
-| 6  | `0x05EA`      |
-| 7  | `0x0608`      |
+Stereo-link toggles in the app do not change how many names are returned; name 5
+is always the Ch5/6 strip label and name 6 is always the Ch7/8 strip label.
+
+### Verified offsets (firmware v11749, USB SysEx layout)
+
+In a full USB SysEx dump, the six names appear at:
+
+| # | Strip | Offset in buf |
+| - | ----- | ------------- |
+| 1 | Ch1 | `0x0554` |
+| 2 | Ch2 | `0x0572` |
+| 3 | Ch3 | `0x0590` |
+| 4 | Ch4 | `0x05AE` |
+| 5 | Ch5+6 | `0x05CC` |
+| 6 | Ch7+8 | `0x05EA` |
+
+In the **BLE compact** dump (~436 bytes), scan for length-prefixed ASCII instead
+of using these absolute offsets.
 
 Stride is `0x1E` (30 bytes) per slot. Each slot is 14 bytes; within those 14 bytes
 the length byte and ASCII payload follow the SysEx 7-bit packing described in
 doc 02, but for pure-ASCII names the scan approach above avoids the need to implement
 the packing decoder.
+
+### USB capture channel mapping
+
+When recording multitrack audio over USB, the FLOW 8 presents **10 channels**
+(8 analog inputs + main L/R pre-fader). Assign labels like this:
+
+| USB ch | Source | Name from mixer? |
+| ------ | ------ | ---------------- |
+| 1–4 | Ch1–Ch4 | Names 1–4 |
+| 5–6 | Ch5+6 pair | Name 5 (same string on both) |
+| 7–8 | Ch7+8 pair | Name 6 (same string on both) |
+| 9 | Main L | Always **Main L** (fixed) |
+| 10 | Main R | Always **Main R** (fixed) |
+
+Stereo-link toggles in the app do not change this table — name 5 is always the
+Ch5/6 strip label and name 6 is always the Ch7/8 strip label.
 
 ### Full example (Python / bleak)
 
@@ -111,7 +142,8 @@ event-driven reference implementation that:
 - generates and persists a client ID,
 - follows the full handshake,
 - reassembles `0x38` fragments,
-- scans for and prints all channel names,
+- decodes all six mixer names and the USB 1–10 mapping (incl. Main L/R),
+- optionally queries icon IDs (`0x80`),
 - saves the raw buffer to `flow8_dump.bin`.
 
 ---
@@ -157,18 +189,26 @@ The SysEx payload uses a 7-bit rotating-MSB packing scheme (see
 [`02-sysex-dump-format.md`](./02-sysex-dump-format.md)). Offsets inside the dump
 (from byte 0 = `0xF0`):
 
-| Ch | Offset   | Slot size |
-| -- | -------- | --------- |
-| 1  | `0x0554` | 14 bytes  |
-| 2  | `0x0572` | 14 bytes  |
-| 3  | `0x0590` | 14 bytes  |
-| 4  | `0x05AE` | 14 bytes  |
-| 5  | `0x05CC` | 14 bytes  |
-| 6  | `0x05EA` | 14 bytes  |
-| 7  | `0x0608` | 14 bytes  |
+| # | Strip | Offset | Slot size |
+| - | ----- | ------ | --------- |
+| 1 | Ch1 | `0x0554` | 14 bytes |
+| 2 | Ch2 | `0x0572` | 14 bytes |
+| 3 | Ch3 | `0x0590` | 14 bytes |
+| 4 | Ch4 | `0x05AE` | 14 bytes |
+| 5 | Ch5+6 | `0x05CC` | 14 bytes |
+| 6 | Ch7+8 | `0x05EA` | 14 bytes |
 
-Decode each slot with `restore_byte` (doc 02), skip control bytes `< 0x20`, then
-read to the first `0x00` null terminator.
+Only **six** name slots are used for scribble labels. Decode each with
+`restore_byte` (doc 02), skip control bytes `< 0x20`, then read to the first `0x00`
+null terminator.
+
+---
+
+## Related: icons and stereo link
+
+Channel **icon IDs** and **stereo-link flags** for Ch5/6 and Ch7/8 live in the
+same MixerState buffer (and a separate ParamQuery `0x80` response). See
+[`06-channel-icons-and-stereo-link.md`](./06-channel-icons-and-stereo-link.md).
 
 ---
 
@@ -186,7 +226,9 @@ etc.), not dump triggers.
 
 - Offsets (`0x0554`, stride `0x1E`) are from firmware v11749. A major firmware
   update could shift them; re-validate if names decode as garbage.
-- Channel 7 is the USB/BT return channel and often carries no custom name.
-- The heuristic scan (Method A) works because channel names are pure printable ASCII.
-  Names with characters outside `0x20–0x7E` would need the full MSB-restoration
-  approach from doc 02.
+- The mixer never returns names for USB 9–10; those are always Main L/R.
+- The BLE compact dump (~436 bytes) has no fixed offsets — scan for the first six
+  length-prefixed ASCII strings.
+- The heuristic scan works because channel names are pure printable ASCII. Names
+  with characters outside `0x20–0x7E` would need the full MSB-restoration approach
+  from doc 02.

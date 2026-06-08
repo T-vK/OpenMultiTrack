@@ -105,7 +105,7 @@ expected range).
 | Channel sends     | `0x0050`–`0x0062` …  | Mon1/Mon2/FX1/FX2 sends per channel   |
 | Channel strip     | `0x0067`–`0x022B` …  | level / pan blocks (Ch1–Ch7)          |
 | Bus levels/bal    | `0x0336`–`0x054E`    | Main/Mon/FX levels & balances         |
-| **Channel names** | **`0x0554` +**       | **7 × 30-byte slots — see doc 04**     |
+| **Channel names** | **`0x0554` +**       | **6 × 30-byte slots (Ch1–4, Ch5+6, Ch7+8) — doc 04** |
 | Gain / comp / EQ  | `0x0736`–`0x08E0`    | per-channel gain, compressor, 4-band EQ |
 | Bus limiters / 9-band EQ | `0x08FD`–`0x0B72` | bus limiters + graphic EQ          |
 | FX slots          | `0x0BC5`–`0x0BD1`    | FX1/FX2 params + preset               |

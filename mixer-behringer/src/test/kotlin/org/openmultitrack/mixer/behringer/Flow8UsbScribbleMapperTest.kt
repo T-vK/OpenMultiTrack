@@ -47,6 +47,32 @@ class Flow8UsbScribbleMapperTest {
         assertThat(labels.first { it.usbChannel == 8 }.name).isEqualTo("Playback")
     }
 
+    @Test
+    fun parseIconConfig_readsHardwareFixture() {
+        val payload = readRepoFixture("icon_config.bin")
+        val icons = Flow8StateDecoder.parseIconConfig(payload)
+
+        assertThat(icons).containsExactly(3, 3, 3, 4, 2, 3).inOrder()
+    }
+
+    @Test
+    fun mapNames_appliesIconsToUsbChannels() {
+        val buf = readRepoFixture("flow8_dump.bin")
+        val iconPayload = readRepoFixture("icon_config.bin")
+        val names = Flow8StateDecoder.decodeNames(buf)
+        val icons = Flow8StateDecoder.parseIconConfig(iconPayload)
+        val labels = Flow8UsbScribbleMapper.mapNamesToUsb(names, icons)
+
+        assertThat(labels.first { it.usbChannel == 1 }.iconId).isEqualTo(3)
+        assertThat(labels.first { it.usbChannel == 4 }.iconId).isEqualTo(4)
+        assertThat(labels.first { it.usbChannel == 5 }.iconId).isEqualTo(2)
+        assertThat(labels.first { it.usbChannel == 6 }.iconId).isEqualTo(2)
+        assertThat(labels.first { it.usbChannel == 7 }.iconId).isEqualTo(3)
+        assertThat(labels.first { it.usbChannel == 8 }.iconId).isEqualTo(3)
+        assertThat(labels.first { it.usbChannel == 9 }.iconId).isNull()
+        assertThat(labels.first { it.usbChannel == 10 }.iconId).isNull()
+    }
+
     private fun readRepoFixture(name: String): ByteArray {
         val candidates = listOf(
             Paths.get("docs/flow8-reverse-engineering/tools", name),

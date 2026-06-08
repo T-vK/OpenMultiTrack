@@ -21,7 +21,10 @@ FLOW8_MODEL = 0x21
 NAMES_START = 0x0554
 NAMES_STRIDE = 0x1E
 NAME_SCAN_LEN = 14
-CHANNEL_COUNT = 7
+CHANNEL_COUNT = 6
+MAIN_L_NAME = "Main L"
+MAIN_R_NAME = "Main R"
+NAME_LABELS = ["Ch1", "Ch2", "Ch3", "Ch4", "Ch5+6", "Ch7+8"]
 
 
 def load_bytes(path):
@@ -114,8 +117,14 @@ def process(path):
     print("  " + "-" * 40)
     for i in range(CHANNEL_COUNT):
         off = NAMES_START + i * NAMES_STRIDE
-        label = f"Ch{i + 1}" if i < 6 else "Ch7/USB-BT"
-        print(f"  {label:>3}  0x{off:05X}  \"{decode_name(data, off)}\"")
+        print(f"  {NAME_LABELS[i]:>6}  0x{off:05X}  \"{decode_name(data, off)}\"")
+    print()
+    print("  USB mapping (10 channels):")
+    print("    USB 1–4  ← names 1–4")
+    print("    USB 5–6  ← name 5 (Ch5+6)")
+    print("    USB 7–8  ← name 6 (Ch7+8)")
+    print(f"    USB 9    ← {MAIN_L_NAME}")
+    print(f"    USB 10   ← {MAIN_R_NAME}")
     print()
 
 

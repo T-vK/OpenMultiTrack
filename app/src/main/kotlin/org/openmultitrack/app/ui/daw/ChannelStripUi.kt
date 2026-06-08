@@ -31,7 +31,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -47,12 +50,36 @@ private val RecordRed = Color(0xFFE53935)
 private val MonitorBlue = Color(0xFF1E88E5)
 private val SoloAmber = Color(0xFFFFB300)
 
-internal fun stripLabelColumnWidth(strips: List<ChannelStripState>, numberMode: StripNumberMode): Dp {
+@Composable
+internal fun stripLabelColumnWidth(
+    strips: List<ChannelStripState>,
+    numberMode: StripNumberMode,
+    iconMode: StripIconMode,
+    labelFontSize: Float,
+): Dp {
+    if (numberMode == StripNumberMode.NUMBERS_ONLY) return 28.dp
     val hasLabels = strips.any { it.displayName.isNotBlank() || it.label.isNotBlank() }
-    return when {
-        numberMode == StripNumberMode.NUMBERS_ONLY -> 28.dp
-        hasLabels -> 96.dp
-        else -> 28.dp
+    if (!hasLabels) return 28.dp
+
+    val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val textStyle = TextStyle(fontSize = labelFontSize.sp, fontWeight = FontWeight.Medium)
+    val maxTextPx = strips.maxOfOrNull { strip ->
+        val line = buildStripLine(strip, numberMode, iconMode)
+        if (line.isEmpty()) 0 else textMeasurer.measure(line, textStyle).size.width
+    } ?: 0
+
+    val showsIcon = iconMode != StripIconMode.HIDE &&
+        strips.any { MixingStationIcons.emoji(it.iconId) != null }
+    val iconWidth = if (showsIcon) {
+        with(density) { (labelFontSize * 1.1f).sp.toDp() }
+    } else {
+        0.dp
+    }
+    val glyphWidth = with(density) { (labelFontSize * 2.6f).sp.toDp() }
+
+    return with(density) {
+        (3.dp + maxTextPx.toDp() + iconWidth + glyphWidth + 8.dp).coerceAtLeast(28.dp)
     }
 }
 
@@ -95,11 +122,11 @@ internal fun StripIdentityCell(
         if (lineText.isNotEmpty()) {
             Text(
                 lineText,
-                modifier = Modifier.weight(1f, fill = false),
                 fontSize = labelFontSize.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                softWrap = false,
+                overflow = TextOverflow.Visible,
             )
         }
         StripStatusGlyphs(

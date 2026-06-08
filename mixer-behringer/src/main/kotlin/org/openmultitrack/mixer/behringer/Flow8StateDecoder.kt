@@ -27,6 +27,28 @@ object Flow8StateDecoder {
         return String(slice, Charsets.US_ASCII)
     }
 
+    /**
+     * Parses the 48-byte ParamQuery `0x80` payload (12 groups × 4 bytes).
+     * Icon for strip *i* is [payload[i*4]] when 1–74, else [payload[i*4+1]].
+     */
+    fun parseIconConfig(payload: ByteArray, maxStrips: Int = MIXER_NAME_COUNT): List<Int?> {
+        val icons = mutableListOf<Int?>()
+        val groups = payload.size / 4
+        for (i in 0 until minOf(maxStrips, groups)) {
+            val base = i * 4
+            val primary = payload[base].toInt() and 0xFF
+            val fallback = payload[base + 1].toInt() and 0xFF
+            icons.add(
+                when {
+                    primary in 1..74 -> primary
+                    fallback in 1..74 -> fallback
+                    else -> null
+                },
+            )
+        }
+        return icons
+    }
+
     private fun scanNames(buf: ByteArray): List<String> {
         val names = mutableListOf<String>()
         var i = 0

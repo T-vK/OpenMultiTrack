@@ -11,12 +11,9 @@ two control surfaces:
 The primary goal of this research is to **extract the channel names** that the
 official app stores in the mixer — values that are not exposed over plain USB MIDI.
 
-> **Status:** The protocol layer is fully documented below from public sources and
-> the reference open-source client. A *live* capture from the locally connected unit
-> could **not** be completed because the USB link is currently faulty
-> (see [`05-hardware-probe-findings.md`](./05-hardware-probe-findings.md)). All
-> tooling needed to capture and decode names once the cable/port is fixed is
-> included under [`tools/`](./tools).
+> **Status:** BLE name/icon capture is **validated on hardware** (firmware v11749,
+> see docs 04 and 06). USB SysEx capture remains blocked by an unstable USB link on
+> the local unit ([`05-hardware-probe-findings.md`](./05-hardware-probe-findings.md)).
 
 ## Device identity
 
@@ -36,10 +33,13 @@ official app stores in the mixer — values that are not exposed over plain USB 
 | [`01-usb-midi-implementation.md`](./01-usb-midi-implementation.md) | USB enumeration, MIDI CC / Program Change map, direction limits |
 | [`02-sysex-dump-format.md`](./02-sysex-dump-format.md) | SysEx framing, 7-byte rotating-MSB packing, packed-float encoding, parameter offset tables |
 | [`03-bluetooth-le-protocol.md`](./03-bluetooth-le-protocol.md) | GATT service/characteristic, auth + session handshake, dump trigger, snapshot-name fetch |
-| [`04-channel-name-extraction.md`](./04-channel-name-extraction.md) | **Main goal** — where channel names live, the decode algorithm, end-to-end capture + parse workflow |
+| [`04-channel-name-extraction.md`](./04-channel-name-extraction.md) | **Main goal** — six mixer names, USB 1–8 mapping, fixed Main L/R on USB 9–10 |
 | [`05-hardware-probe-findings.md`](./05-hardware-probe-findings.md) | What was observed on the locally attached unit (incl. the USB fault) |
+| [`06-channel-icons-and-stereo-link.md`](./06-channel-icons-and-stereo-link.md) | Channel **icon IDs** (BLE ParamQuery `0x80`) and **stereo-link** detection (Ch5/6, Ch7/8) |
 | [`tools/capture_sysex.sh`](./tools/capture_sysex.sh) | Capture a raw SysEx dump from USB MIDI with `amidi` |
 | [`tools/extract_channel_names.py`](./tools/extract_channel_names.py) | Decode channel names from a captured dump (no dependencies) |
+| [`tools/extract_flow8_channels.py`](./tools/extract_flow8_channels.py) | Decode six names, icons, and full USB 1–10 mapping from a dump |
+| [`tools/ble_dump_names.py`](./tools/ble_dump_names.py) | Live BLE capture: MixerState + icon config query |
 
 ## How the pieces fit together
 
@@ -55,13 +55,16 @@ official app stores in the mixer — values that are not exposed over plain USB 
                          decode 7-byte MSB packing
                                               │
                                               ▼
-                 channel names @ 0x0554, stride 0x1E
+                 six channel names → USB 1–8 + Main L/R
 ```
 
-The key insight: **channel names are carried inside the SysEx state dump**, and the
-only documented way to make the mixer emit that dump is the BLE `0x4B` trigger — but
-the dump itself is delivered over **USB MIDI**, where it can be captured with
-standard ALSA tools.
+**Channel naming model:** the mixer always exposes **six** custom names (Ch1–4,
+Ch5+6, Ch7+8). Map them to USB capture channels 1–8; label USB 9–10 as **Main L**
+and **Main R** (not returned by the mixer).
+
+For names, the simplest path is **BLE-only** (`0x37` → `0x38` fragments, ~436 bytes).
+The full **USB SysEx** dump (`F0 00 20 32 21 … F7`, ~3 KiB) requires BLE `0x4B` to
+trigger and USB MIDI to receive.
 
 ## Sources & attribution
 

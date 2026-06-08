@@ -57,6 +57,8 @@ function frame(type, payload):
 | `0x37` | client → device| GetMixerState      | empty                |
 | `0x38` | device → client| MixerState (chunk) | state data fragment  |
 | `0x39` | client → device| HandshakeClient    | 16-byte client ID    |
+| `0x26` | client → device| ParamQuery         | 1-byte setting ID    |
+| `0x25` | device → client| ParamResponse      | id + len + payload   |
 | `0x4B` | client → device| DumpTrigger        | empty (SysEx on USB) |
 
 ### Worked examples
@@ -154,8 +156,24 @@ on notification(data):
             process(full_dump)
 ```
 
-The reassembled buffer contains the raw mixer state including length-prefixed ASCII
-channel names. See [`04-channel-name-extraction.md`](./04-channel-name-extraction.md).
+The reassembled buffer contains the raw mixer state including **six**
+length-prefixed ASCII channel names (Ch1–4, Ch5+6, Ch7+8). Map them to USB
+channels 1–8; USB 9–10 are always Main L/R. See
+[`04-channel-name-extraction.md`](./04-channel-name-extraction.md).
+
+### Optional: icon config query (ParamQuery `0x80`)
+
+After all `0x38` fragments arrive, the official app sends a second query for
+channel icon IDs:
+
+```
+Send: frame(0x26, [0x80])  →  [0x26, 0x01, 0x80, 0xA7]
+Wait: 0x25 ParamResponse with param_id=0x80 and a 48-byte payload
+```
+
+Icon IDs (1–74) are numeric references to local `input_icon_NNN` drawables — the
+images are not sent over BLE. Per-slot fallback bytes also exist in the MixerState
+buffer. Full layout: [`06-channel-icons-and-stereo-link.md`](./06-channel-icons-and-stereo-link.md).
 
 ## Optional: SysEx dump via USB MIDI (DumpTrigger 0x4B)
 

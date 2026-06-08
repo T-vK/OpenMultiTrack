@@ -246,17 +246,20 @@ class Flow8BleScribbleImporter(
             WaitingForHandshake,
             WaitingForHandshakeReply,
             CollectingState,
+            WaitingForIconConfig,
         }
 
         private var gatt: BluetoothGatt? = null
         private var characteristic: BluetoothGattCharacteristic? = null
         private val fragments = linkedMapOf<Int, ByteArray>()
         private var fragmentTotal = 0
+        private var stateBuffer: ByteArray? = null
         private var connectionState = ConnectionState.Connecting
         private var completed = false
         private val mainHandler = Handler(Looper.getMainLooper())
         private val writeQueue = ArrayDeque<ByteArray>()
         private var writeInFlight = false
+        private var iconConfigTimeout: Runnable? = null
 
         @SuppressLint("MissingPermission")
         fun start(context: Context) {
@@ -330,7 +333,12 @@ class Flow8BleScribbleImporter(
                 if (gatt != this@Flow8BleSession.gatt) return
                 writeInFlight = false
                 if (status != BluetoothGatt.GATT_SUCCESS) {
-                    OmtLog.w("Flow8Ble", "GATT write status=$status")
+                    OmtLog.w("Flow8Ble", "GATT write status=$status state=$connectionState")
+                    if (connectionState == ConnectionState.WaitingForIconConfig) {
+                        writeInFlight = false
+                        finishDump(iconPayload = null)
+                        return
+                    }
                     fail("FLOW 8 GATT write failed (status=$status)")
                     return
                 }
@@ -381,10 +389,49 @@ class Flow8BleScribbleImporter(
                         fragments[seq] = data.copyOfRange(4, data.size)
                         OmtLog.i("Flow8Ble", "MixerState fragment ${fragments.size}/$fragmentTotal")
                         if (fragmentTotal > 0 && fragments.size >= fragmentTotal) {
-                            finishDump()
+                            onStateDumpComplete(gatt)
                         }
                     }
+                    T_PARAM_RESPONSE -> {
+                        if (connectionState != ConnectionState.WaitingForIconConfig) return
+                        if (data.size < 5) return
+                        val paramId = data[2].toInt() and 0xFF
+                        if (paramId != ICON_PARAM_ID) return
+                        val payloadLen = data[3].toInt() and 0xFF
+                        if (data.size < 4 + payloadLen) return
+                        val payload = data.copyOfRange(4, 4 + payloadLen)
+                        OmtLog.i("Flow8Ble", "IconConfig (0x80) payload=${payloadLen}B")
+                        finishDump(iconPayload = payload)
+                    }
                 }
+            }
+
+            private fun assembleStateBuffer(): ByteArray = buildList {
+                for (i in 0 until fragmentTotal) {
+                    add(fragments[i] ?: byteArrayOf())
+                }
+            }.fold(byteArrayOf()) { acc, bytes -> acc + bytes }
+
+            @SuppressLint("MissingPermission")
+            private fun onStateDumpComplete(gatt: BluetoothGatt) {
+                stateBuffer = assembleStateBuffer()
+                connectionState = ConnectionState.WaitingForIconConfig
+                val timeout = Runnable {
+                    if (!completed && connectionState == ConnectionState.WaitingForIconConfig) {
+                        OmtLog.i("Flow8Ble", "icon config timeout — using names only")
+                        finishDump(iconPayload = null)
+                    }
+                }
+                iconConfigTimeout = timeout
+                mainHandler.postDelayed(timeout, ICON_CONFIG_TIMEOUT_MS)
+                mainHandler.postDelayed({
+                    queuePacket(gatt, frame(T_PARAM_QUERY, byteArrayOf(ICON_PARAM_ID.toByte())))
+                }, WRITE_GAP_MS)
+            }
+
+            private fun cancelIconConfigTimeout() {
+                iconConfigTimeout?.let { mainHandler.removeCallbacks(it) }
+                iconConfigTimeout = null
             }
 
             @SuppressLint("MissingPermission")
@@ -407,7 +454,11 @@ class Flow8BleScribbleImporter(
                 @Suppress("DEPRECATION")
                 if (!gatt.writeCharacteristic(char)) {
                     writeInFlight = false
-                    fail("FLOW 8 writeCharacteristic failed")
+                    if (connectionState == ConnectionState.WaitingForIconConfig) {
+                        finishDump(iconPayload = null)
+                    } else {
+                        fail("FLOW 8 writeCharacteristic failed")
+                    }
                 }
             }
 
@@ -418,21 +469,23 @@ class Flow8BleScribbleImporter(
                 close()
             }
 
-            private fun finishDump() {
+            private fun finishDump(iconPayload: ByteArray?) {
                 if (completed) return
-                val buf = buildList {
-                    for (i in 0 until fragmentTotal) {
-                        add(fragments[i] ?: byteArrayOf())
-                    }
-                }.fold(byteArrayOf()) { acc, bytes -> acc + bytes }
+                cancelIconConfigTimeout()
+                val buf = stateBuffer ?: assembleStateBuffer()
                 val names = Flow8StateDecoder.decodeNames(buf)
                 if (names.isEmpty()) {
                     onComplete(Result.failure(IllegalStateException("No channel names in FLOW 8 state dump")))
                     return
                 }
-                val labels = Flow8UsbScribbleMapper.mapNamesToUsb(names)
+                val icons = iconPayload?.let { Flow8StateDecoder.parseIconConfig(it) }
+                val labels = Flow8UsbScribbleMapper.mapNamesToUsb(names, icons)
                 completed = true
-                OmtLog.i("Flow8Ble", "decoded ${names.size} mixer names → ${labels.size} USB labels")
+                val iconSummary = icons?.count { it != null } ?: 0
+                OmtLog.i(
+                    "Flow8Ble",
+                    "decoded ${names.size} mixer names, $iconSummary icons → ${labels.size} USB labels",
+                )
                 onComplete(Result.success(labels))
                 close()
             }
@@ -466,6 +519,10 @@ class Flow8BleScribbleImporter(
         private const val T_GET_MIXER_STATE = 0x37
         private const val T_MIXER_STATE = 0x38
         private const val T_HANDSHAKE_CLIENT = 0x39
+        private const val T_PARAM_RESPONSE = 0x25
+        private const val T_PARAM_QUERY = 0x26
+        private const val ICON_PARAM_ID = 0x80
+        private const val ICON_CONFIG_TIMEOUT_MS = 2_000L
 
         private fun frame(type: Int, payload: ByteArray): ByteArray {
             val body = byteArrayOf(type.toByte(), 0x01) + payload

@@ -13,7 +13,7 @@ currently faulty**, which blocked a live SysEx capture.
   usb 1-1.1: Product: FLOW 8
   ```
 
-- A Bluetooth controller is present on the host (`Controller … NB-TVK [default]`), so
+- A Bluetooth controller is present on the host (`Controller … NB-TTT [default]`), so
   the BLE path (auth + dump trigger, doc 03) is viable once needed.
 
 - ALSA MIDI tooling is installed and available: `amidi`, `arecordmidi`, `aseqdump`,
@@ -79,13 +79,27 @@ of likelihood:
    python3 ./tools/extract_channel_names.py dump.syx
    ```
 
-## Verified offline instead
+## BLE capture succeeded (2026-06-08)
 
-Since live hardware was unavailable, the decode toolchain was validated against a
-**synthetic dump** built to match the documented framing and the 7-byte rotating-MSB
-packing. `tools/extract_channel_names.py` correctly round-tripped names through the
-carrier-byte-skipping logic (e.g. `VOX`, `GUITAR`), confirming the parser is ready to
-run against a real capture once the USB link is restored.
+Although USB remained unstable, **Bluetooth LE name import was validated** against
+the locally visible `FLOW 8 LE` peripheral (firmware v11749):
+
+```bash
+cd docs/flow8-reverse-engineering/tools
+python3 ble_dump_names.py
+python3 extract_flow8_channels.py flow8_dump.bin --icon-config icon_config.bin
+```
+
+Captured six mixer names (Ch1–4, Ch5+6 as ELECTRIC, Ch7+8 as Playback) plus icon
+IDs via ParamQuery `0x80`. Fixtures are checked in at `tools/flow8_dump.bin` and
+`tools/icon_config.bin`. See docs 04 and 06.
+
+## USB SysEx — still not captured
+
+The USB SysEx decode toolchain was also validated against a **synthetic dump** with
+7-byte rotating-MSB packing. `tools/extract_channel_names.py` round-trips names
+through the carrier-byte-skipping logic; a live `amidi -r` capture awaits a stable
+USB cable/port.
 
 ## Environment summary
 
@@ -94,7 +108,8 @@ run against a real capture once the USB link is restored.
 | FLOW 8 USB ID     | `1397:050c`, Product `FLOW 8`, `bcdDevice 2.10`   |
 | USB link          | **Unstable** — `Cannot enable … power cycle` loop |
 | ALSA MIDI port    | Not present (device never settled)                |
-| BLE controller    | Present (`NB-TVK`)                                 |
+| BLE controller    | Present (`NB-TTT`)                                 |
 | MIDI tools        | `amidi`, `aseqdump`, `arecordmidi`, `aconnect`    |
+| BLE name capture  | **Validated** — see `tools/flow8_dump.bin`          |
 | Live SysEx dump   | **Not captured** (blocked by USB fault)           |
-| Parser validation | Passed against synthetic dump                     |
+| Parser validation | BLE hardware + synthetic SysEx                    |
