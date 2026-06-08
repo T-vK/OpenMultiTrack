@@ -3,7 +3,10 @@ package org.openmultitrack.domain.channel
 /** UI + recording state for one input channel (0-based index). */
 data class ChannelStripState(
     val index: Int,
+    /** Raw scribble name from mixer (may include `_iconId` suffix). */
     val label: String = "",
+    val displayName: String = "",
+    val iconId: Int? = null,
     val colorArgb: Int = ChannelColors.defaultForIndex(index),
     val armed: Boolean = true,
     val monitoring: Boolean = true,

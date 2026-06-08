@@ -51,9 +51,14 @@ class SessionRecorder {
             return Result.failure(IllegalStateException(status.errorMessage ?: "Recording failed"))
         }
 
-        channelCount = status.channelCount.coerceIn(AudioConstants.MIN_CHANNELS, AudioConstants.MAX_CHANNELS)
+        val hardwareChannels = status.channelCount.coerceIn(AudioConstants.MIN_CHANNELS, AudioConstants.MAX_CHANNELS)
+        channelCount = minOf(hardwareChannels, route.channelCount)
+            .coerceIn(AudioConstants.MIN_CHANNELS, AudioConstants.MAX_CHANNELS)
         sampleRate = status.sampleRate
-        OmtLog.i("Recorder", "native running ${channelCount}ch @ ${sampleRate}Hz (${route.backend})")
+        OmtLog.i(
+            "Recorder",
+            "native running file=${channelCount}ch hardware=${hardwareChannels}ch @ ${sampleRate}Hz (${route.backend})",
+        )
 
         val file = File(
             outputDir,
@@ -64,8 +69,13 @@ class SessionRecorder {
         droppedFrames = 0
 
         val wav = WavWriter(file, channelCount, sampleRate)
-        val framesPerChunk = chunkFramesForChannels(channelCount)
-        val scratch = FloatArray(framesPerChunk * channelCount)
+        val framesPerChunk = chunkFramesForChannels(hardwareChannels)
+        val scratch = FloatArray(framesPerChunk * hardwareChannels)
+        val fileScratch = if (hardwareChannels > channelCount) {
+            FloatArray(framesPerChunk * channelCount)
+        } else {
+            scratch
+        }
         val backend = route.backend
 
         writerJob = scope.launch(Dispatchers.IO) {
@@ -74,7 +84,17 @@ class SessionRecorder {
                 while (isActive) {
                     val frames = AudioEngineRouter.readRecordedFrames(scratch, framesPerChunk, backend)
                     if (frames > 0) {
-                        wav.writeInterleavedFloat(scratch, frames)
+                        if (hardwareChannels > channelCount) {
+                            for (frame in 0 until frames) {
+                                for (ch in 0 until channelCount) {
+                                    fileScratch[frame * channelCount + ch] =
+                                        scratch[frame * hardwareChannels + ch]
+                                }
+                            }
+                            wav.writeInterleavedFloat(fileScratch, frames)
+                        } else {
+                            wav.writeInterleavedFloat(scratch, frames)
+                        }
                         framesWritten += frames
                         droppedFrames = AudioEngineRouter.recordingDroppedFrames(backend)
                         if (framesWritten - lastLogFrames >= sampleRate) {

@@ -37,6 +37,7 @@ import org.openmultitrack.sessionio.wav.WavReader
 import org.openmultitrack.usb.AudioEngineRouter
 import org.openmultitrack.usb.FullUsbProbeResult
 import org.openmultitrack.usb.UsbAudioEnumerator
+import org.openmultitrack.mixer.behringer.ScribbleStripLabel
 import org.openmultitrack.mixer.behringer.UsbChannelScribble
 import org.openmultitrack.usb.UsbAudioStreamHandle
 import java.io.File
@@ -132,8 +133,12 @@ class MixerSessionController(
             s.copy(
                 channelStrips = s.channelStrips.map { strip ->
                     val scribble = byIndex[strip.index] ?: return@map strip
+                    val raw = scribble.name?.takeIf { it.isNotBlank() } ?: return@map strip
+                    val parsed = ScribbleStripLabel.parse(raw)
                     strip.copy(
-                        label = scribble.name?.takeIf { it.isNotBlank() } ?: strip.label,
+                        label = raw,
+                        displayName = parsed.displayName,
+                        iconId = parsed.iconId,
                         colorArgb = scribble.colorArgb ?: strip.colorArgb,
                     )
                 },

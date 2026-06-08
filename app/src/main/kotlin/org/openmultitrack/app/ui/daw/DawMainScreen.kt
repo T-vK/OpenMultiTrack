@@ -67,6 +67,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.openmultitrack.app.DawUiState
+import org.openmultitrack.app.data.StripIconMode
+import org.openmultitrack.app.data.StripNumberMode
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.app.util.AppLogBuffer
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
@@ -112,6 +114,8 @@ fun DawMainScreen(
     onHideMonitorChange: (Boolean) -> Unit,
     onHideSoloChange: (Boolean) -> Unit,
     onShowWaveformsChange: (Boolean) -> Unit,
+    onStripNumberModeChange: (StripNumberMode) -> Unit,
+    onStripIconModeChange: (StripIconMode) -> Unit,
 ) {
     val activeId = state.activeMixerId
     val session = activeId?.let { state.sessionByMixer[it] }
@@ -163,6 +167,9 @@ fun DawMainScreen(
                 EmptyMixersPrompt(onAddMixer = onAddMixer, onRefresh = onRefreshUsb)
             } else {
                 state.globalStatus?.let { StatusBanner(it) }
+                if (state.pendingRecordingResume) {
+                    StatusBanner("Incomplete recording found — scribble import paused until you resume or finalize.")
+                }
                 session?.warningMessage?.let { WarningBanner(it) }
                 session?.statusMessage?.let { msg ->
                     if (session.warningMessage == null) {
@@ -186,6 +193,8 @@ fun DawMainScreen(
                             hideArm = state.hideArmButton,
                             hideMonitor = state.hideMonitorButton,
                             hideSolo = state.hideSoloButton,
+                            numberMode = state.stripNumberMode,
+                            iconMode = state.stripIconMode,
                             onArm = { onToggleArm(s.mixerId, it) },
                             onMonitor = { onToggleMonitor(s.mixerId, it) },
                             onSolo = { onToggleSolo(s.mixerId, it) },
@@ -236,6 +245,21 @@ fun DawMainScreen(
                 SettingsSwitch("Hide monitor button", state.hideMonitorButton, onHideMonitorChange)
                 SettingsSwitch("Hide solo button", state.hideSoloButton, onHideSoloChange)
                 SettingsSwitch("Show waveforms", state.showWaveforms, onShowWaveformsChange)
+                Text("Channel strip display", style = MaterialTheme.typography.titleMedium)
+                StripModePicker(
+                    title = "Channel numbers",
+                    options = StripNumberMode.entries,
+                    selected = state.stripNumberMode,
+                    label = { it.label },
+                    onSelect = onStripNumberModeChange,
+                )
+                StripModePicker(
+                    title = "Channel icons",
+                    options = StripIconMode.entries,
+                    selected = state.stripIconMode,
+                    label = { it.label },
+                    onSelect = onStripIconModeChange,
+                )
                 Spacer(Modifier.height(32.dp))
             }
         }
@@ -536,6 +560,27 @@ private fun WarningBanner(message: String) {
 }
 
 @Composable
+private fun <T> StripModePicker(
+    title: String,
+    options: List<T>,
+    selected: T,
+    label: (T) -> String,
+    onSelect: (T) -> Unit,
+) {
+    Text(title, style = MaterialTheme.typography.labelLarge)
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        options.forEach { option ->
+            TextButton(onClick = { onSelect(option) }) {
+                Text(
+                    if (option == selected) "✓ ${label(option)}" else label(option),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ChannelStripList(
     strips: List<ChannelStripState>,
     normalized: Boolean,
@@ -544,10 +589,15 @@ private fun ChannelStripList(
     hideArm: Boolean,
     hideMonitor: Boolean,
     hideSolo: Boolean,
+    numberMode: StripNumberMode,
+    iconMode: StripIconMode,
     onArm: (Int) -> Unit,
     onMonitor: (Int) -> Unit,
     onSolo: (Int) -> Unit,
 ) {
+    var overlayIndex by remember { mutableStateOf<Int?>(null) }
+    val labelColumnWidth = stripLabelColumnWidth(strips, numberMode)
+
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
@@ -557,8 +607,8 @@ private fun ChannelStripList(
         val gap = 2.dp
         val totalGaps = gap * (count - 1).coerceAtLeast(0)
         val stripHeight = ((maxHeight - totalGaps) / count).coerceIn(MinStripHeight, MaxStripHeight)
-        val buttonSize = (stripHeight - 6.dp).coerceIn(28.dp, 52.dp)
         val innerPad = (stripHeight * 0.12f).coerceIn(3.dp, 8.dp)
+        val labelFontSize = (stripHeight.value * 0.30f).coerceIn(10f, 13f)
 
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -568,20 +618,32 @@ private fun ChannelStripList(
                 ChannelStripRow(
                     strip = strip,
                     stripHeight = stripHeight,
-                    buttonSize = buttonSize,
                     innerPad = innerPad,
+                    labelFontSize = labelFontSize,
+                    labelColumnWidth = labelColumnWidth,
                     peaks = if (showWaveforms) waveformPeaks[strip.index] else null,
                     normalized = normalized,
                     showWaveform = showWaveforms,
-                    hideArm = hideArm,
-                    hideMonitor = hideMonitor,
-                    hideSolo = hideSolo,
-                    onArm = { onArm(strip.index) },
-                    onMonitor = { onMonitor(strip.index) },
-                    onSolo = { onSolo(strip.index) },
+                    numberMode = numberMode,
+                    iconMode = iconMode,
+                    onOpenControls = { overlayIndex = strip.index },
                 )
             }
         }
+    }
+
+    overlayIndex?.let { index ->
+        val strip = strips.firstOrNull { it.index == index } ?: return@let
+        ChannelStripControlDialog(
+            strip = strip,
+            hideArm = hideArm,
+            hideMonitor = hideMonitor,
+            hideSolo = hideSolo,
+            onDismiss = { overlayIndex = null },
+            onArm = { onArm(strip.index) },
+            onMonitor = { onMonitor(strip.index) },
+            onSolo = { onSolo(strip.index) },
+        )
     }
 }
 
@@ -589,17 +651,15 @@ private fun ChannelStripList(
 private fun ChannelStripRow(
     strip: ChannelStripState,
     stripHeight: Dp,
-    buttonSize: Dp,
     innerPad: Dp,
+    labelFontSize: Float,
+    labelColumnWidth: Dp,
     peaks: FloatArray?,
     normalized: Boolean,
     showWaveform: Boolean,
-    hideArm: Boolean,
-    hideMonitor: Boolean,
-    hideSolo: Boolean,
-    onArm: () -> Unit,
-    onMonitor: () -> Unit,
-    onSolo: () -> Unit,
+    numberMode: StripNumberMode,
+    iconMode: StripIconMode,
+    onOpenControls: () -> Unit,
 ) {
     val colorBarHeight = stripHeight - innerPad * 2
     Row(
@@ -612,61 +672,15 @@ private fun ChannelStripRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(innerPad / 2),
     ) {
-        Box(
-            Modifier
-                .width(3.dp)
-                .height(colorBarHeight)
-                .clip(RoundedCornerShape(2.dp))
-                .background(Color(strip.colorArgb)),
+        StripIdentityCell(
+            strip = strip,
+            columnWidth = labelColumnWidth,
+            labelFontSize = labelFontSize,
+            numberMode = numberMode,
+            iconMode = iconMode,
+            colorBarHeight = colorBarHeight,
+            onClick = onOpenControls,
         )
-        Text(
-            "${strip.index + 1}",
-            modifier = Modifier.width(22.dp),
-            fontSize = (stripHeight.value * 0.32f).coerceIn(10f, 14f).sp,
-            fontWeight = FontWeight.Bold,
-        )
-        if (strip.label.isNotBlank()) {
-            Text(
-                strip.label,
-                modifier = Modifier.widthIn(max = 72.dp),
-                fontSize = (stripHeight.value * 0.28f).coerceIn(9f, 12f).sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (!hideArm) {
-            StripChannelToggle(
-                checked = strip.armed,
-                icon = Icons.Filled.FiberManualRecord,
-                activeColor = RecordRed,
-                iconTintWhenOff = RecordRed,
-                contentDescription = "Arm",
-                size = buttonSize,
-                onClick = onArm,
-            )
-        }
-        if (!hideMonitor) {
-            StripChannelToggle(
-                checked = strip.monitoring,
-                icon = Icons.Filled.Headphones,
-                activeColor = MonitorBlue,
-                iconTintWhenOff = MaterialTheme.colorScheme.onSurfaceVariant,
-                contentDescription = "Monitor",
-                size = buttonSize,
-                onClick = onMonitor,
-            )
-        }
-        if (!hideSolo) {
-            StripChannelToggle(
-                checked = strip.solo,
-                icon = Icons.Filled.VolumeUp,
-                activeColor = SoloAmber,
-                iconTintWhenOff = MaterialTheme.colorScheme.onSurfaceVariant,
-                contentDescription = "Solo",
-                size = buttonSize,
-                onClick = onSolo,
-            )
-        }
         if (showWaveform) {
             WaveformView(
                 peaks = peaks,
@@ -674,47 +688,12 @@ private fun ChannelStripRow(
                 normalized = normalized,
                 modifier = Modifier
                     .weight(1f)
-                    .height(stripHeight - innerPad * 2)
+                    .height(colorBarHeight)
                     .clip(RoundedCornerShape(3.dp))
                     .background(MaterialTheme.colorScheme.surface),
             )
         } else {
             Spacer(Modifier.weight(1f))
-        }
-    }
-}
-
-@Composable
-private fun StripChannelToggle(
-    checked: Boolean,
-    icon: ImageVector,
-    activeColor: Color,
-    iconTintWhenOff: Color,
-    contentDescription: String,
-    size: Dp,
-    onClick: () -> Unit,
-) {
-    val bg = if (checked) activeColor else MaterialTheme.colorScheme.surface
-    val border = if (checked) activeColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-    val iconTint = when {
-        checked && icon == Icons.Filled.FiberManualRecord -> Color.White
-        checked -> Color.White
-        else -> iconTintWhenOff
-    }
-    Surface(
-        onClick = onClick,
-        shape = CircleShape,
-        color = bg,
-        border = BorderStroke(1.dp, border),
-        modifier = Modifier.size(size),
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = icon,
-                contentDescription = contentDescription,
-                modifier = Modifier.size((size.value * 0.48f).coerceIn(14f, 24f).dp),
-                tint = iconTint,
-            )
         }
     }
 }

@@ -109,6 +109,8 @@ class MainActivity : ComponentActivity() {
                         onHideMonitorChange = viewModel::setHideMonitorButton,
                         onHideSoloChange = viewModel::setHideSoloButton,
                         onShowWaveformsChange = viewModel::setShowWaveforms,
+                        onStripNumberModeChange = viewModel::setStripNumberMode,
+                        onStripIconModeChange = viewModel::setStripIconMode,
                     )
                 }
             }

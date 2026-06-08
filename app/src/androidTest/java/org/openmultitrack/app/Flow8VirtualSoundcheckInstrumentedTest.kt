@@ -81,6 +81,7 @@ class Flow8VirtualSoundcheckInstrumentedTest {
                 probe,
                 stream,
                 VIRTUAL_SOUNDCHECK_CHANNELS,
+                maxChannels = VIRTUAL_SOUNDCHECK_CHANNELS,
             ) ?: error("No capture route for Flow 8")
 
             val recorder = SessionRecorder()

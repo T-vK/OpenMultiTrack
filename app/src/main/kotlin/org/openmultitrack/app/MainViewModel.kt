@@ -23,6 +23,10 @@ import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.usb.AudioOutputDeviceLabel
 import org.openmultitrack.usb.LabeledAudioDevice
+import org.openmultitrack.app.data.StripIconMode
+import org.openmultitrack.app.data.StripNumberMode
+import org.openmultitrack.app.scribble.Flow8BleScribbleImporter
+import org.openmultitrack.app.scribble.IncompleteRecordingStore
 import org.openmultitrack.app.scribble.OscLanDiscovery
 import org.openmultitrack.mixer.behringer.Xr18ScribbleImporter
 import org.openmultitrack.usb.UsbAudioEnumerator
@@ -42,6 +46,9 @@ data class DawUiState(
     val hideMonitorButton: Boolean = false,
     val hideSoloButton: Boolean = false,
     val showWaveforms: Boolean = true,
+    val stripNumberMode: StripNumberMode = StripNumberMode.BOTH,
+    val stripIconMode: StripIconMode = StripIconMode.SHOW,
+    val pendingRecordingResume: Boolean = false,
 )
 
 class MainViewModel(
@@ -58,6 +65,8 @@ class MainViewModel(
             hideMonitorButton = settings.hideMonitorButton,
             hideSoloButton = settings.hideSoloButton,
             showWaveforms = settings.showWaveforms,
+            stripNumberMode = settings.stripNumberMode,
+            stripIconMode = settings.stripIconMode,
         ),
     )
     val uiState: StateFlow<DawUiState> = _uiState.asStateFlow()
@@ -223,44 +232,68 @@ class MainViewModel(
         _uiState.update { it.copy(showWaveforms = show) }
     }
 
+    fun setStripNumberMode(mode: StripNumberMode) {
+        settings.stripNumberMode = mode
+        _uiState.update { it.copy(stripNumberMode = mode) }
+    }
+
+    fun setStripIconMode(mode: StripIconMode) {
+        settings.stripIconMode = mode
+        _uiState.update { it.copy(stripIconMode = mode) }
+    }
+
     fun refreshScribble(mixerId: String) {
         val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
-        if (!supportsOscScribble(profile)) {
+        if (!supportsScribbleImport(profile)) {
             _uiState.update { it.copy(globalStatus = "Scribble import is not available for this mixer yet.") }
             return
         }
         viewModelScope.launch {
-            _uiState.update { it.copy(globalStatus = "Importing scribble strip…") }
-            try {
-                val importer = Xr18ScribbleImporter()
-                val host = profile.oscHost
-                    ?: OscLanDiscovery.discoverMixerIp(appContext)
-                if (host == null) {
-                    _uiState.update {
-                        it.copy(globalStatus = "Mixer not found on network. Connect tablet and XR18 to the same LAN.")
-                    }
-                    return@launch
+            importScribbleForMixer(profile)
+        }
+    }
+
+    private suspend fun importScribbleForMixer(profile: MixerProfile) {
+        _uiState.update { it.copy(globalStatus = "Importing scribble strip…") }
+        try {
+            val result: Result<Pair<MixerProfile, List<org.openmultitrack.mixer.behringer.UsbChannelScribble>>> = when {
+                supportsFlow8Scribble(profile) -> withContext(Dispatchers.IO) {
+                    Flow8BleScribbleImporter(appContext).fetchChannelLabels().map { profile to it }
                 }
-                val result = withContext(Dispatchers.IO) { importer.fetchUsbLabels(host) }
-                result.onSuccess { labels ->
-                    sessionClient.withManager { mgr ->
-                        mgr.getOrCreate(mixerId).applyScribbleLabels(labels)
+                supportsOscScribble(profile) -> {
+                    val host = profile.oscHost ?: OscLanDiscovery.discoverMixerIp(appContext)
+                    if (host == null) {
+                        _uiState.update {
+                            it.copy(globalStatus = "Mixer not found on network. Connect device and mixer to the same LAN.")
+                        }
+                        return
                     }
-                    val updated = profile.copy(oscHost = host, scribbleImported = true)
-                    mixerStore.saveMixer(updated)
-                    loadMixers()
-                    val named = labels.count { !it.name.isNullOrBlank() }
-                    AppLogBuffer.append("I", "Scribble", "Imported $named channel labels from $host")
-                    _uiState.update { it.copy(globalStatus = "Scribble: $named channel labels from $host") }
-                    OmtLog.i("ViewModel", "scribble imported $named labels from $host")
-                }.onFailure { e ->
-                    OmtLog.e("ViewModel", "scribble import failed", e)
-                    _uiState.update { it.copy(globalStatus = "Scribble import failed: ${e.message}") }
+                    withContext(Dispatchers.IO) {
+                        Xr18ScribbleImporter().fetchUsbLabels(host).map { labels ->
+                            profile.copy(oscHost = host) to labels
+                        }
+                    }
                 }
-            } catch (e: Exception) {
+                else -> Result.failure(IllegalStateException("Unsupported mixer"))
+            }
+            result.onSuccess { (updatedProfile, labels) ->
+                sessionClient.withManager { mgr ->
+                    mgr.getOrCreate(profile.id).applyScribbleLabels(labels)
+                }
+                val saved = updatedProfile.copy(scribbleImported = true)
+                mixerStore.saveMixer(saved)
+                loadMixers()
+                val named = labels.count { !it.name.isNullOrBlank() }
+                AppLogBuffer.append("I", "Scribble", "Imported $named channel labels for ${profile.displayName}")
+                _uiState.update { it.copy(globalStatus = "Scribble: $named channel labels") }
+                OmtLog.i("ViewModel", "scribble imported $named labels for ${profile.id}")
+            }.onFailure { e ->
                 OmtLog.e("ViewModel", "scribble import failed", e)
                 _uiState.update { it.copy(globalStatus = "Scribble import failed: ${e.message}") }
             }
+        } catch (e: Exception) {
+            OmtLog.e("ViewModel", "scribble import failed", e)
+            _uiState.update { it.copy(globalStatus = "Scribble import failed: ${e.message}") }
         }
     }
 
@@ -322,11 +355,18 @@ class MainViewModel(
             val result = withContext(Dispatchers.IO) { probeService.probe(usb) }
             manager.onProbeComplete(profile.id, usb, result)
             OmtLog.i("ViewModel", "auto-probed ${profile.displayName}")
-            if (supportsOscScribble(profile) && !profile.scribbleImported) {
-                refreshScribble(profile.id)
+            val resumePending = IncompleteRecordingStore.hasIncompleteRecording(appContext, settings, profile.id)
+            _uiState.update { it.copy(pendingRecordingResume = resumePending) }
+            if (resumePending) {
+                AppLogBuffer.append("I", "Scribble", "Skipped auto-import — incomplete recording to resume")
+            } else if (supportsScribbleImport(profile)) {
+                importScribbleForMixer(profile)
             }
         }
     }
+
+    private fun supportsScribbleImport(profile: MixerProfile): Boolean =
+        supportsOscScribble(profile) || supportsFlow8Scribble(profile)
 
     private fun supportsOscScribble(profile: MixerProfile): Boolean {
         if (profile.productId == XR18_PRODUCT_ID) return true
@@ -336,8 +376,15 @@ class MainViewModel(
             name.contains("X32", ignoreCase = true)
     }
 
+    private fun supportsFlow8Scribble(profile: MixerProfile): Boolean {
+        if (profile.productId == FLOW8_PRODUCT_ID) return true
+        val name = "${profile.productName} ${profile.displayName}"
+        return name.contains("FLOW 8", ignoreCase = true) || name.contains("FLOW8", ignoreCase = true)
+    }
+
     companion object {
         private const val XR18_PRODUCT_ID = 0x00d4
+        private const val FLOW8_PRODUCT_ID = 0x050c
         fun factory(context: Context): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")

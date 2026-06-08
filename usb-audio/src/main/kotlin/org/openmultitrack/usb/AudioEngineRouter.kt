@@ -37,7 +37,12 @@ object AudioEngineRouter {
         stream: UsbAudioStreamHandle?,
         requestedChannels: Int,
         sampleRateHz: Int = 48_000,
+        maxChannels: Int? = null,
     ): CaptureRoute? {
+        fun clampChannels(count: Int): Int {
+            val capped = maxChannels?.let { minOf(count, it) } ?: count
+            return capped.coerceAtLeast(minOf(requestedChannels, maxChannels ?: requestedChannels))
+        }
         val uac2 = probe.uac2Caps
         val oboeIn = probe.input?.takeIf { it.isSuccess }
         val oboeChannels = oboeIn?.channelCount ?: 0
@@ -55,14 +60,14 @@ object AudioEngineRouter {
                     backend = AudioBackend.UAC2,
                     usbStream = stream,
                     uac2Alt = alt,
-                    channelCount = alt.channels,
+                    channelCount = clampChannels(alt.channels),
                     sampleRate = alt.sampleRateHz.takeIf { it > 0 } ?: sampleRateHz,
                 )
             }
         }
 
         if (oboeIn != null && oboeChannels >= 1) {
-            val channels = minOf(requestedChannels, oboeChannels)
+            val channels = clampChannels(minOf(requestedChannels, oboeChannels))
             OmtLog.i("Router", "capture → Oboe ${channels}ch deviceId=${oboeIn.deviceId}")
             return CaptureRoute(
                 backend = AudioBackend.OBOE,
@@ -81,7 +86,7 @@ object AudioEngineRouter {
                     backend = AudioBackend.UAC2,
                     usbStream = stream,
                     uac2Alt = alt,
-                    channelCount = alt.channels,
+                    channelCount = clampChannels(alt.channels),
                     sampleRate = alt.sampleRateHz.takeIf { it > 0 } ?: sampleRateHz,
                 )
             }
