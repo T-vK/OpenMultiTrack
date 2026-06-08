@@ -1,8 +1,11 @@
 package org.openmultitrack.app.ui.daw
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -14,8 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -23,15 +25,16 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledIconToggleButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -54,9 +57,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.openmultitrack.app.DawUiState
@@ -68,6 +74,12 @@ import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.TransportState
 import org.openmultitrack.usb.LabeledAudioDevice
+
+private val RecordRed = Color(0xFFE53935)
+private val MonitorBlue = Color(0xFF1E88E5)
+private val SoloAmber = Color(0xFFFFB300)
+private val MinStripHeight = 36.dp
+private val MaxStripHeight = 72.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -162,6 +174,7 @@ fun DawMainScreen(
                         ChannelStripList(
                             strips = s.channelStrips,
                             normalized = waveformNormalized,
+                            waveformPeaks = s.waveformPeaks,
                             onArm = { onToggleArm(s.mixerId, it) },
                             onMonitor = { onToggleMonitor(s.mixerId, it) },
                             onSolo = { onToggleSolo(s.mixerId, it) },
@@ -244,135 +257,200 @@ private fun TransportToolbar(
     val activeMixer = mixers.firstOrNull { it.id == activeMixerId }
     val selectedOutput = outputDevices.firstOrNull { it.device.id == session.monitorOutputDeviceId }
 
-    Surface(color = MaterialTheme.colorScheme.surface) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 6.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            // Mixer dropdown
-            Box {
-                TextButton(onClick = { mixerMenuOpen = true }) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            activeMixer?.displayName ?: "Mixer",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.width(88.dp),
-                            style = MaterialTheme.typography.labelLarge,
-                        )
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
-                    }
-                }
-                DropdownMenu(expanded = mixerMenuOpen, onDismissRequest = { mixerMenuOpen = false }) {
-                    mixers.forEach { m ->
-                        DropdownMenuItem(
-                            text = { Text(m.displayName) },
-                            onClick = {
-                                mixerMenuOpen = false
-                                onSelectMixer(m.id)
-                            },
-                        )
-                    }
-                }
-            }
-
-            // Record | Soundcheck segmented toggle
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.weight(1f, fill = false)) {
-                SegmentedButton(
-                    selected = session.appMode == AppMode.MULTITRACK_RECORD,
-                    onClick = { onSetAppMode(activeMixerId, AppMode.MULTITRACK_RECORD) },
-                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                    label = { Text("Record", fontSize = 11.sp) },
-                )
-                SegmentedButton(
-                    selected = session.appMode == AppMode.VIRTUAL_SOUNDCHECK,
-                    onClick = { onSetAppMode(activeMixerId, AppMode.VIRTUAL_SOUNDCHECK) },
-                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                    label = { Text("Soundcheck", fontSize = 11.sp) },
-                )
-            }
-
-            // Monitor toggle + output dropdown
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                FilledIconToggleButton(
-                    checked = session.isMonitoring,
-                    onCheckedChange = { checked ->
-                        if (checked) onStartMonitor() else onStopMonitor()
-                    },
-                    enabled = session.probe != null && session.appMode == AppMode.MULTITRACK_RECORD,
+    BoxWithConstraints {
+        val showLabels = maxWidth >= 720.dp
+        Surface(color = MaterialTheme.colorScheme.surface) {
+            Column {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Icon(Icons.Default.Headphones, contentDescription = "Monitor")
-                }
-                Box {
-                    IconButton(
-                        onClick = { monitorDeviceMenuOpen = true },
-                        modifier = Modifier.size(32.dp),
-                        enabled = outputDevices.isNotEmpty(),
-                    ) {
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Monitor output")
-                    }
-                    DropdownMenu(
-                        expanded = monitorDeviceMenuOpen,
-                        onDismissRequest = { monitorDeviceMenuOpen = false },
-                    ) {
-                        outputDevices.forEach { labeled ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(labeled.label, maxLines = 2, style = MaterialTheme.typography.bodySmall)
-                                },
-                                onClick = {
-                                    monitorDeviceMenuOpen = false
-                                    onSetMonitorOutput(labeled.device.id)
-                                },
-                            )
+                    Box {
+                        TextButton(onClick = { mixerMenuOpen = true }) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    activeMixer?.displayName ?: "Mixer",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.widthIn(max = 100.dp),
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                        DropdownMenu(expanded = mixerMenuOpen, onDismissRequest = { mixerMenuOpen = false }) {
+                            mixers.forEach { m ->
+                                DropdownMenuItem(
+                                    text = { Text(m.displayName) },
+                                    onClick = {
+                                        mixerMenuOpen = false
+                                        onSelectMixer(m.id)
+                                    },
+                                )
+                            }
                         }
                     }
-                }
-            }
 
-            // Record transport
-            if (session.isRecording) {
-                FilledIconToggleButton(
-                    checked = true,
-                    onCheckedChange = { onStopRecord() },
-                ) {
-                    Icon(Icons.Default.Stop, contentDescription = "Stop recording", tint = Color.White)
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.weight(1f)) {
+                        SegmentedButton(
+                            selected = session.appMode == AppMode.MULTITRACK_RECORD,
+                            onClick = { onSetAppMode(activeMixerId, AppMode.MULTITRACK_RECORD) },
+                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                            icon = { SegmentedButtonDefaults.Icon(active = session.appMode == AppMode.MULTITRACK_RECORD) { Icon(Icons.Default.Mic, null, Modifier.size(14.dp)) } },
+                            label = { Text("Record", fontSize = 11.sp, maxLines = 1) },
+                        )
+                        SegmentedButton(
+                            selected = session.appMode == AppMode.VIRTUAL_SOUNDCHECK,
+                            onClick = { onSetAppMode(activeMixerId, AppMode.VIRTUAL_SOUNDCHECK) },
+                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                            icon = { SegmentedButtonDefaults.Icon(active = session.appMode == AppMode.VIRTUAL_SOUNDCHECK) { Icon(Icons.Default.VolumeUp, null, Modifier.size(14.dp)) } },
+                            label = { Text("Soundcheck", fontSize = 11.sp, maxLines = 1) },
+                        )
+                    }
+
+                    MonitorControl(
+                        session = session,
+                        outputDevices = outputDevices,
+                        showLabels = showLabels,
+                        monitorDeviceMenuOpen = monitorDeviceMenuOpen,
+                        onMonitorDeviceMenuOpen = { monitorDeviceMenuOpen = it },
+                        onStartMonitor = onStartMonitor,
+                        onStopMonitor = onStopMonitor,
+                        onSetMonitorOutput = onSetMonitorOutput,
+                    )
+
+                    RecordControl(
+                        session = session,
+                        showLabels = showLabels,
+                        onStartRecord = onStartRecord,
+                        onStopRecord = onStopRecord,
+                    )
+
+                    when (session.transportState) {
+                        TransportState.RECORDING_DEGRADED -> Text("⚠", color = RecordRed, fontWeight = FontWeight.Bold)
+                        else -> Unit
+                    }
                 }
-            } else {
-                IconButton(
-                    onClick = onStartRecord,
-                    enabled = session.probe != null && session.appMode == AppMode.MULTITRACK_RECORD,
-                ) {
-                    Icon(
-                        Icons.Filled.FiberManualRecord,
-                        contentDescription = "Record",
-                        tint = MaterialTheme.colorScheme.error,
+                selectedOutput?.let {
+                    Text(
+                        "Monitor: ${it.shortLabel}",
+                        modifier = Modifier.padding(start = 12.dp, bottom = 2.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
+        }
+    }
+}
 
-            // Transport indicator
-            val indicator = when (session.transportState) {
-                TransportState.RECORDING -> "●"
-                TransportState.RECORDING_DEGRADED -> "⚠"
-                TransportState.PLAYING -> "▶"
-                else -> null
+@Composable
+private fun MonitorControl(
+    session: MixerSessionUiState,
+    outputDevices: List<LabeledAudioDevice>,
+    showLabels: Boolean,
+    monitorDeviceMenuOpen: Boolean,
+    onMonitorDeviceMenuOpen: (Boolean) -> Unit,
+    onStartMonitor: () -> Unit,
+    onStopMonitor: () -> Unit,
+    onSetMonitorOutput: (Int) -> Unit,
+) {
+    val enabled = session.probe != null && session.appMode == AppMode.MULTITRACK_RECORD
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (showLabels) {
+            FilledTonalButton(
+                onClick = { if (session.isMonitoring) onStopMonitor() else onStartMonitor() },
+                enabled = enabled,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = if (session.isMonitoring) MonitorBlue else MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = if (session.isMonitoring) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
+            ) {
+                Icon(Icons.Default.Headphones, contentDescription = "Monitor", modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Monitor", fontSize = 12.sp)
             }
-            indicator?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+        } else {
+            Surface(
+                onClick = { if (session.isMonitoring) onStopMonitor() else onStartMonitor() },
+                enabled = enabled,
+                shape = CircleShape,
+                color = if (session.isMonitoring) MonitorBlue else MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.size(40.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Headphones,
+                        contentDescription = "Monitor",
+                        tint = if (session.isMonitoring) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
         }
-        selectedOutput?.let {
-            Text(
-                "Monitor: ${it.shortLabel}",
-                modifier = Modifier.padding(start = 12.dp, bottom = 2.dp),
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+        Box {
+            IconButton(
+                onClick = { onMonitorDeviceMenuOpen(true) },
+                modifier = Modifier.size(32.dp),
+                enabled = outputDevices.isNotEmpty(),
+            ) {
+                Icon(Icons.Default.ArrowDropDown, contentDescription = "Monitor output")
+            }
+            DropdownMenu(expanded = monitorDeviceMenuOpen, onDismissRequest = { onMonitorDeviceMenuOpen(false) }) {
+                outputDevices.forEach { labeled ->
+                    DropdownMenuItem(
+                        text = { Text(labeled.label, maxLines = 2, style = MaterialTheme.typography.bodySmall) },
+                        onClick = {
+                            onMonitorDeviceMenuOpen(false)
+                            onSetMonitorOutput(labeled.device.id)
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecordControl(
+    session: MixerSessionUiState,
+    showLabels: Boolean,
+    onStartRecord: () -> Unit,
+    onStopRecord: () -> Unit,
+) {
+    val enabled = session.probe != null && session.appMode == AppMode.MULTITRACK_RECORD
+    if (session.isRecording) {
+        Button(
+            onClick = onStopRecord,
+            contentPadding = PaddingValues(horizontal = if (showLabels) 12.dp else 8.dp, vertical = 6.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = RecordRed, contentColor = Color.White),
+        ) {
+            Icon(Icons.Default.Stop, contentDescription = "Stop recording", modifier = Modifier.size(18.dp))
+            if (showLabels) {
+                Spacer(Modifier.width(4.dp))
+                Text("Stop", fontSize = 12.sp)
+            }
+        }
+    } else {
+        FilledTonalButton(
+            onClick = onStartRecord,
+            enabled = enabled,
+            contentPadding = PaddingValues(horizontal = if (showLabels) 12.dp else 8.dp, vertical = 6.dp),
+            colors = ButtonDefaults.filledTonalButtonColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = RecordRed,
+            ),
+        ) {
+            Icon(Icons.Filled.FiberManualRecord, contentDescription = "Record", tint = RecordRed, modifier = Modifier.size(18.dp))
+            if (showLabels) {
+                Spacer(Modifier.width(4.dp))
+                Text("Record", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+            }
         }
     }
 }
@@ -414,17 +492,40 @@ private fun WarningBanner(message: String) {
 private fun ChannelStripList(
     strips: List<ChannelStripState>,
     normalized: Boolean,
+    waveformPeaks: Map<Int, FloatArray>,
     onArm: (Int) -> Unit,
     onMonitor: (Int) -> Unit,
     onSolo: (Int) -> Unit,
 ) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 4.dp, vertical = 2.dp),
     ) {
-        items(strips, key = { it.index }) { strip ->
-            ChannelStripRow(strip, onArm, onMonitor, onSolo)
+        val count = strips.size.coerceAtLeast(1)
+        val gap = 2.dp
+        val totalGaps = gap * (count - 1).coerceAtLeast(0)
+        val stripHeight = ((maxHeight - totalGaps) / count).coerceIn(MinStripHeight, MaxStripHeight)
+        val buttonSize = (stripHeight - 6.dp).coerceIn(28.dp, 52.dp)
+        val innerPad = (stripHeight * 0.12f).coerceIn(3.dp, 8.dp)
+
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(gap),
+        ) {
+            strips.forEach { strip ->
+                ChannelStripRow(
+                    strip = strip,
+                    stripHeight = stripHeight,
+                    buttonSize = buttonSize,
+                    innerPad = innerPad,
+                    peaks = waveformPeaks[strip.index],
+                    normalized = normalized,
+                    onArm = { onArm(strip.index) },
+                    onMonitor = { onMonitor(strip.index) },
+                    onSolo = { onSolo(strip.index) },
+                )
+            }
         }
     }
 }
@@ -432,96 +533,143 @@ private fun ChannelStripList(
 @Composable
 private fun ChannelStripRow(
     strip: ChannelStripState,
-    onArm: (Int) -> Unit,
-    onMonitor: (Int) -> Unit,
-    onSolo: (Int) -> Unit,
+    stripHeight: Dp,
+    buttonSize: Dp,
+    innerPad: Dp,
+    peaks: FloatArray?,
+    normalized: Boolean,
+    onArm: () -> Unit,
+    onMonitor: () -> Unit,
+    onSolo: () -> Unit,
 ) {
-    val stripHeight = 36.dp
+    val colorBarHeight = stripHeight - innerPad * 2
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(stripHeight)
             .clip(RoundedCornerShape(4.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(horizontal = 4.dp),
+            .padding(horizontal = innerPad),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(innerPad / 2),
     ) {
         Box(
             Modifier
                 .width(3.dp)
-                .height(28.dp)
+                .height(colorBarHeight)
                 .clip(RoundedCornerShape(2.dp))
                 .background(Color(strip.colorArgb)),
         )
         Text(
             "${strip.index + 1}",
-            modifier = Modifier.width(20.dp),
-            fontSize = 11.sp,
+            modifier = Modifier.width(22.dp),
+            fontSize = (stripHeight.value * 0.32f).coerceIn(10f, 14f).sp,
             fontWeight = FontWeight.Bold,
         )
-        StripIconToggle(
+        StripChannelToggle(
             checked = strip.armed,
-            checkedIcon = Icons.Filled.FiberManualRecord,
-            uncheckedIcon = Icons.Filled.FiberManualRecord,
-            tint = MaterialTheme.colorScheme.error,
+            icon = Icons.Filled.FiberManualRecord,
+            activeColor = RecordRed,
+            iconTintWhenOff = RecordRed,
             contentDescription = "Arm",
-            onClick = { onArm(strip.index) },
+            size = buttonSize,
+            onClick = onArm,
         )
-        StripIconToggle(
+        StripChannelToggle(
             checked = strip.monitoring,
-            checkedIcon = Icons.Filled.Headphones,
-            uncheckedIcon = Icons.Filled.Headphones,
-            tint = MaterialTheme.colorScheme.primary,
+            icon = Icons.Filled.Headphones,
+            activeColor = MonitorBlue,
+            iconTintWhenOff = MaterialTheme.colorScheme.onSurfaceVariant,
             contentDescription = "Monitor",
-            onClick = { onMonitor(strip.index) },
+            size = buttonSize,
+            onClick = onMonitor,
         )
-        StripIconToggle(
+        StripChannelToggle(
             checked = strip.solo,
-            checkedIcon = Icons.Filled.VolumeUp,
-            uncheckedIcon = Icons.Filled.VolumeUp,
-            tint = MaterialTheme.colorScheme.tertiary,
+            icon = Icons.Filled.VolumeUp,
+            activeColor = SoloAmber,
+            iconTintWhenOff = MaterialTheme.colorScheme.onSurfaceVariant,
             contentDescription = "Solo",
-            onClick = { onSolo(strip.index) },
+            size = buttonSize,
+            onClick = onSolo,
         )
-        WaveformPlaceholder(
-            modifier = Modifier.weight(1f).height(28.dp),
+        WaveformView(
+            peaks = peaks,
             color = Color(strip.colorArgb),
+            normalized = normalized,
+            modifier = Modifier
+                .weight(1f)
+                .height(stripHeight - innerPad * 2)
+                .clip(RoundedCornerShape(3.dp))
+                .background(MaterialTheme.colorScheme.surface),
         )
     }
 }
 
 @Composable
-private fun StripIconToggle(
+private fun StripChannelToggle(
     checked: Boolean,
-    checkedIcon: androidx.compose.ui.graphics.vector.ImageVector,
-    uncheckedIcon: androidx.compose.ui.graphics.vector.ImageVector,
-    tint: Color,
+    icon: ImageVector,
+    activeColor: Color,
+    iconTintWhenOff: Color,
     contentDescription: String,
+    size: Dp,
     onClick: () -> Unit,
 ) {
-    FilledIconToggleButton(
-        checked = checked,
-        onCheckedChange = { onClick() },
-        modifier = Modifier.size(30.dp),
+    val bg = if (checked) activeColor else MaterialTheme.colorScheme.surface
+    val border = if (checked) activeColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+    val iconTint = when {
+        checked && icon == Icons.Filled.FiberManualRecord -> Color.White
+        checked -> Color.White
+        else -> iconTintWhenOff
+    }
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = bg,
+        border = BorderStroke(1.dp, border),
+        modifier = Modifier.size(size),
     ) {
-        Icon(
-            imageVector = if (checked) checkedIcon else uncheckedIcon,
-            contentDescription = contentDescription,
-            modifier = Modifier.size(16.dp),
-            tint = if (checked) tint else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                modifier = Modifier.size((size.value * 0.48f).coerceIn(14f, 24f).dp),
+                tint = iconTint,
+            )
+        }
     }
 }
 
 @Composable
-private fun WaveformPlaceholder(modifier: Modifier, color: Color) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(3.dp))
-            .background(MaterialTheme.colorScheme.surface),
-    ) {
-        Text("〜", modifier = Modifier.align(Alignment.Center), fontSize = 10.sp, color = color.copy(alpha = 0.5f))
+private fun WaveformView(
+    peaks: FloatArray?,
+    color: Color,
+    normalized: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val data = peaks
+    if (data == null || data.isEmpty()) {
+        Box(modifier = modifier)
+        return
+    }
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        if (w <= 0f || h <= 0f) return@Canvas
+        val mid = h / 2f
+        val step = w / data.size.coerceAtLeast(1)
+        val stroke = (step * 0.7f).coerceAtLeast(1f)
+        data.forEachIndexed { i, peak ->
+            val amp = peak.coerceIn(0f, 1f)
+            val barH = amp * h * 0.92f
+            drawLine(
+                color = color.copy(alpha = 0.85f),
+                start = Offset(i * step + step / 2f, mid - barH / 2f),
+                end = Offset(i * step + step / 2f, mid + barH / 2f),
+                strokeWidth = stroke,
+            )
+        }
     }
 }
 

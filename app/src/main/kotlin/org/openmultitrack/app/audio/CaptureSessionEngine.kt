@@ -48,6 +48,7 @@ class CaptureSessionEngine {
     private var fanoutJob: Job? = null
     private var activeRoute: CaptureRoute? = null
     private var activeBackend: AudioBackend? = null
+    @Volatile
     private var perChannelWriter: PerChannelWavWriter? = null
     private var legacyWavWriter: WavWriter? = null
     private var sessionDir: File? = null
@@ -69,6 +70,8 @@ class CaptureSessionEngine {
     private val monitorOutputDeviceId = AtomicReference(-1)
     private val monitorOutputRunning = AtomicBoolean(false)
     private var virtualMicOutputRunning = false
+    private val waveformRings = Array<LiveWaveformRing?>(64) { null }
+    private var waveformDecimateCounter = 0
 
     val isCaptureActive: Boolean
         get() = fanoutJob?.isActive == true
@@ -131,6 +134,10 @@ class CaptureSessionEngine {
         channelCount = status.channelCount
         sampleRate = status.sampleRate
         usbDegraded = false
+        clearWaveforms()
+        for (ch in 0 until channelCount) {
+            waveformRings[ch] = LiveWaveformRing.forWindow(sampleRate, RECORD_WAVEFORM_WINDOW_SEC)
+        }
         startFanoutLoop(scope, route.backend)
         Result.success(Unit)
     }
@@ -187,10 +194,12 @@ class CaptureSessionEngine {
     suspend fun stopRecording(): RecordingSession? = lifecycleMutex.withLock {
         val dir = sessionDir
         val config = recordingConfig
-        perChannelWriter?.close()
+        val writer = perChannelWriter
         perChannelWriter = null
-        legacyWavWriter?.close()
+        writer?.close()
+        val legacy = legacyWavWriter
         legacyWavWriter = null
+        legacy?.close()
         recordingConfig = null
         sessionDir = null
 
@@ -213,16 +222,34 @@ class CaptureSessionEngine {
     }
 
     suspend fun stopCapture() = lifecycleMutex.withLock {
-        perChannelWriter?.close()
+        val writer = perChannelWriter
         perChannelWriter = null
-        legacyWavWriter?.close()
+        writer?.close()
+        val legacy = legacyWavWriter
         legacyWavWriter = null
+        legacy?.close()
         sessionDir = null
         recordingConfig = null
         stopCaptureInternalLocked()
     }
 
     fun droppedFrameCount(): Long = droppedFrames
+
+    fun waveformSnapshots(normalize: Boolean): Map<Int, FloatArray> {
+        val out = LinkedHashMap<Int, FloatArray>()
+        for (ch in 0 until channelCount) {
+            waveformRings[ch]?.let { ring ->
+                val snap = ring.snapshot(normalize)
+                if (snap.isNotEmpty()) out[ch] = snap
+            }
+        }
+        return out
+    }
+
+    fun clearWaveforms() {
+        for (i in waveformRings.indices) waveformRings[i] = null
+        waveformDecimateCounter = 0
+    }
 
     private fun needsCapture(): Boolean {
         val monitor = monitorConfig.get()
@@ -277,9 +304,7 @@ class CaptureSessionEngine {
                     if (frames <= 0) {
                         consecutiveEmptyReads++
                         if (isRecording && (usbDegraded || consecutiveEmptyReads > 3)) {
-                            val silenceFrames = minOf(256, framesPerChunk)
-                            perChannelWriter?.writeSilence(silenceFrames)
-                            framesWritten += silenceFrames
+                            writeRecordingSilence(minOf(256, framesPerChunk))
                         }
                         Thread.sleep(2)
                         continue
@@ -287,9 +312,9 @@ class CaptureSessionEngine {
                     consecutiveEmptyReads = 0
                     droppedFrames = AudioEngineRouter.recordingDroppedFrames(backend)
 
-                    perChannelWriter?.writeInterleavedMultiChannel(scratch, frames, channelCount)?.also {
-                        framesWritten += frames
-                    }
+                    pushWaveformPeaks(scratch, frames, channelCount)
+
+                    writeRecordingFrames(scratch, frames, channelCount)
 
                     val monitor = monitorConfig.get()
                     if (monitor.enabled && MonitorMixer.effectiveMonitorChannels(monitor).isNotEmpty()) {
@@ -332,6 +357,42 @@ class CaptureSessionEngine {
         }
     }
 
+    private fun writeRecordingFrames(scratch: FloatArray, frames: Int, channels: Int) {
+        val writer = perChannelWriter ?: return
+        if (!isRecording) return
+        try {
+            writer.writeInterleavedMultiChannel(scratch, frames, channels)
+            framesWritten += frames
+        } catch (_: IllegalStateException) {
+            // stopRecording closed the writer while this chunk was in flight
+        }
+    }
+
+    private fun writeRecordingSilence(frames: Int) {
+        val writer = perChannelWriter ?: return
+        if (!isRecording) return
+        try {
+            writer.writeSilence(frames)
+            framesWritten += frames
+        } catch (_: IllegalStateException) {
+            // writer closed during stop
+        }
+    }
+
+    private fun pushWaveformPeaks(scratch: FloatArray, frames: Int, channels: Int) {
+        waveformDecimateCounter++
+        if (waveformDecimateCounter < WAVEFORM_DECIMATE_CHUNKS) return
+        waveformDecimateCounter = 0
+        for (ch in 0 until channels) {
+            var peak = 0f
+            for (frame in 0 until frames) {
+                val sample = scratch[frame * channels + ch]
+                peak = maxOf(peak, kotlin.math.abs(sample))
+            }
+            waveformRings[ch]?.pushPeak(peak)
+        }
+    }
+
     private fun ensureMonitorOutput(deviceId: Int) {
         if (deviceId < 0) return
         val prevId = monitorOutputDeviceId.get()
@@ -344,6 +405,11 @@ class CaptureSessionEngine {
         } else {
             OmtLog.e("CaptureSession", "monitor failed: ${status.errorMessage}")
         }
+    }
+
+    private companion object {
+        const val WAVEFORM_DECIMATE_CHUNKS = 4
+        const val RECORD_WAVEFORM_WINDOW_SEC = 15f
     }
 
     private fun ensureVirtualMicOutput(config: VirtualMicConfig) {

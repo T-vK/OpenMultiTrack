@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -59,6 +60,7 @@ data class MixerSessionUiState(
     val monitorOutputDeviceId: Int = -1,
     val captureChannelCount: Int = 0,
     val recordElapsedSec: Float = 0f,
+    val waveformPeaks: Map<Int, FloatArray> = emptyMap(),
 )
 
 class MixerSessionController(
@@ -77,6 +79,7 @@ class MixerSessionController(
     private var activeDescriptor: UsbAudioDeviceDescriptor? = null
     private var loopbackPlaybackId: Int? = null
     private var usbDetachJob: Job? = null
+    private var waveformJob: Job? = null
     private var profile: MixerProfile? = null
 
     private val storageRoot: File
@@ -150,6 +153,7 @@ class MixerSessionController(
                     ensureCapture(descriptor, probe).getOrThrow()
                 }
                 applyMonitorRouting(enabled = true)
+                startWaveformUpdates()
                 _state.update {
                     it.copy(
                         isMonitoring = true,
@@ -164,6 +168,7 @@ class MixerSessionController(
     fun stopMonitoring() {
         captureEngine.updateMonitor(MonitorMixConfig(enabled = false))
         _state.update { it.copy(isMonitoring = false, statusMessage = "Monitor off") }
+        stopWaveformUpdatesIfIdle()
         releaseCaptureIfIdle()
     }
 
@@ -188,6 +193,7 @@ class MixerSessionController(
                         ).getOrThrow()
                     }
                 }
+                startWaveformUpdates()
                 _state.update {
                     it.copy(
                         isRecording = true,
@@ -216,6 +222,7 @@ class MixerSessionController(
                     statusMessage = session?.let { s -> "Saved → ${s.filePath}" } ?: "Stopped",
                 )
             }
+            stopWaveformUpdatesIfIdle()
             releaseCaptureIfIdle()
         }
     }
@@ -279,6 +286,8 @@ class MixerSessionController(
     }
 
     fun shutdown() {
+        waveformJob?.cancel()
+        waveformJob = null
         scope.launch {
             captureMutex.withLock {
                 withContext(Dispatchers.IO) { captureEngine.stopCapture() }
@@ -286,6 +295,28 @@ class MixerSessionController(
             player.stop()
             usbStream?.close()
             usbStream = null
+        }
+    }
+
+    private fun startWaveformUpdates() {
+        if (waveformJob?.isActive == true) return
+        waveformJob = scope.launch {
+            while (isActive) {
+                if (captureEngine.isCaptureActive) {
+                    val peaks = captureEngine.waveformSnapshots(settings.waveformNormalized)
+                    _state.update { it.copy(waveformPeaks = peaks) }
+                }
+                delay(50)
+            }
+        }
+    }
+
+    private fun stopWaveformUpdatesIfIdle() {
+        if (!_state.value.isMonitoring && !_state.value.isRecording) {
+            waveformJob?.cancel()
+            waveformJob = null
+            captureEngine.clearWaveforms()
+            _state.update { it.copy(waveformPeaks = emptyMap()) }
         }
     }
 
