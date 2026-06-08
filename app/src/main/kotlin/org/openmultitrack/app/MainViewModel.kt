@@ -21,6 +21,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.data.MixerDeviceStore
+import org.openmultitrack.app.data.ScribbleStripCache
 import org.openmultitrack.app.service.AudioSessionClient
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.app.util.AppLogBuffer
@@ -71,6 +72,7 @@ class MainViewModel(
     private val enumerator: UsbAudioEnumerator,
     private val probeService: UsbAudioProbeService,
     private val mixerStore: MixerDeviceStore,
+    private val scribbleStripCache: ScribbleStripCache,
     private val settings: AppSettingsStore,
     private val sessionClient: AudioSessionClient,
 ) : ViewModel() {
@@ -173,6 +175,7 @@ class MainViewModel(
     fun removeMixer(id: String) {
         val removed = _uiState.value.mixers.firstOrNull { it.id == id } ?: return
         mixerStore.removeMixer(id)
+        scribbleStripCache.delete(id)
         observedMixerIds.remove(id)
         sessionClient.withManager { it.unregisterMixer(id) }
         loadMixers()
@@ -194,7 +197,7 @@ class MainViewModel(
     fun setActiveMixer(id: String) {
         sessionClient.withManager { it.setActiveMixer(id) }
         _uiState.update { it.copy(activeMixerId = id) }
-        maybeAutoImportFlow8Scribble(id)
+        onFlow8MixerReady(id)
     }
 
     fun setAppMode(mixerId: String, mode: AppMode) {
@@ -408,6 +411,7 @@ class MainViewModel(
                 sessionClient.withManager { mgr ->
                     mgr.getOrCreate(profile.id).applyScribbleLabels(labels)
                 }
+                scribbleStripCache.save(profile.id, labels)
                 val saved = updatedProfile.copy(scribbleImported = true)
                 mixerStore.saveMixer(saved)
                 loadMixers()
@@ -541,24 +545,44 @@ class MainViewModel(
                 supportsFlow8Scribble(resolvedProfile) &&
                 resolvedProfile.id == _uiState.value.activeMixerId
             ) {
-                maybeAutoImportFlow8Scribble(resolvedProfile.id)
+                onFlow8MixerReady(resolvedProfile.id)
             }
         }
     }
 
-    private fun maybeAutoImportFlow8Scribble(mixerId: String) {
+    private fun onFlow8MixerReady(mixerId: String) {
         val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
         if (!supportsFlow8Scribble(profile)) return
-        if (profile.scribbleImported) return
-        if (IncompleteRecordingStore.hasIncompleteRecording(appContext, settings, mixerId)) {
-            AppLogBuffer.append("I", "Scribble", "Skipped FLOW 8 auto-import — incomplete recording to resume")
-            return
-        }
         val session = _uiState.value.sessionByMixer[mixerId]
         if (session == null || session.probing || session.probe == null) {
             OmtLog.d("ViewModel", "defer FLOW 8 scribble until probe completes for ${profile.displayName}")
             return
         }
+        if (scribbleStripCache.hasCache(mixerId)) {
+            applyCachedScribble(mixerId)
+            return
+        }
+        maybeAutoImportFlow8Scribble(mixerId)
+    }
+
+    private fun applyCachedScribble(mixerId: String) {
+        val labels = scribbleStripCache.load(mixerId) ?: return
+        sessionClient.withManager { mgr ->
+            mgr.getOrCreate(mixerId).applyScribbleLabels(labels)
+        }
+        OmtLog.i("ViewModel", "applied cached FLOW 8 scribble ($mixerId, ${labels.size} channels)")
+        AppLogBuffer.append("I", "Scribble", "Loaded cached strip labels (${labels.size} channels)")
+    }
+
+    private fun maybeAutoImportFlow8Scribble(mixerId: String) {
+        val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
+        if (!supportsFlow8Scribble(profile)) return
+        if (scribbleStripCache.hasCache(mixerId)) return
+        if (IncompleteRecordingStore.hasIncompleteRecording(appContext, settings, mixerId)) {
+            AppLogBuffer.append("I", "Scribble", "Skipped FLOW 8 auto-import — incomplete recording to resume")
+            return
+        }
+        val session = _uiState.value.sessionByMixer[mixerId] ?: return
         if (!canAutoImportScribble(session)) {
             OmtLog.i("ViewModel", "skipped FLOW 8 auto-import — mixer is recording or soundchecking")
             return
@@ -664,6 +688,7 @@ class MainViewModel(
                         enumerator,
                         UsbAudioProbeService(enumerator),
                         MixerDeviceStore(appContext),
+                        ScribbleStripCache(appContext),
                         AppSettingsStore(appContext),
                         AudioSessionClient(appContext),
                     ) as T
