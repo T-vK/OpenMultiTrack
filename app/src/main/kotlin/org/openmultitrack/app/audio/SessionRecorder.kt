@@ -37,14 +37,14 @@ class SessionRecorder {
         usbDevice: UsbDevice? = null,
     ): Result<RecordingSession> {
         writerJob?.cancel()
-        AudioEngineRouter.stopRecording()
+        activeBackend?.let { AudioEngineRouter.stopRecording(it, SESSION_OWNER_ID) }
         activeBackend = route.backend
 
         OmtLog.i(
             "Recorder",
             "start backend=${route.backend} channels=${route.channelCount} sampleRate=${route.sampleRate}",
         )
-        val status = AudioEngineRouter.startRecording(route, usbDevice)
+        val status = AudioEngineRouter.startRecording(route, SESSION_OWNER_ID, usbDevice)
         if (!status.active) {
             OmtLog.e("Recorder", "native start failed: ${status.errorMessage}")
             activeBackend = null
@@ -131,7 +131,7 @@ class SessionRecorder {
         OmtLog.i("Recorder", "stop requested framesWritten=$framesWritten")
         writerJob?.cancelAndJoin()
         writerJob = null
-        AudioEngineRouter.stopRecording()
+        activeBackend?.let { AudioEngineRouter.stopRecording(it, SESSION_OWNER_ID) }
         activeBackend = null
         val file = outputFile ?: return null
         OmtLog.i(
@@ -149,6 +149,8 @@ class SessionRecorder {
     fun droppedFrameCount(): Long = droppedFrames
 
     companion object {
+        private const val SESSION_OWNER_ID = "legacy-session-recorder"
+
         /** Keep writer buffer under ~512 KiB of floats regardless of channel count. */
         fun chunkFramesForChannels(channelCount: Int): Int {
             val targetSamples = 131_072

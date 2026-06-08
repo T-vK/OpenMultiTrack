@@ -155,23 +155,18 @@ object AudioEngineRouter {
         return null
     }
 
-    fun startRecording(route: CaptureRoute, usbDevice: android.hardware.usb.UsbDevice? = null): NativeEngineStatus {
-        stopRecording()
-        return when (route.backend) {
-            AudioBackend.OBOE ->
-                NativeAudioEngine.startRecording(route.oboeDeviceId, route.channelCount, route.sampleRate)
-            AudioBackend.UAC2 -> {
-                val stream = route.usbStream ?: return failed("missing usb stream")
-                val alt = route.uac2Alt ?: return failed("missing uac2 alt")
-                val javaClaimed = claimUac2Interface(stream, usbDevice, alt)
-                NativeUac2Engine.startCapture(stream.fd, alt, javaClaimed)
-            }
-        }
+    fun startRecording(
+        route: CaptureRoute,
+        ownerId: String,
+        usbDevice: android.hardware.usb.UsbDevice? = null,
+    ): NativeEngineStatus = NativeAudioCaptureRegistry.start(ownerId, route, usbDevice)
+
+    fun stopRecording(backend: AudioBackend, ownerId: String) {
+        NativeAudioCaptureRegistry.release(backend, ownerId)
     }
 
-    fun stopRecording() {
-        NativeAudioEngine.stopRecording()
-        NativeUac2Engine.stopCapture()
+    fun stopAllRecording() {
+        NativeAudioCaptureRegistry.releaseAll()
     }
 
     fun readRecordedFrames(dest: FloatArray, maxFrames: Int, backend: AudioBackend): Int =
@@ -220,7 +215,7 @@ object AudioEngineRouter {
     private fun claimUac2Interface(
         stream: UsbAudioStreamHandle,
         usbDevice: android.hardware.usb.UsbDevice?,
-        alt: org.openmultitrack.audio.NativeUac2AltSetting,
+        alt: NativeUac2AltSetting,
     ): Boolean {
         if (usbDevice == null) return false
         val ok = stream.claimInterface(

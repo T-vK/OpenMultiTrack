@@ -28,7 +28,9 @@ import java.util.concurrent.atomic.AtomicReference
 /**
  * Single USB capture stream shared by recording, live monitor, and optional root virtual mic.
  */
-class CaptureSessionEngine {
+class CaptureSessionEngine(
+    private val ownerId: String,
+) {
     data class VirtualMicConfig(
         val enabled: Boolean,
         val selectedChannels: Set<Int>,
@@ -146,7 +148,7 @@ class CaptureSessionEngine {
         activeRoute = route
 
         OmtLog.i("CaptureSession", "startCapture backend=${route.backend} ch=${route.channelCount}")
-        val status = AudioEngineRouter.startRecording(route, usbDevice)
+        val status = AudioEngineRouter.startRecording(route, ownerId, usbDevice)
         if (!status.active) {
             activeBackend = null
             activeRoute = null
@@ -316,12 +318,17 @@ class CaptureSessionEngine {
     }
 
     private suspend fun stopCaptureInternalLocked() {
+        val backend = activeBackend
         fanoutJob?.cancelAndJoin()
         fanoutJob = null
         stopMonitorOutput()
-        NativeAudioEngine.stopPlayback()
-        virtualMicOutputRunning = false
-        AudioEngineRouter.stopRecording()
+        if (virtualMicOutputRunning) {
+            NativeAudioEngine.stopPlayback()
+            virtualMicOutputRunning = false
+        }
+        if (backend != null) {
+            AudioEngineRouter.stopRecording(backend, ownerId)
+        }
         activeBackend = null
         activeRoute = null
     }

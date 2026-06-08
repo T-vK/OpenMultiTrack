@@ -75,7 +75,7 @@ class MixerSessionController(
     private val settings: AppSettingsStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val captureEngine = CaptureSessionEngine()
+    private val captureEngine = CaptureSessionEngine(mixerId)
     private val player = SessionPlayer()
     private val captureMutex = Mutex()
     private var usbStream: UsbAudioStreamHandle? = null
@@ -325,7 +325,7 @@ class MixerSessionController(
 
     fun onUsbDetached(deviceName: String?) {
         val desc = activeDescriptor ?: return
-        if (deviceName != null && deviceName != desc.deviceName) return
+        if (deviceName == null || deviceName != desc.deviceName) return
         usbDetachJob?.cancel()
         captureEngine.setUsbDegraded(true)
         _state.update {
@@ -340,7 +340,7 @@ class MixerSessionController(
             withContext(Dispatchers.IO) {
                 if (_state.value.isUsbDegraded) {
                     captureMutex.withLock {
-                        if (!_state.value.isRecording) {
+                        if (!_state.value.isRecording && captureEngine.isCaptureActive) {
                             captureEngine.stopCapture()
                         }
                         usbStream?.close()

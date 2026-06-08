@@ -52,6 +52,7 @@ class MultiMixerSessionManager(
     }
 
     fun onUsbDetached(deviceName: String?) {
+        if (deviceName == null) return
         controllers.values.forEach { it.onUsbDetached(deviceName) }
     }
 
@@ -62,5 +63,6 @@ class MultiMixerSessionManager(
     fun shutdownAll() {
         controllers.values.forEach { it.shutdown() }
         controllers.clear()
+        org.openmultitrack.usb.AudioEngineRouter.stopAllRecording()
     }
 }
