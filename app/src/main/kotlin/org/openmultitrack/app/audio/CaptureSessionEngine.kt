@@ -81,6 +81,7 @@ class CaptureSessionEngine(
     private var virtualMicOutputRunning = false
     private val waveformRings = Array<LiveWaveformRing?>(64) { null }
     private val pendingWaveformPeaks = FloatArray(64)
+    private val meterHold = FloatArray(64)
     private var waveformWindowSec = DEFAULT_WAVEFORM_WINDOW_SEC
     private var waveformPeaksPerSecond = DEFAULT_WAVEFORM_PEAKS_PER_SEC
     private var lastWaveformEmitNs = 0L
@@ -287,6 +288,23 @@ class CaptureSessionEngine(
 
     fun droppedFrameCount(): Long = droppedFrames
 
+    /** Live input levels for VU meters while monitoring (no waveform history). */
+    fun captureMeterLevels(): Map<Int, Float> {
+        val out = LinkedHashMap<Int, Float>()
+        for (ch in 0 until channelCount) {
+            val raw = pendingWaveformPeaks[ch]
+            if (raw > 0f) {
+                meterHold[ch] = maxOf(scaleMeterPeak(raw), meterHold[ch])
+                pendingWaveformPeaks[ch] = 0f
+            }
+            meterHold[ch] *= 0.85f
+            if (meterHold[ch] > 1e-4f) {
+                out[ch] = meterHold[ch]
+            }
+        }
+        return out
+    }
+
     fun waveformSnapshots(normalize: Boolean): Map<Int, LiveWaveformSnapshot> {
         val out = LinkedHashMap<Int, LiveWaveformSnapshot>()
         for (ch in 0 until channelCount) {
@@ -300,6 +318,7 @@ class CaptureSessionEngine(
     fun clearWaveforms() {
         for (i in waveformRings.indices) waveformRings[i] = null
         pendingWaveformPeaks.fill(0f)
+        meterHold.fill(0f)
         lastWaveformEmitNs = 0L
     }
 
@@ -516,6 +535,12 @@ class CaptureSessionEngine(
         buildSessionMetadata(config, sampleRate, framesWritten).writeTo(dir)
     }
 
+    private fun scaleMeterPeak(raw: Float): Float {
+        if (raw <= 1e-6f) return 0f
+        val gain = if (raw < 0.15f) 1f / raw else 1f
+        return (raw * gain).coerceIn(0f, 1f)
+    }
+
     private fun accumulateWaveformPeaks(scratch: FloatArray, frames: Int, channels: Int) {
         for (ch in 0 until channels) {
             var peak = 0f
@@ -528,6 +553,7 @@ class CaptureSessionEngine(
     }
 
     private fun maybeEmitWaveformPeaks() {
+        if (!isRecording) return
         val intervalNs = 1_000_000_000L / waveformPeaksPerSecond
         val now = System.nanoTime()
         if (lastWaveformEmitNs != 0L && now - lastWaveformEmitNs < intervalNs) return

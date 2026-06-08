@@ -249,6 +249,9 @@ fun DawMainScreen(
                                 strips = s.channelStrips,
                                 normalized = waveformNormalized,
                                 waveformPeaks = s.waveformPeaks,
+                                captureMeterLevels = s.captureMeterLevels,
+                                isMonitoring = s.isMonitoring,
+                                isRecording = s.isRecording,
                                 showWaveforms = state.showWaveforms,
                                 hideArm = state.hideArmButton,
                                 hideMonitor = state.hideMonitorButton,
@@ -968,6 +971,9 @@ private fun ChannelStripList(
     strips: List<ChannelStripState>,
     normalized: Boolean,
     waveformPeaks: Map<Int, LiveWaveformSnapshot>,
+    captureMeterLevels: Map<Int, Float>,
+    isMonitoring: Boolean,
+    isRecording: Boolean,
     showWaveforms: Boolean,
     hideArm: Boolean,
     hideMonitor: Boolean,
@@ -1041,9 +1047,14 @@ private fun ChannelStripList(
                     innerPad = innerPad,
                     labelFontSize = labelFontSize,
                     labelColumnWidth = labelColumnWidth,
-                    waveform = if (showWaveforms) waveformPeaks[strip.index] else null,
+                    waveform = if (showWaveforms && isRecording) waveformPeaks[strip.index] else null,
+                    captureMeterLevel = if (isMonitoring && !isRecording) {
+                        captureMeterLevels[strip.index] ?: 0f
+                    } else {
+                        null
+                    },
                     normalized = normalized,
-                    showWaveform = showWaveforms,
+                    showWaveform = showWaveforms && isRecording,
                     numberMode = numberMode,
                     iconMode = iconMode,
                     hideArm = hideArm,
@@ -1078,6 +1089,7 @@ private fun ChannelStripRow(
     labelFontSize: Float,
     labelColumnWidth: Dp,
     waveform: LiveWaveformSnapshot?,
+    captureMeterLevel: Float?,
     normalized: Boolean,
     showWaveform: Boolean,
     numberMode: StripNumberMode,
@@ -1110,7 +1122,7 @@ private fun ChannelStripRow(
             onClick = onOpenControls,
         )
         StripVuMeter(
-            level = liveVuLevel(waveform, normalized),
+            level = captureMeterLevel ?: liveVuLevel(waveform, normalized),
             height = colorBarHeight,
         )
         if (showWaveform) {

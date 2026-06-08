@@ -81,6 +81,7 @@ data class MixerSessionUiState(
     val captureChannelCount: Int = 0,
     val recordElapsedSec: Float = 0f,
     val waveformPeaks: Map<Int, LiveWaveformSnapshot> = emptyMap(),
+    val captureMeterLevels: Map<Int, Float> = emptyMap(),
     val soundcheckSessions: List<SoundcheckSessionItem> = emptyList(),
     val selectedSoundcheckDir: String? = null,
     val playbackPositionSec: Float = 0f,
@@ -498,10 +499,12 @@ class MixerSessionController(
                     ensureCapture(descriptor, probe).getOrThrow()
                 }
                 applyMonitorRouting(enabled = true)
-                startWaveformUpdates()
+                startCaptureUiUpdates()
                 _state.update {
                     it.copy(
                         isMonitoring = true,
+                        waveformPeaks = emptyMap(),
+                        recordElapsedSec = 0f,
                         statusMessage = "Monitoring",
                         warningMessage = null,
                     )
@@ -542,7 +545,7 @@ class MixerSessionController(
                         ).getOrThrow()
                     }
                 }
-                startWaveformUpdates()
+                startCaptureUiUpdates()
                 val sessionDir = captureEngine.activeSessionDir
                 if (sessionDir != null) {
                     settings.setActiveRecording(prof.id, sessionDir.absolutePath)
@@ -583,7 +586,7 @@ class MixerSessionController(
                         captureEngine.resumeRecording(sessionDir).getOrThrow()
                     }
                 }
-                startWaveformUpdates()
+                startCaptureUiUpdates()
                 settings.setActiveRecording(
                     meta.mixerId.takeIf { it.isNotBlank() } ?: profile?.id ?: mixerId,
                     sessionDir.absolutePath,
@@ -910,16 +913,37 @@ class MixerSessionController(
         playbackStatusJob = null
     }
 
-    private fun startWaveformUpdates() {
+    private fun startCaptureUiUpdates() {
         waveformJob?.cancel()
         waveformJob = scope.launch {
             while (isActive) {
                 if (captureEngine.isCaptureActive) {
-                    val peaks = captureEngine.waveformSnapshots(normalize = true)
-                    val elapsed = if (_state.value.isRecording) captureEngine.recordElapsedSec() else 0f
-                    _state.update { it.copy(waveformPeaks = peaks, recordElapsedSec = elapsed) }
+                    val recording = _state.value.isRecording
+                    val monitoring = _state.value.isMonitoring
+                    when {
+                        recording -> {
+                            val peaks = captureEngine.waveformSnapshots(normalize = true)
+                            _state.update {
+                                it.copy(
+                                    waveformPeaks = peaks,
+                                    recordElapsedSec = captureEngine.recordElapsedSec(),
+                                    captureMeterLevels = emptyMap(),
+                                )
+                            }
+                        }
+                        monitoring -> {
+                            val levels = captureEngine.captureMeterLevels()
+                            _state.update {
+                                it.copy(
+                                    captureMeterLevels = levels,
+                                    waveformPeaks = emptyMap(),
+                                    recordElapsedSec = 0f,
+                                )
+                            }
+                        }
+                    }
                 }
-                delay(40)
+                delay(if (_state.value.isRecording) 40 else 80)
             }
         }
     }
@@ -963,7 +987,7 @@ class MixerSessionController(
             waveformJob?.cancel()
             waveformJob = null
             captureEngine.clearWaveforms()
-            _state.update { it.copy(waveformPeaks = emptyMap()) }
+            _state.update { it.copy(waveformPeaks = emptyMap(), captureMeterLevels = emptyMap()) }
         }
     }
 
