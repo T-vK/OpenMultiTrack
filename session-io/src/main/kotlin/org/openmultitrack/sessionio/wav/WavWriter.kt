@@ -12,21 +12,40 @@ import kotlin.math.min
  * Streaming PCM WAV writer (24-bit integer, interleaved).
  * Header is finalized on [close].
  */
-class WavWriter(
+class WavWriter private constructor(
     private val file: File,
     private val channelCount: Int,
     private val sampleRate: Int,
+    append: Boolean,
 ) : AutoCloseable {
     private val raf = RandomAccessFile(file, "rw")
     private var dataBytesWritten: Long = 0
     private var closed = false
+
+    constructor(
+        file: File,
+        channelCount: Int,
+        sampleRate: Int,
+    ) : this(file, channelCount, sampleRate, append = false)
 
     init {
         require(channelCount in AudioConstants.MIN_CHANNELS..AudioConstants.MAX_CHANNELS) {
             "channelCount out of range: $channelCount"
         }
         require(sampleRate > 0) { "sampleRate must be positive" }
-        writePlaceholderHeader()
+        if (append) {
+            val format = WavReader.parseHeader(file)
+            require(format.channelCount == channelCount) {
+                "channelCount mismatch: file=${format.channelCount} expected=$channelCount"
+            }
+            require(format.sampleRate == sampleRate) {
+                "sampleRate mismatch: file=${format.sampleRate} expected=$sampleRate"
+            }
+            dataBytesWritten = format.dataSize
+            raf.seek(format.dataOffset + format.dataSize)
+        } else {
+            writePlaceholderHeader()
+        }
     }
 
     fun writeInterleavedFloat(samples: FloatArray, frames: Int) {
@@ -85,5 +104,9 @@ class WavWriter(
 
     companion object {
         private const val RIFF_HEADER_SIZE = 44
+
+        /** Reopen an existing WAV and append PCM after any data already on disk. */
+        fun openForAppend(file: File, channelCount: Int, sampleRate: Int): WavWriter =
+            WavWriter(file, channelCount, sampleRate, append = true)
     }
 }

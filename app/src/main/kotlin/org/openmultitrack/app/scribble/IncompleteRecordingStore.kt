@@ -10,6 +10,13 @@ object IncompleteRecordingStore {
     fun hasIncompleteRecording(context: Context, settings: AppSettingsStore, mixerId: String): Boolean =
         findIncompleteSessions(context, settings, mixerId).isNotEmpty()
 
+    fun latestIncompleteSession(
+        context: Context,
+        settings: AppSettingsStore,
+        mixerId: String,
+    ): File? = findIncompleteSessions(context, settings, mixerId)
+        .maxByOrNull { SessionMetadata.read(it)?.startedAtEpochMs ?: 0L }
+
     fun findIncompleteSessions(
         context: Context,
         settings: AppSettingsStore,

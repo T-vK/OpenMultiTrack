@@ -65,6 +65,11 @@ class CaptureSessionEngine {
     @Volatile
     private var usbDegraded: Boolean = false
 
+    /** Wall-clock origin for the session timeline (persists across resume). */
+    private var recordingStartedAtEpochMs: Long? = null
+
+    private var lastMetadataPersistFrames: Long = 0
+
     private val monitorConfig = AtomicReference(MonitorMixConfig())
     private val virtualMicConfig = AtomicReference<VirtualMicConfig?>(null)
     private val monitorOutputDeviceId = AtomicReference(-1)
@@ -87,6 +92,9 @@ class CaptureSessionEngine {
 
     val isUsbDegraded: Boolean
         get() = usbDegraded
+
+    fun recordElapsedSec(): Float =
+        if (sampleRate > 0) framesWritten.toFloat() / sampleRate else 0f
 
     fun updateMonitor(config: MonitorMixConfig) {
         val prev = monitorConfig.getAndSet(config)
@@ -166,31 +174,13 @@ class CaptureSessionEngine {
         sessionDir = dir
         recordingConfig = config
         framesWritten = 0
+        recordingStartedAtEpochMs = System.currentTimeMillis()
+        lastMetadataPersistFrames = 0
 
         val writer = PerChannelWavWriter(dir, config.channelStrips, sampleRate)
         perChannelWriter = writer
 
-        SessionMetadata(
-            mixerId = config.mixerId,
-            mixerFolderName = config.mixerFolderName,
-            customTitle = config.customTitle,
-            sampleRate = sampleRate,
-            format = org.openmultitrack.domain.session.SessionFormat.PER_CHANNEL_WAV,
-            channels = config.channelStrips.filter { it.armed }.map { strip ->
-                org.openmultitrack.sessionio.session.ChannelMetadata(
-                    index = strip.index,
-                    fileName = org.openmultitrack.sessionio.session.ChannelFileNaming.fileName(
-                        strip.index,
-                        strip.label,
-                    ),
-                    displayName = org.openmultitrack.sessionio.session.ChannelFileNaming.displayName(
-                        strip.index,
-                        strip.label,
-                    ),
-                    colorArgb = strip.colorArgb,
-                )
-            },
-        ).writeTo(dir)
+        buildSessionMetadata(config, sampleRate, framesWritten).writeTo(dir)
 
         val armedCount = config.channelStrips.count { it.armed }
         Result.success(
@@ -199,6 +189,48 @@ class CaptureSessionEngine {
                 channelCount = armedCount,
                 sampleRate = sampleRate,
                 framesRecorded = 0,
+            ),
+        )
+    }
+
+    suspend fun resumeRecording(sessionDir: File): Result<RecordingSession> = lifecycleMutex.withLock {
+        if (!isCaptureActive) {
+            return Result.failure(IllegalStateException("Capture not running"))
+        }
+        if (isRecording) {
+            return Result.success(currentRecordingSession())
+        }
+        val meta = SessionMetadata.read(sessionDir)
+            ?: return Result.failure(IllegalStateException("No session metadata"))
+        if (!meta.incomplete) {
+            return Result.failure(IllegalStateException("Session already complete"))
+        }
+
+        val writer = PerChannelWavWriter.openForResume(sessionDir, meta)
+        perChannelWriter = writer
+        this.sessionDir = sessionDir
+        framesWritten = writer.totalFramesWritten()
+        recordingStartedAtEpochMs = meta.startedAtEpochMs
+        lastMetadataPersistFrames = framesWritten
+        sampleRate = meta.sampleRate
+        recordingConfig = RecordingConfig(
+            mixerId = meta.mixerId,
+            mixerFolderName = meta.mixerFolderName,
+            storageRoot = sessionDir.parentFile?.parentFile ?: sessionDir.parentFile ?: sessionDir,
+            channelStrips = writer.channelStrips(),
+            customTitle = meta.customTitle,
+        )
+
+        catchUpTimelineToTarget(maxFramesPerPass = Int.MAX_VALUE / 2)
+        maybePersistTimeline()
+
+        val armedCount = meta.channels.size
+        Result.success(
+            RecordingSession(
+                filePath = sessionDir.absolutePath,
+                channelCount = armedCount,
+                sampleRate = sampleRate,
+                framesRecorded = framesWritten,
             ),
         )
     }
@@ -214,6 +246,8 @@ class CaptureSessionEngine {
         legacy?.close()
         recordingConfig = null
         sessionDir = null
+        recordingStartedAtEpochMs = null
+        lastMetadataPersistFrames = 0
 
         if (dir != null && config != null) {
             SessionMetadata.read(dir)?.markComplete(dir)
@@ -242,6 +276,8 @@ class CaptureSessionEngine {
         legacy?.close()
         sessionDir = null
         recordingConfig = null
+        recordingStartedAtEpochMs = null
+        lastMetadataPersistFrames = 0
         stopCaptureInternalLocked()
     }
 
@@ -327,8 +363,13 @@ class CaptureSessionEngine {
 
                         if (frames <= 0) {
                             consecutiveEmptyReads++
-                            if (isRecording && (usbDegraded || consecutiveEmptyReads > 3)) {
-                                writeRecordingSilence(minOf(256, framesPerChunk))
+                            if (isRecording) {
+                                val advanced = catchUpTimelineToTarget(
+                                    maxFramesPerPass = if (usbDegraded) 65_536 else 8_192,
+                                )
+                                if (advanced > 0 && (usbDegraded || consecutiveEmptyReads > 1)) {
+                                    continue
+                                }
                             }
                             Thread.sleep(2)
                             continue
@@ -339,7 +380,9 @@ class CaptureSessionEngine {
                         accumulateWaveformPeaks(scratch, frames, channelCount)
                         maybeEmitWaveformPeaks()
 
+                        catchUpTimelineToTarget(maxFramesPerPass = 4_096)
                         writeRecordingFrames(scratch, frames, channelCount)
+                        maybePersistTimeline()
 
                         val monitor = monitorConfig.get()
                         if (monitor.enabled && MonitorMixer.effectiveMonitorChannels(monitor).isNotEmpty()) {
@@ -391,23 +434,77 @@ class CaptureSessionEngine {
     private fun writeRecordingFrames(scratch: FloatArray, frames: Int, channels: Int) {
         val writer = perChannelWriter ?: return
         if (!isRecording) return
+        val maxFrames = (sessionTargetFrames() - framesWritten).coerceAtLeast(0)
+        val toWrite = minOf(frames.toLong(), maxFrames).toInt()
+        if (toWrite <= 0) return
         try {
-            writer.writeInterleavedMultiChannel(scratch, frames, channels)
-            framesWritten += frames
+            writer.writeInterleavedMultiChannel(scratch, toWrite, channels)
+            framesWritten += toWrite
         } catch (_: IllegalStateException) {
             // stopRecording closed the writer while this chunk was in flight
         }
     }
 
-    private fun writeRecordingSilence(frames: Int) {
-        val writer = perChannelWriter ?: return
-        if (!isRecording) return
+    private fun sessionTargetFrames(): Long {
+        val started = recordingStartedAtEpochMs ?: return framesWritten
+        val elapsedMs = (System.currentTimeMillis() - started).coerceAtLeast(0)
+        return elapsedMs * sampleRate / 1_000L
+    }
+
+    /** Inserts silence so [framesWritten] matches the wall-clock session timeline. */
+    private fun catchUpTimelineToTarget(maxFramesPerPass: Int): Int {
+        val writer = perChannelWriter ?: return 0
+        if (!isRecording) return 0
+        var written = 0
         try {
-            writer.writeSilence(frames)
-            framesWritten += frames
+            var gap = sessionTargetFrames() - framesWritten
+            while (gap > 0 && written < maxFramesPerPass) {
+                val chunk = minOf(gap, (maxFramesPerPass - written).toLong(), 8_192L).toInt()
+                writer.writeSilence(chunk)
+                framesWritten += chunk
+                written += chunk
+                gap -= chunk
+            }
         } catch (_: IllegalStateException) {
             // writer closed during stop
         }
+        return written
+    }
+
+    private fun buildSessionMetadata(
+        config: RecordingConfig,
+        rate: Int,
+        timelineFrames: Long,
+    ): SessionMetadata = SessionMetadata(
+        mixerId = config.mixerId,
+        mixerFolderName = config.mixerFolderName,
+        customTitle = config.customTitle,
+        sampleRate = rate,
+        format = org.openmultitrack.domain.session.SessionFormat.PER_CHANNEL_WAV,
+        startedAtEpochMs = recordingStartedAtEpochMs ?: System.currentTimeMillis(),
+        timelineFramesWritten = timelineFrames,
+        channels = config.channelStrips.filter { it.armed }.map { strip ->
+            org.openmultitrack.sessionio.session.ChannelMetadata(
+                index = strip.index,
+                fileName = org.openmultitrack.sessionio.session.ChannelFileNaming.fileName(
+                    strip.index,
+                    strip.label,
+                ),
+                displayName = org.openmultitrack.sessionio.session.ChannelFileNaming.displayName(
+                    strip.index,
+                    strip.label,
+                ),
+                colorArgb = strip.colorArgb,
+            )
+        },
+    )
+
+    private fun maybePersistTimeline() {
+        val dir = sessionDir ?: return
+        val config = recordingConfig ?: return
+        if (framesWritten - lastMetadataPersistFrames < sampleRate / 2) return
+        lastMetadataPersistFrames = framesWritten
+        buildSessionMetadata(config, sampleRate, framesWritten).writeTo(dir)
     }
 
     private fun accumulateWaveformPeaks(scratch: FloatArray, frames: Int, channels: Int) {

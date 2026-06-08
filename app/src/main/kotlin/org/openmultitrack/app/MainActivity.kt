@@ -139,6 +139,7 @@ class MainActivity : ComponentActivity() {
                         onStripIconModeChange = viewModel::setStripIconMode,
                         onRecordWaveformWindowChange = viewModel::setRecordWaveformWindowSec,
                         onDismissStatusToast = viewModel::dismissStatusToast,
+                        onFinalizeIncompleteRecording = viewModel::finalizeIncompleteRecording,
                     )
                 }
             }

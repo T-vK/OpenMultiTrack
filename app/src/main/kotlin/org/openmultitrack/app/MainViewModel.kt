@@ -57,6 +57,7 @@ private sealed class PendingFlow8Action {
 private sealed class PendingAudioAction {
     data class Record(val mixerId: String) : PendingAudioAction()
     data class Monitor(val mixerId: String) : PendingAudioAction()
+    data class Resume(val mixerId: String, val sessionDir: java.io.File) : PendingAudioAction()
 }
 
 data class DawUiState(
@@ -178,6 +179,10 @@ class MainViewModel(
                 pendingAudioAction = null
                 startMonitorInternal(action.mixerId)
             }
+            is PendingAudioAction.Resume -> {
+                pendingAudioAction = null
+                resumeRecordingInternal(action.mixerId, action.sessionDir)
+            }
         }
     }
 
@@ -214,6 +219,7 @@ class MainViewModel(
         val mixerId = when (action) {
             is PendingAudioAction.Record -> action.mixerId
             is PendingAudioAction.Monitor -> action.mixerId
+            is PendingAudioAction.Resume -> action.mixerId
         }
         showStatus("Allow microphone access to record or monitor.", mixerId)
         return false
@@ -367,6 +373,47 @@ class MainViewModel(
 
     fun stopRecord(mixerId: String) {
         sessionClient.withManager { it.getOrCreate(mixerId).stopRecording() }
+        clearPendingRecordingResumeIfNeeded(mixerId)
+    }
+
+    fun finalizeIncompleteRecording(mixerId: String) {
+        val sessionDir = IncompleteRecordingStore.latestIncompleteSession(appContext, settings, mixerId)
+            ?: return
+        sessionClient.withManager { it.getOrCreate(mixerId).finalizeIncompleteRecording(sessionDir) }
+        _uiState.update { it.copy(pendingRecordingResume = false) }
+        showStatus("Incomplete recording finalized.", mixerId)
+        val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
+        if (supportsOscScribble(profile)) {
+            onOscMixerReady(mixerId)
+        } else if (supportsFlow8Scribble(profile) && mixerId == _uiState.value.activeMixerId) {
+            onFlow8MixerReady(mixerId)
+        }
+    }
+
+    private fun resumeRecordingInternal(mixerId: String, sessionDir: java.io.File) {
+        if (!sessionClient.promoteForeground("Recording resumed")) {
+            showStatus("Could not resume recording — allow microphone permission and try again.", mixerId)
+            return
+        }
+        sessionClient.withManager { it.getOrCreate(mixerId).resumeRecording(sessionDir) }
+        _uiState.update { it.copy(pendingRecordingResume = false) }
+        showStatus("Recording resumed automatically.", mixerId)
+        AppLogBuffer.append("I", "Record", "Resumed incomplete session at ${sessionDir.absolutePath}")
+    }
+
+    private fun maybeAutoResumeRecording(mixerId: String) {
+        val session = _uiState.value.sessionByMixer[mixerId]
+        if (session?.isRecording == true) return
+        val sessionDir = IncompleteRecordingStore.latestIncompleteSession(appContext, settings, mixerId)
+            ?: return
+        if (!ensureAudioPermission(PendingAudioAction.Resume(mixerId, sessionDir))) return
+        resumeRecordingInternal(mixerId, sessionDir)
+    }
+
+    private fun clearPendingRecordingResumeIfNeeded(mixerId: String) {
+        if (!IncompleteRecordingStore.hasIncompleteRecording(appContext, settings, mixerId)) {
+            _uiState.update { it.copy(pendingRecordingResume = false) }
+        }
     }
 
     fun onUsbPermissionGranted(deviceName: String) {
@@ -704,6 +751,7 @@ class MainViewModel(
             _uiState.update { it.copy(pendingRecordingResume = resumePending) }
             if (resumePending) {
                 AppLogBuffer.append("I", "Scribble", "Skipped auto-import — incomplete recording to resume")
+                maybeAutoResumeRecording(resolvedProfile.id)
             } else if (supportsOscScribble(resolvedProfile)) {
                 onOscMixerReady(resolvedProfile.id)
             } else if (

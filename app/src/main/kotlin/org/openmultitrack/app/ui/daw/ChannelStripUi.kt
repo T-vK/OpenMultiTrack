@@ -142,6 +142,7 @@ internal fun StripIdentityCell(
                 .background(Color(strip.colorArgb)),
         )
         if (iconEmoji != null) {
+            Spacer(Modifier.width(colorBarGap))
             ScribbleIconEmoji(emoji = iconEmoji, containerSize = bigIconSize)
             Spacer(Modifier.width(iconGap))
         }
@@ -183,7 +184,7 @@ private fun ScribbleIconEmoji(
         contentAlignment = Alignment.Center,
     ) {
         val fontSize = with(LocalDensity.current) {
-            minOf(maxWidth, maxHeight).times(0.78f).toSp()
+            minOf(maxWidth, maxHeight).times(0.82f).toSp()
         }
         Text(
             text = emoji,

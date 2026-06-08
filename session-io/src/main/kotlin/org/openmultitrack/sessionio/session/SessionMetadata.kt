@@ -19,6 +19,8 @@ data class SessionMetadata(
     val channels: List<ChannelMetadata>,
     val startedAtEpochMs: Long = System.currentTimeMillis(),
     val incomplete: Boolean = true,
+    /** Logical timeline position in frames (includes silence gaps). */
+    val timelineFramesWritten: Long = 0,
 ) {
     fun writeTo(dir: File) {
         File(dir, "session.json").writeText(toJson())
@@ -41,6 +43,7 @@ data class SessionMetadata(
               "format": "${format.name}",
               "startedAtEpochMs": $startedAtEpochMs,
               "incomplete": $incomplete,
+              "timelineFramesWritten": $timelineFramesWritten,
               "channels": [$chJson]
             }
         """.trimIndent()
@@ -60,6 +63,8 @@ data class SessionMetadata(
                 Regex(""""$name"\s*:\s*(\d+)""").find(text)?.groupValues?.get(1)?.toInt() ?: 0
             fun boolField(name: String): Boolean =
                 Regex(""""$name"\s*:\s*(true|false)""").find(text)?.groupValues?.get(1) == "true"
+            fun longField(name: String): Long =
+                Regex(""""$name"\s*:\s*(\d+)""").find(text)?.groupValues?.get(1)?.toLong() ?: 0L
 
             val channels = Regex(""""index"\s*:\s*(\d+).*?"fileName"\s*:\s*"([^"]*)".*?"displayName"\s*:\s*"([^"]*)".*?"colorArgb"\s*:\s*(\d+)""")
                 .findAll(text)
@@ -79,8 +84,9 @@ data class SessionMetadata(
                 sampleRate = intField("sampleRate"),
                 format = SessionFormat.valueOf(field("format") ?: SessionFormat.PER_CHANNEL_WAV.name),
                 channels = channels,
-                startedAtEpochMs = intField("startedAtEpochMs").toLong(),
+                startedAtEpochMs = longField("startedAtEpochMs"),
                 incomplete = boolField("incomplete"),
+                timelineFramesWritten = longField("timelineFramesWritten"),
             )
         }
 

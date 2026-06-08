@@ -126,6 +126,7 @@ fun DawMainScreen(
     onStripIconModeChange: (StripIconMode) -> Unit,
     onRecordWaveformWindowChange: (Float) -> Unit,
     onDismissStatusToast: () -> Unit,
+    onFinalizeIncompleteRecording: (String) -> Unit,
 ) {
     val activeId = state.activeMixerId
     val session = activeId?.let { state.sessionByMixer[it] }
@@ -179,7 +180,11 @@ fun DawMainScreen(
                     EmptyMixersPrompt(onAddMixer = onAddMixer, onRefresh = onRefreshUsb)
                 } else {
                     if (state.pendingRecordingResume) {
-                        WarningBanner("Incomplete recording found — scribble import paused until you resume or finalize.")
+                        IncompleteRecordingBanner(
+                            message = "Interrupted recording detected — resuming automatically. " +
+                                "Silence is inserted for any time not captured.",
+                            onFinalize = activeId?.let { id -> { onFinalizeIncompleteRecording(id) } },
+                        )
                     }
                     session?.warningMessage?.let { WarningBanner(it) }
                     when (session?.appMode) {
@@ -585,6 +590,33 @@ private fun WarningBanner(message: String) {
             color = MaterialTheme.colorScheme.onErrorContainer,
             style = MaterialTheme.typography.bodySmall,
         )
+    }
+}
+
+@Composable
+private fun IncompleteRecordingBanner(
+    message: String,
+    onFinalize: (() -> Unit)?,
+) {
+    Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.errorContainer) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                message,
+                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            onFinalize?.let { finalize ->
+                TextButton(onClick = finalize) {
+                    Text("Finalize")
+                }
+            }
+        }
     }
 }
 

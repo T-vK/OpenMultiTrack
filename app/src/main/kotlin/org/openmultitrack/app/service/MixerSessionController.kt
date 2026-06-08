@@ -34,6 +34,7 @@ import org.openmultitrack.domain.channel.ChannelStripState
 import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.TransportState
+import org.openmultitrack.sessionio.session.SessionMetadata
 import org.openmultitrack.sessionio.wav.WavReader
 import org.openmultitrack.usb.AudioEngineRouter
 import org.openmultitrack.usb.FullUsbProbeResult
@@ -242,6 +243,55 @@ class MixerSessionController(
         }
     }
 
+    fun resumeRecording(sessionDir: File) {
+        val descriptor = activeDescriptor ?: return
+        val probe = activeProbe ?: return
+        scope.launch {
+            try {
+                captureMutex.withLock {
+                    withContext(Dispatchers.IO) {
+                        val meta = SessionMetadata.read(sessionDir)
+                            ?: error("No session metadata in ${sessionDir.absolutePath}")
+                        restoreChannelStripsFromMetadata(meta)
+                        if (!captureEngine.isCaptureActive) {
+                            ensureCapture(descriptor, probe).getOrThrow()
+                        } else {
+                            syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
+                        }
+                        captureEngine.resumeRecording(sessionDir).getOrThrow()
+                    }
+                }
+                startWaveformUpdates()
+                _state.update {
+                    it.copy(
+                        isRecording = true,
+                        transportState = TransportState.RECORDING,
+                        statusMessage = "Recording resumed",
+                        warningMessage = null,
+                        lastRecordingPath = sessionDir.absolutePath,
+                    )
+                }
+            } catch (e: Exception) {
+                OmtLog.e("MixerSession", "resumeRecording failed", e)
+                _state.update { it.copy(statusMessage = e.message) }
+            }
+        }
+    }
+
+    fun finalizeIncompleteRecording(sessionDir: File) {
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                SessionMetadata.read(sessionDir)?.markComplete(sessionDir)
+            }
+            _state.update {
+                it.copy(
+                    statusMessage = "Incomplete session finalized",
+                    warningMessage = null,
+                )
+            }
+        }
+    }
+
     fun stopRecording() {
         scope.launch {
             val session = captureMutex.withLock {
@@ -344,10 +394,32 @@ class MixerSessionController(
             while (isActive) {
                 if (captureEngine.isCaptureActive) {
                     val peaks = captureEngine.waveformSnapshots(normalize = true)
-                    _state.update { it.copy(waveformPeaks = peaks) }
+                    val elapsed = if (_state.value.isRecording) captureEngine.recordElapsedSec() else 0f
+                    _state.update { it.copy(waveformPeaks = peaks, recordElapsedSec = elapsed) }
                 }
                 delay(40)
             }
+        }
+    }
+
+    private fun restoreChannelStripsFromMetadata(meta: SessionMetadata) {
+        val maxIndex = meta.channels.maxOfOrNull { it.index } ?: return
+        val chCount = maxOf(_state.value.captureChannelCount, maxIndex + 1)
+        _state.update { s ->
+            val strips = (0 until chCount).map { i ->
+                val existing = s.channelStrips.getOrNull(i) ?: ChannelStripState(index = i)
+                val metaCh = meta.channels.firstOrNull { it.index == i }
+                if (metaCh != null) {
+                    existing.copy(
+                        displayName = metaCh.displayName,
+                        colorArgb = metaCh.colorArgb,
+                        armed = true,
+                    )
+                } else {
+                    existing.copy(armed = false)
+                }
+            }
+            s.copy(channelStrips = strips, captureChannelCount = chCount)
         }
     }
 

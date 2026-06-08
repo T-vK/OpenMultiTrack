@@ -24,6 +24,28 @@ class WavRoundTripTest {
     }
 
     @Test
+    fun openForAppend_continuesExistingPcm() {
+        val file = File.createTempFile("omt", ".wav")
+        try {
+            WavWriter(file, channelCount = 2, sampleRate = 48_000).use { writer ->
+                writer.writeInterleavedFloat(floatArrayOf(0.5f, -0.5f), frames = 1)
+            }
+            WavWriter.openForAppend(file, channelCount = 2, sampleRate = 48_000).use { writer ->
+                writer.writeInterleavedFloat(floatArrayOf(-0.25f, 0.25f), frames = 1)
+            }
+            WavReader(file).use { reader ->
+                assertThat(reader.format.frameCount).isEqualTo(2)
+                val out = FloatArray(4)
+                assertThat(reader.readInterleavedFloat(out, frames = 2)).isEqualTo(2)
+                assertThat(out[0]).isWithin(0.01f).of(0.5f)
+                assertThat(out[2]).isWithin(0.01f).of(-0.25f)
+            }
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
     fun writerReader_roundTrip24Bit() {
         val file = File.createTempFile("omt", ".wav")
         try {
