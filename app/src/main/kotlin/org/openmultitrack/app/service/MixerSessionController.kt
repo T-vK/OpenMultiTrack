@@ -36,6 +36,7 @@ import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.TransportState
 import org.openmultitrack.sessionio.session.SessionLibrary
 import org.openmultitrack.sessionio.session.SessionMetadata
+import org.openmultitrack.sessionio.wav.SessionWaveformCache
 import org.openmultitrack.sessionio.wav.SessionWaveformExtractor
 import org.openmultitrack.sessionio.wav.SessionWaveformOverview
 import org.openmultitrack.sessionio.wav.WavReader
@@ -85,6 +86,9 @@ data class MixerSessionUiState(
     val playbackDurationSec: Float = 0f,
     val soundcheckWaveforms: SessionWaveformOverview? = null,
     val soundcheckWaveformsLoading: Boolean = false,
+    val soundcheckWaveformProgress: Float = 0f,
+    val soundcheckWaveformChannelsLoaded: Int = 0,
+    val soundcheckWaveformChannelsTotal: Int = 0,
     val soundcheckViewStartSec: Float = 0f,
     val soundcheckViewWindowSec: Float = 180f,
     val soundcheckLoopStartSec: Float? = null,
@@ -200,14 +204,16 @@ class MixerSessionController(
     fun selectSoundcheckSession(sessionDir: String) {
         stopSoundcheck()
         val item = _state.value.soundcheckSessions.firstOrNull { it.sessionDir == sessionDir }
-        _state.update {
-            it.copy(
-                selectedSoundcheckDir = sessionDir,
-                playbackPositionSec = 0f,
-                playbackDurationSec = item?.durationSec ?: 0f,
-            )
+        scope.launch {
+            val dir = File(sessionDir)
+            val metadata = withContext(Dispatchers.IO) {
+                SessionMetadata.read(dir)?.withResolvedChannels(dir)
+            } ?: return@launch
+            val durationSec = item?.durationSec?.takeIf { it > 0f }
+                ?: withContext(Dispatchers.IO) { SessionWaveformExtractor.durationSec(dir, metadata) }
+            prepareSoundcheckSessionUi(sessionDir, metadata, durationSec)
+            loadSoundcheckWaveformsBackground(dir, metadata)
         }
-        loadSoundcheckWaveforms(sessionDir)
     }
 
     fun setSoundcheckView(viewStartSec: Float, viewWindowSec: Float) {
@@ -683,35 +689,133 @@ class MixerSessionController(
         }
     }
 
+    private fun prepareSoundcheckSessionUi(
+        sessionDir: String,
+        metadata: SessionMetadata,
+        durationSec: Float,
+    ) {
+        restoreSoundcheckStripsFromMetadata(metadata)
+        val windowSec = settings.playbackWaveformWindowSec.coerceIn(30f, 600f)
+        val channelTotal = metadata.channels.size
+        _state.update {
+            it.copy(
+                selectedSoundcheckDir = sessionDir,
+                playbackPositionSec = 0f,
+                playbackDurationSec = durationSec,
+                soundcheckWaveforms = SessionWaveformOverview(
+                    peaksByChannel = emptyMap(),
+                    peaksPerSec = SessionWaveformExtractor.DEFAULT_PEAKS_PER_SEC,
+                    durationSec = durationSec,
+                ),
+                soundcheckWaveformsLoading = channelTotal > 0,
+                soundcheckWaveformProgress = 0f,
+                soundcheckWaveformChannelsLoaded = 0,
+                soundcheckWaveformChannelsTotal = channelTotal,
+                soundcheckViewStartSec = 0f,
+                soundcheckViewWindowSec = windowSec,
+                soundcheckLoopStartSec = null,
+                soundcheckLoopEndSec = null,
+                soundcheckLoopEnabled = false,
+                soundcheckLoopSelecting = false,
+            )
+        }
+    }
+
     private fun loadSoundcheckWaveforms(sessionDir: String) {
         soundcheckWaveformJob?.cancel()
-        _state.update { it.copy(soundcheckWaveformsLoading = true, soundcheckWaveforms = null) }
         soundcheckWaveformJob = scope.launch {
             val dir = File(sessionDir)
             val metadata = withContext(Dispatchers.IO) {
                 SessionMetadata.read(dir)?.withResolvedChannels(dir)
-            } ?: run {
-                _state.update { it.copy(soundcheckWaveformsLoading = false) }
+            } ?: return@launch
+            val durationSec = withContext(Dispatchers.IO) { SessionWaveformExtractor.durationSec(dir, metadata) }
+            prepareSoundcheckSessionUi(sessionDir, metadata, durationSec)
+            loadSoundcheckWaveformsBackground(dir, metadata)
+        }
+    }
+
+    private fun loadSoundcheckWaveformsBackground(dir: File, metadata: SessionMetadata) {
+        soundcheckWaveformJob?.cancel()
+        soundcheckWaveformJob = scope.launch {
+            val cached = withContext(Dispatchers.IO) { SessionWaveformCache.load(dir, metadata) }
+            if (cached != null) {
+                applySoundcheckWaveformOverview(cached, loading = false)
                 return@launch
             }
-            restoreChannelStripsFromMetadata(metadata)
             val overview = withContext(Dispatchers.IO) {
-                SessionWaveformExtractor.extract(dir, metadata)
+                SessionWaveformExtractor.extractIncremental(dir, metadata) { chIndex, peaks, completed, total ->
+                    launch(Dispatchers.Main.immediate) {
+                        mergeSoundcheckChannelPeaks(chIndex, peaks, completed, total)
+                    }
+                }
             }
-            val windowSec = settings.playbackWaveformWindowSec.coerceIn(30f, 600f)
-            _state.update {
-                it.copy(
-                    soundcheckWaveforms = overview,
-                    soundcheckWaveformsLoading = false,
-                    playbackDurationSec = overview.durationSec,
-                    soundcheckViewStartSec = 0f,
-                    soundcheckViewWindowSec = windowSec,
-                    soundcheckLoopStartSec = null,
-                    soundcheckLoopEndSec = null,
-                    soundcheckLoopEnabled = false,
-                    soundcheckLoopSelecting = false,
+            withContext(Dispatchers.IO) { SessionWaveformCache.save(dir, overview) }
+            applySoundcheckWaveformOverview(overview, loading = false)
+        }
+    }
+
+    private fun mergeSoundcheckChannelPeaks(
+        channelIndex: Int,
+        peaks: FloatArray,
+        completed: Int,
+        total: Int,
+    ) {
+        _state.update { s ->
+            val base = s.soundcheckWaveforms ?: SessionWaveformOverview(
+                peaksByChannel = emptyMap(),
+                peaksPerSec = SessionWaveformExtractor.DEFAULT_PEAKS_PER_SEC,
+                durationSec = s.playbackDurationSec,
+            )
+            val updatedPeaks = base.peaksByChannel.toMutableMap()
+            updatedPeaks[channelIndex] = peaks
+            s.copy(
+                soundcheckWaveforms = base.copy(peaksByChannel = updatedPeaks),
+                soundcheckWaveformsLoading = completed < total,
+                soundcheckWaveformProgress = if (total > 0) completed.toFloat() / total else 1f,
+                soundcheckWaveformChannelsLoaded = completed,
+                soundcheckWaveformChannelsTotal = total,
+            )
+        }
+    }
+
+    private fun applySoundcheckWaveformOverview(overview: SessionWaveformOverview, loading: Boolean) {
+        _state.update {
+            it.copy(
+                soundcheckWaveforms = overview,
+                soundcheckWaveformsLoading = loading,
+                soundcheckWaveformProgress = if (loading) it.soundcheckWaveformProgress else 1f,
+                soundcheckWaveformChannelsLoaded = if (loading) {
+                    it.soundcheckWaveformChannelsLoaded
+                } else {
+                    overview.peaksByChannel.size
+                },
+                soundcheckWaveformChannelsTotal = overview.peaksByChannel.size
+                    .coerceAtLeast(it.soundcheckWaveformChannelsTotal),
+                playbackDurationSec = overview.durationSec.coerceAtLeast(it.playbackDurationSec),
+            )
+        }
+    }
+
+    private fun restoreSoundcheckStripsFromMetadata(meta: SessionMetadata) {
+        _state.update { s ->
+            val strips = meta.channels.sortedBy { it.index }.map { metaCh ->
+                val existing = s.channelStrips.firstOrNull { it.index == metaCh.index }
+                    ?: ChannelStripState(index = metaCh.index)
+                val hasCachedLabel = existing.displayName.isNotBlank() || existing.label.isNotBlank()
+                existing.copy(
+                    displayName = if (hasCachedLabel) existing.displayName else metaCh.displayName,
+                    label = if (hasCachedLabel) existing.label else labelFromSessionFileName(metaCh.fileName),
+                    colorArgb = if (hasCachedLabel) existing.colorArgb else metaCh.colorArgb,
+                    iconId = existing.iconId,
+                    armed = true,
+                    monitoring = false,
+                    solo = false,
                 )
             }
+            s.copy(
+                channelStrips = strips,
+                captureChannelCount = strips.size.coerceAtLeast(s.captureChannelCount),
+            )
         }
     }
 

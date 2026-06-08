@@ -22,8 +22,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -91,19 +91,38 @@ fun SoundcheckPanel(
             selectedDir = session.selectedSoundcheckDir,
             onSelectSession = onSelectSession,
         )
-        Spacer(Modifier.height(6.dp))
+        if (session.soundcheckWaveformsLoading) {
+            LinearProgressIndicator(
+                progress = { session.soundcheckWaveformProgress.coerceIn(0f, 1f) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp),
+            )
+            if (session.soundcheckWaveformChannelsTotal > 0) {
+                Text(
+                    "Drawing waveforms ${session.soundcheckWaveformChannelsLoaded}/${session.soundcheckWaveformChannelsTotal}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
+                )
+            } else {
+                Spacer(Modifier.height(6.dp))
+            }
+        } else {
+            Spacer(Modifier.height(6.dp))
+        }
         when {
             session.soundcheckSessions.isEmpty() -> SoundcheckEmptyState()
             session.selectedSoundcheckDir == null -> SoundcheckEmptyState("Select a session to preview.")
-            session.soundcheckWaveformsLoading -> Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator()
-            }
-            session.soundcheckWaveforms != null -> SoundcheckWaveformStripList(
+            session.channelStrips.isEmpty() -> SoundcheckEmptyState("Loading session channels…")
+            else -> SoundcheckWaveformStripList(
                 session = session,
-                overview = session.soundcheckWaveforms,
+                overview = session.soundcheckWaveforms ?: SessionWaveformOverview(
+                    peaksByChannel = emptyMap(),
+                    peaksPerSec = 4f,
+                    durationSec = session.playbackDurationSec,
+                ),
+                waveformsLoading = session.soundcheckWaveformsLoading,
                 normalized = normalized,
                 showWaveforms = showWaveforms,
                 numberMode = numberMode,
@@ -116,7 +135,6 @@ fun SoundcheckPanel(
                 onZoomView = onZoomView,
                 onSetLoopRegion = onSetLoopRegion,
             )
-            else -> SoundcheckEmptyState("Could not load waveforms for this session.")
         }
     }
 }
@@ -210,6 +228,7 @@ private fun SoundcheckEmptyState(message: String = "No completed sessions yet. R
 private fun SoundcheckWaveformStripList(
     session: MixerSessionUiState,
     overview: SessionWaveformOverview,
+    waveformsLoading: Boolean,
     normalized: Boolean,
     showWaveforms: Boolean,
     numberMode: StripNumberMode,
@@ -222,7 +241,7 @@ private fun SoundcheckWaveformStripList(
     onZoomView: (Float, Float) -> Unit,
     onSetLoopRegion: (Float, Float) -> Unit,
 ) {
-    val strips = session.channelStrips.filter { overview.peaksByChannel.containsKey(it.index) }
+    val strips = session.channelStrips
     if (strips.isEmpty()) {
         SoundcheckEmptyState("No channel data in this session.")
         return
