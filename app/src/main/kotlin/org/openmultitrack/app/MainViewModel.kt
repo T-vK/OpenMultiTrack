@@ -341,7 +341,7 @@ class MainViewModel(
             return msg
         }
         if (msg.contains("GATT write failed", ignoreCase = true) || msg.contains("status=133")) {
-            return "FLOW 8 pairing expired. Press the Bluetooth pairing button and tap Import again."
+            return "FLOW 8 pairing expired. MENU → PAIRING → PAIR APP, then try again."
         }
         return "FLOW 8 scribble import failed: $msg"
     }
