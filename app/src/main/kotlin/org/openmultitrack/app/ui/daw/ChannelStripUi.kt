@@ -77,19 +77,19 @@ internal fun stripLabelColumnWidth(
     val showsIcon = iconMode != StripIconMode.HIDE &&
         strips.any { MixingStationIcons.emoji(it.iconId) != null }
     val bigIconWidth = if (showsIcon) {
-        (stripHeight * 0.72f).coerceIn(22.dp, 40.dp)
+        (stripHeight * 0.72f).coerceIn(22.dp, 48.dp)
     } else {
         0.dp
     }
     val showsGlyphs = !hideArm || !hideMonitor || !hideSolo
     val glyphWidth = if (showsGlyphs) {
-        with(density) { (labelFontSize * 3.2f).sp.toDp() }
+        with(density) { (labelFontSize * 3.6f).sp.toDp() }
     } else {
         0.dp
     }
     val labelWidth = with(density) { maxTextPx.toDp() }
 
-    return (3.dp + bigIconWidth + maxOf(labelWidth, glyphWidth) + 10.dp).coerceAtLeast(28.dp)
+    return (3.dp + bigIconWidth + maxOf(labelWidth, glyphWidth) + 14.dp).coerceAtLeast(36.dp)
 }
 
 @Composable
@@ -110,9 +110,14 @@ internal fun StripIdentityCell(
     }
     val iconEmoji = parsed.iconEmoji
     val lineText = parsed.lineText
-    val bigIconSize = (colorBarHeight * 0.72f).coerceIn(22.dp, 40.dp)
-    val bigIconFontSize = (labelFontSize * 2.1f).coerceIn(18f, 32f)
-    val controlIconSize = (labelFontSize * 0.95f).coerceIn(10f, 14f).dp
+    val bigIconSize = (colorBarHeight * 0.72f).coerceIn(22.dp, 48.dp)
+    val bigIconFontSize = (labelFontSize * 2.1f).coerceIn(18f, 36f)
+    val controlIconSize = (labelFontSize * 0.95f).coerceIn(10f, 16f).dp
+    val colorBarWidth = 3.dp
+    val rowSpacing = 4.dp
+    val iconColumnWidth = if (iconEmoji != null) bigIconSize else 0.dp
+    val textAreaWidth = (columnWidth - colorBarWidth - iconColumnWidth - rowSpacing * 2 - 2.dp)
+        .coerceAtLeast(24.dp)
 
     Row(
         modifier = Modifier
@@ -122,11 +127,11 @@ internal fun StripIdentityCell(
             .clickable(onClick = onClick)
             .padding(end = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(rowSpacing),
     ) {
         Box(
             Modifier
-                .width(3.dp)
+                .width(colorBarWidth)
                 .height(colorBarHeight)
                 .clip(RoundedCornerShape(2.dp))
                 .background(Color(strip.colorArgb)),
@@ -147,7 +152,7 @@ internal fun StripIdentityCell(
             }
         }
         Column(
-            modifier = Modifier.weight(1f, fill = false),
+            modifier = Modifier.width(textAreaWidth),
             verticalArrangement = Arrangement.Center,
         ) {
             if (!hideArm || !hideMonitor || !hideSolo) {
@@ -167,7 +172,7 @@ internal fun StripIdentityCell(
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
+                    overflow = TextOverflow.Clip,
                 )
             }
         }

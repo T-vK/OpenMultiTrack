@@ -35,7 +35,9 @@ import org.openmultitrack.usb.AudioOutputDeviceLabel
 import org.openmultitrack.usb.LabeledAudioDevice
 import org.openmultitrack.app.data.StripIconMode
 import org.openmultitrack.app.data.StripNumberMode
+import org.openmultitrack.app.audio.RecordAudioPermissions
 import org.openmultitrack.app.scribble.Flow8BlePermissions
+import org.openmultitrack.app.ui.daw.StatusToast
 import org.openmultitrack.app.scribble.Flow8BleScribbleImporter
 import org.openmultitrack.app.scribble.IncompleteRecordingStore
 import org.openmultitrack.app.scribble.OscLanDiscovery
@@ -52,6 +54,11 @@ private sealed class PendingFlow8Action {
     data class Import(val mixerId: String) : PendingFlow8Action()
 }
 
+private sealed class PendingAudioAction {
+    data class Record(val mixerId: String) : PendingAudioAction()
+    data class Monitor(val mixerId: String) : PendingAudioAction()
+}
+
 data class DawUiState(
     val mixers: List<MixerProfile> = emptyList(),
     val activeMixerId: String? = null,
@@ -63,7 +70,7 @@ data class DawUiState(
     val showSettings: Boolean = false,
     val showLogViewer: Boolean = false,
     val flow8PairingDialog: Flow8PairingDialogState? = null,
-    val globalStatus: String? = null,
+    val statusToast: StatusToast? = null,
     val hideArmButton: Boolean = false,
     val hideMonitorButton: Boolean = false,
     val hideSoloButton: Boolean = false,
@@ -103,7 +110,11 @@ class MainViewModel(
     val usbPermissionRequests: SharedFlow<String> = _usbPermissionRequests.asSharedFlow()
     private val _bluetoothPermissionRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
     val bluetoothPermissionRequests: SharedFlow<Unit> = _bluetoothPermissionRequests.asSharedFlow()
+    private val _audioPermissionRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
+    val audioPermissionRequests: SharedFlow<Unit> = _audioPermissionRequests.asSharedFlow()
     private var pendingFlow8Action: PendingFlow8Action? = null
+    private var pendingAudioAction: PendingAudioAction? = null
+    private val lastSessionStatusByMixer = mutableMapOf<String, String?>()
 
     init {
         sessionClient.onManagerLost {
@@ -134,9 +145,7 @@ class MainViewModel(
     fun onBluetoothPermissionsResult(granted: Boolean) {
         if (!granted) {
             pendingFlow8Action = null
-            _uiState.update {
-                it.copy(globalStatus = "Bluetooth permission is required for FLOW 8 scribble import.")
-            }
+            showStatus("Bluetooth permission is required for FLOW 8 scribble import (BLE).")
             return
         }
         when (val action = pendingFlow8Action) {
@@ -151,6 +160,63 @@ class MainViewModel(
                 viewModelScope.launch { importScribbleForMixer(profile) }
             }
         }
+    }
+
+    fun onAudioPermissionResult(granted: Boolean) {
+        if (!granted) {
+            pendingAudioAction = null
+            showStatus("Microphone permission is required to record or monitor USB audio.")
+            return
+        }
+        when (val action = pendingAudioAction) {
+            null -> Unit
+            is PendingAudioAction.Record -> {
+                pendingAudioAction = null
+                startRecordInternal(action.mixerId)
+            }
+            is PendingAudioAction.Monitor -> {
+                pendingAudioAction = null
+                startMonitorInternal(action.mixerId)
+            }
+        }
+    }
+
+    fun dismissStatusToast() {
+        _uiState.update { it.copy(statusToast = null) }
+    }
+
+    fun showSessionStatus(mixerId: String, message: String) {
+        showStatus(message, mixerId)
+    }
+
+    private fun showStatus(message: String, mixerId: String? = null) {
+        val name = (mixerId ?: _uiState.value.activeMixerId)?.let { id ->
+            _uiState.value.mixers.firstOrNull { it.id == id }?.displayName
+        }
+        val text = when {
+            name == null -> message
+            message.startsWith("$name:") || message.startsWith("$name —") -> message
+            else -> "$name: $message"
+        }
+        _uiState.update { it.copy(statusToast = StatusToast(text)) }
+    }
+
+    private fun shouldShowScribbleStatus(profile: MixerProfile, backgroundRefresh: Boolean): Boolean =
+        !backgroundRefresh && profile.id == _uiState.value.activeMixerId
+
+    private fun ensureAudioPermission(action: PendingAudioAction): Boolean {
+        if (RecordAudioPermissions.hasPermission(appContext)) {
+            pendingAudioAction = null
+            return true
+        }
+        pendingAudioAction = action
+        _audioPermissionRequests.tryEmit(Unit)
+        val mixerId = when (action) {
+            is PendingAudioAction.Record -> action.mixerId
+            is PendingAudioAction.Monitor -> action.mixerId
+        }
+        showStatus("Allow microphone access to record or monitor.", mixerId)
+        return false
     }
 
     fun refreshUsbAndOutputs() {
@@ -178,7 +244,7 @@ class MainViewModel(
 
     fun addMixer(descriptor: UsbAudioDeviceDescriptor) {
         if (!mixerStore.isBehringerAudioInterface(descriptor)) {
-            _uiState.update { it.copy(globalStatus = "Not a supported audio interface.") }
+            showStatus("Not a supported audio interface.")
             return
         }
         val existing = mixerStore.findMatchingMixer(descriptor)
@@ -187,9 +253,9 @@ class MainViewModel(
                 it.copy(
                     showAddMixerDialog = false,
                     activeMixerId = existing.id,
-                    globalStatus = "${existing.displayName} is already added.",
                 )
             }
+            showStatus("Already added.", existing.id)
             setActiveMixer(existing.id)
             return
         }
@@ -223,7 +289,7 @@ class MainViewModel(
                 mixers = remaining,
                 sessionByMixer = it.sessionByMixer - id,
                 activeMixerId = nextActive,
-                globalStatus = if (remaining.isEmpty()) null else "Removed ${removed.displayName}.",
+                statusToast = if (remaining.isEmpty()) null else StatusToast("Removed ${removed.displayName}."),
             )
         }
     }
@@ -270,7 +336,15 @@ class MainViewModel(
     }
 
     fun startMonitor(mixerId: String) {
-        sessionClient.promoteForeground("Monitor")
+        if (!ensureAudioPermission(PendingAudioAction.Monitor(mixerId))) return
+        startMonitorInternal(mixerId)
+    }
+
+    private fun startMonitorInternal(mixerId: String) {
+        if (!sessionClient.promoteForeground("Monitor")) {
+            showStatus("Could not start monitor — allow microphone permission and try again.", mixerId)
+            return
+        }
         sessionClient.withManager { it.getOrCreate(mixerId).startMonitoring() }
     }
 
@@ -279,7 +353,15 @@ class MainViewModel(
     }
 
     fun startRecord(mixerId: String) {
-        sessionClient.promoteForeground("Recording")
+        if (!ensureAudioPermission(PendingAudioAction.Record(mixerId))) return
+        startRecordInternal(mixerId)
+    }
+
+    private fun startRecordInternal(mixerId: String) {
+        if (!sessionClient.promoteForeground("Recording")) {
+            showStatus("Could not start recording — allow microphone permission and try again.", mixerId)
+            return
+        }
         sessionClient.withManager { it.getOrCreate(mixerId).startRecording() }
     }
 
@@ -364,7 +446,7 @@ class MainViewModel(
     fun refreshScribble(mixerId: String) {
         val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
         if (!supportsScribbleImport(profile)) {
-            _uiState.update { it.copy(globalStatus = "Scribble import is not available for this mixer yet.") }
+            showStatus("Scribble import is not available for this mixer yet.", mixerId)
             return
         }
         if (supportsFlow8Scribble(profile)) {
@@ -401,28 +483,31 @@ class MainViewModel(
     private suspend fun importScribbleForMixerLocked(profile: MixerProfile, backgroundRefresh: Boolean = false) {
         val flow8 = supportsFlow8Scribble(profile)
         val previousFingerprint = if (backgroundRefresh) scribbleStripCache.loadFingerprint(profile.id) else null
-        if (!backgroundRefresh) {
-            _uiState.update {
-                it.copy(
-                    globalStatus = if (flow8) {
-                        Flow8BleScribbleImporter.PAIRING_SCANNING_MESSAGE
-                    } else {
-                        "Importing scribble strip…"
-                    },
-                )
-            }
+        if (shouldShowScribbleStatus(profile, backgroundRefresh)) {
+            showStatus(
+                if (flow8) {
+                    Flow8BleScribbleImporter.PAIRING_SCANNING_MESSAGE
+                } else {
+                    "Importing scribble strip over OSC/LAN…"
+                },
+                profile.id,
+            )
         }
         try {
             val result: Result<Pair<MixerProfile, List<org.openmultitrack.mixer.behringer.UsbChannelScribble>>> = when {
                 flow8 -> withContext(Dispatchers.IO) {
                     Flow8BleScribbleImporter(
                         context = appContext,
-                        onStatus = { status -> _uiState.update { ui -> ui.copy(globalStatus = status) } },
+                        onStatus = { status ->
+                            if (profile.id == _uiState.value.activeMixerId) {
+                                showStatus(status, profile.id)
+                            }
+                        },
                     ).fetchChannelLabels().map { profile to it }
                 }
                 supportsOscScribble(profile) -> {
-                    if (!backgroundRefresh) {
-                        _uiState.update { it.copy(globalStatus = "Searching for mixer on LAN…") }
+                    if (shouldShowScribbleStatus(profile, backgroundRefresh)) {
+                        showStatus("Searching for mixer on LAN (OSC)…", profile.id)
                     }
                     val host = withContext(Dispatchers.IO) {
                         val saved = profile.oscHost
@@ -435,13 +520,11 @@ class MainViewModel(
                     }
                     if (host == null) {
                         OmtLog.w("ViewModel", "OSC discovery failed for ${profile.displayName}")
-                        if (!backgroundRefresh) {
-                            _uiState.update {
-                                it.copy(
-                                    globalStatus = "Mixer not found on LAN (OSC). Same Wi‑Fi as mixer? " +
-                                        "Check Menu → Log viewer for OscDiscovery lines.",
-                                )
-                            }
+                        if (shouldShowScribbleStatus(profile, backgroundRefresh)) {
+                            showStatus(
+                                "Not found on LAN (OSC). Same Wi‑Fi as mixer? See Menu → Log viewer.",
+                                profile.id,
+                            )
                         }
                         return
                     }
@@ -471,25 +554,24 @@ class MainViewModel(
                     OmtLog.d("ViewModel", "OSC scribble unchanged for ${profile.id} ($named labels)")
                 } else {
                     AppLogBuffer.append("I", "Scribble", "Imported $named channel labels for ${profile.displayName}")
-                    if (!backgroundRefresh) {
-                        _uiState.update { it.copy(globalStatus = "Scribble: $named channel labels") }
+                    if (shouldShowScribbleStatus(profile, backgroundRefresh)) {
+                        showStatus("Scribble imported — $named channel labels", profile.id)
                     }
                     OmtLog.i("ViewModel", "scribble imported $named labels for ${profile.id}")
                 }
             }.onFailure { e ->
                 OmtLog.e("ViewModel", "scribble import failed", e)
-                if (!backgroundRefresh) {
-                    _uiState.update {
-                        it.copy(globalStatus = flow8ScribbleFailureMessage(e))
-                    }
+                if (shouldShowScribbleStatus(profile, backgroundRefresh)) {
+                    showStatus(flow8ScribbleFailureMessage(e), profile.id)
                 }
             }
         } catch (e: Exception) {
             OmtLog.e("ViewModel", "scribble import failed", e)
-            if (!backgroundRefresh) {
-                _uiState.update {
-                    it.copy(globalStatus = if (flow8) flow8ScribbleFailureMessage(e) else "Scribble import failed: ${e.message}")
-                }
+            if (shouldShowScribbleStatus(profile, backgroundRefresh)) {
+                showStatus(
+                    if (flow8) flow8ScribbleFailureMessage(e) else "Scribble import failed: ${e.message}",
+                    profile.id,
+                )
             }
         }
     }
@@ -544,6 +626,17 @@ class MainViewModel(
                 _uiState.update { ui ->
                     ui.copy(sessionByMixer = ui.sessionByMixer + (mixerId to session))
                 }
+                val msg = session.statusMessage
+                val prev = lastSessionStatusByMixer[mixerId]
+                if (
+                    msg != null &&
+                    msg != prev &&
+                    mixerId == _uiState.value.activeMixerId &&
+                    session.warningMessage == null
+                ) {
+                    showSessionStatus(mixerId, msg)
+                }
+                lastSessionStatusByMixer[mixerId] = msg
             }
         }
     }
@@ -575,11 +668,7 @@ class MainViewModel(
         val usb = resolveUsbDevice(profile, usbDevices)
         if (usb == null) {
             OmtLog.w("ViewModel", "USB device not found for ${profile.displayName} (vid=${profile.vendorId} pid=${profile.productId})")
-            _uiState.update {
-                it.copy(
-                    globalStatus = "${profile.displayName} not on USB — reconnecting automatically…",
-                )
-            }
+            showStatus("Not on USB — reconnecting automatically…", profile.id)
             return
         }
         val resolvedProfile = if (usb.deviceName != profile.usbDeviceName || usb.productName != profile.productName) {
@@ -593,9 +682,7 @@ class MainViewModel(
         if (!enumerator.hasUsbPermission(usb.deviceName)) {
             OmtLog.w("ViewModel", "USB permission needed for ${resolvedProfile.displayName} (${usb.deviceName})")
             _usbPermissionRequests.tryEmit(usb.deviceName)
-            _uiState.update {
-                it.copy(globalStatus = "Allow USB access for ${resolvedProfile.displayName} when prompted.")
-            }
+            showStatus("Allow USB access when prompted.", resolvedProfile.id)
             return
         }
         viewModelScope.launch {
@@ -606,7 +693,7 @@ class MainViewModel(
             OmtLog.i("ViewModel", "auto-probed ${resolvedProfile.displayName}")
             usbRecoveryJob?.cancel()
             val resumePending = IncompleteRecordingStore.hasIncompleteRecording(appContext, settings, resolvedProfile.id)
-            _uiState.update { it.copy(pendingRecordingResume = resumePending, globalStatus = null) }
+            _uiState.update { it.copy(pendingRecordingResume = resumePending) }
             if (resumePending) {
                 AppLogBuffer.append("I", "Scribble", "Skipped auto-import — incomplete recording to resume")
             } else if (supportsOscScribble(resolvedProfile)) {
@@ -690,9 +777,12 @@ class MainViewModel(
         }
         pendingFlow8Action = pending
         _bluetoothPermissionRequests.tryEmit(Unit)
-        _uiState.update {
-            it.copy(globalStatus = "Allow Bluetooth access for FLOW 8 scribble import.")
+        val mixerId = when (pending) {
+            is PendingFlow8Action.ShowPairingDialog -> pending.mixerId
+            is PendingFlow8Action.Import -> pending.mixerId
+            null -> _uiState.value.activeMixerId
         }
+        showStatus("Allow Bluetooth access for FLOW 8 scribble import (BLE).", mixerId)
         return false
     }
 
@@ -771,15 +861,11 @@ class MainViewModel(
                     !session?.channelStrips.isNullOrEmpty()
                 }
                 if (recovered) {
-                    _uiState.update { it.copy(globalStatus = null) }
+                    dismissStatusToast()
                     return@launch
                 }
             }
-            _uiState.update {
-                it.copy(
-                    globalStatus = "USB mixer still not ready. Unplug and replug the USB cable, then wait a few seconds.",
-                )
-            }
+            showStatus("USB mixer still not ready — unplug and replug the cable, then wait a few seconds.")
         }
     }
 

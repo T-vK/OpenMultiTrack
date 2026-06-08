@@ -6,6 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -82,8 +84,8 @@ import org.openmultitrack.usb.LabeledAudioDevice
 private val RecordRed = Color(0xFFE53935)
 private val MonitorBlue = Color(0xFF1E88E5)
 private val SoloAmber = Color(0xFFFFB300)
-private val MinStripHeight = 36.dp
-private val MaxStripHeight = 72.dp
+private val MinStripHeight = 44.dp
+private val ScrollStripHeight = 72.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -120,6 +122,7 @@ fun DawMainScreen(
     onShowWaveformsChange: (Boolean) -> Unit,
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
+    onDismissStatusToast: () -> Unit,
 ) {
     val activeId = state.activeMixerId
     val session = activeId?.let { state.sessionByMixer[it] }
@@ -163,50 +166,44 @@ fun DawMainScreen(
             }
         },
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            if (state.mixers.isEmpty()) {
-                EmptyMixersPrompt(onAddMixer = onAddMixer, onRefresh = onRefreshUsb)
-            } else {
-                state.globalStatus?.let { StatusBanner(it) }
-                if (state.pendingRecordingResume) {
-                    StatusBanner("Incomplete recording found — scribble import paused until you resume or finalize.")
-                }
-                session?.warningMessage?.let { WarningBanner(it) }
-                session?.statusMessage?.let { msg ->
-                    if (session.warningMessage == null) {
-                        Text(
-                            msg,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (state.mixers.isEmpty()) {
+                    EmptyMixersPrompt(onAddMixer = onAddMixer, onRefresh = onRefreshUsb)
+                } else {
+                    if (state.pendingRecordingResume) {
+                        WarningBanner("Incomplete recording found — scribble import paused until you resume or finalize.")
                     }
-                }
-                when (session?.appMode) {
-                    AppMode.VIRTUAL_SOUNDCHECK -> SoundcheckPlaceholder()
-                    else -> session?.let { s ->
-                        ChannelStripList(
-                            strips = s.channelStrips,
-                            normalized = waveformNormalized,
-                            waveformPeaks = s.waveformPeaks,
-                            showWaveforms = state.showWaveforms,
-                            hideArm = state.hideArmButton,
-                            hideMonitor = state.hideMonitorButton,
-                            hideSolo = state.hideSoloButton,
-                            numberMode = state.stripNumberMode,
-                            iconMode = state.stripIconMode,
-                            onArm = { onToggleArm(s.mixerId, it) },
-                            onMonitor = { onToggleMonitor(s.mixerId, it) },
-                            onSolo = { onToggleSolo(s.mixerId, it) },
-                        )
+                    session?.warningMessage?.let { WarningBanner(it) }
+                    when (session?.appMode) {
+                        AppMode.VIRTUAL_SOUNDCHECK -> SoundcheckPlaceholder()
+                        else -> session?.let { s ->
+                            ChannelStripList(
+                                strips = s.channelStrips,
+                                normalized = waveformNormalized,
+                                waveformPeaks = s.waveformPeaks,
+                                showWaveforms = state.showWaveforms,
+                                hideArm = state.hideArmButton,
+                                hideMonitor = state.hideMonitorButton,
+                                hideSolo = state.hideSoloButton,
+                                numberMode = state.stripNumberMode,
+                                iconMode = state.stripIconMode,
+                                onArm = { onToggleArm(s.mixerId, it) },
+                                onMonitor = { onToggleMonitor(s.mixerId, it) },
+                                onSolo = { onToggleSolo(s.mixerId, it) },
+                            )
+                        }
                     }
                 }
             }
+            StatusToastHost(
+                toast = state.statusToast,
+                onDismiss = onDismissStatusToast,
+            )
         }
     }
 
@@ -575,20 +572,6 @@ private fun EmptyMixersPrompt(onAddMixer: () -> Unit, onRefresh: () -> Unit) {
 }
 
 @Composable
-private fun StatusBanner(message: String) {
-    Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primaryContainer) {
-        Text(
-            message,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-@Composable
 private fun WarningBanner(message: String) {
     Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.errorContainer) {
         Text(
@@ -624,9 +607,11 @@ private fun ChannelStripList(
         val count = strips.size.coerceAtLeast(1)
         val gap = 2.dp
         val totalGaps = gap * (count - 1).coerceAtLeast(0)
-        val stripHeight = ((maxHeight - totalGaps) / count).coerceIn(MinStripHeight, MaxStripHeight)
-        val innerPad = (stripHeight * 0.12f).coerceIn(3.dp, 8.dp)
-        val labelFontSize = (stripHeight.value * 0.30f).coerceIn(10f, 13f)
+        val naturalHeight = (maxHeight - totalGaps) / count
+        val useScroll = naturalHeight < MinStripHeight
+        val stripHeight = if (useScroll) ScrollStripHeight else naturalHeight
+        val innerPad = (stripHeight * 0.12f).coerceIn(3.dp, 10.dp)
+        val labelFontSize = (stripHeight.value * 0.30f).coerceIn(10f, 16f)
         val labelColumnWidth = stripLabelColumnWidth(
             strips,
             numberMode,
@@ -658,8 +643,15 @@ private fun ChannelStripList(
             return@BoxWithConstraints
         }
 
+        val listModifier = if (useScroll) {
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+        } else {
+            Modifier.fillMaxSize()
+        }
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = listModifier,
             verticalArrangement = Arrangement.spacedBy(gap),
         ) {
             strips.forEach { strip ->

@@ -27,6 +27,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.data.MixerDeviceStore
+import org.openmultitrack.app.audio.RecordAudioPermissions
 import org.openmultitrack.app.scribble.Flow8BlePermissions
 import org.openmultitrack.app.ui.daw.DawMainScreen
 import org.openmultitrack.audio.OmtLog
@@ -55,6 +56,13 @@ class MainActivity : ComponentActivity() {
         val granted = results.values.all { it }
         OmtLog.i("Activity", "Bluetooth permissions granted=$granted")
         viewModel.onBluetoothPermissionsResult(granted)
+    }
+
+    private val audioPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        OmtLog.i("Activity", "RECORD_AUDIO granted=$granted")
+        viewModel.onAudioPermissionResult(granted)
     }
 
     private val usbReceiver = object : BroadcastReceiver() {
@@ -128,6 +136,7 @@ class MainActivity : ComponentActivity() {
                         onShowWaveformsChange = viewModel::setShowWaveforms,
                         onStripNumberModeChange = viewModel::setStripNumberMode,
                         onStripIconModeChange = viewModel::setStripIconMode,
+                        onDismissStatusToast = viewModel::dismissStatusToast,
                     )
                 }
             }
@@ -152,13 +161,22 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.audioPermissionRequests.collect {
+                    requestAudioPermissionIfNeeded()
+                }
+            }
+        }
         requestBluetoothPermissionsForFlow8IfNeeded()
+        requestAudioPermissionIfNeeded()
     }
 
     override fun onResume() {
         super.onResume()
         requestPermissionsForConnectedMixers()
         requestBluetoothPermissionsForFlow8IfNeeded()
+        requestAudioPermissionIfNeeded()
         viewModel.onAppResumed()
     }
 
@@ -225,6 +243,15 @@ class MainActivity : ComponentActivity() {
     private fun handleUsbIntent(intent: Intent?) {
         val device = parseUsbDevice(intent ?: return) ?: return
         requestUsbPermission(device)
+    }
+
+    private fun requestAudioPermissionIfNeeded() {
+        if (RecordAudioPermissions.hasPermission(this)) {
+            viewModel.onAudioPermissionResult(granted = true)
+            return
+        }
+        if (MixerDeviceStore(applicationContext).listMixers().isEmpty()) return
+        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 
     private fun requestBluetoothPermissionsIfNeeded() {

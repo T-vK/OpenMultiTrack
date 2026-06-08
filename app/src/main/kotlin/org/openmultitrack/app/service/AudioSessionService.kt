@@ -48,24 +48,34 @@ class AudioSessionService : Service() {
             }
             else -> {
                 intent?.getStringExtra(EXTRA_STATUS)?.let { promoteToForeground(it) }
+                    ?: run {
+                        // START_STICKY restart — stay bound without promoting from background.
+                        OmtLog.d("Service", "onStartCommand without status — skip foreground promote")
+                    }
             }
         }
         return START_STICKY
     }
 
-    fun promoteToForeground(status: String? = null) {
+    fun promoteToForeground(status: String? = null): Boolean {
         val notification = buildNotification(status ?: "Audio session active")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                } else {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                }
+                startForeground(NOTIFICATION_ID, notification, type)
             } else {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                @Suppress("DEPRECATION")
+                startForeground(NOTIFICATION_ID, notification)
             }
-            startForeground(NOTIFICATION_ID, notification, type)
-        } else {
-            @Suppress("DEPRECATION")
-            startForeground(NOTIFICATION_ID, notification)
+            true
+        } catch (e: Exception) {
+            OmtLog.e("Service", "startForeground failed", e)
+            false
         }
     }
 
@@ -196,11 +206,16 @@ class AudioSessionClient(private val context: Context) {
         mixerManager?.let(block)
     }
 
-    fun promoteForeground(status: String) {
+    fun promoteForeground(status: String): Boolean {
         AudioSessionService.start(context, status)
-        service?.let {
-            it.promoteToForeground(status)
-            it.updateNotification(status)
-        } ?: run { pendingForegroundStatus = status }
+        val service = service
+        return if (service != null) {
+            val ok = service.promoteToForeground(status)
+            if (ok) service.updateNotification(status)
+            ok
+        } else {
+            pendingForegroundStatus = status
+            true
+        }
     }
 }
