@@ -36,6 +36,7 @@ import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.TransportState
 import org.openmultitrack.sessionio.session.SessionMetadata
 import org.openmultitrack.sessionio.wav.WavReader
+import org.openmultitrack.sessionio.wav.WavWriter
 import org.openmultitrack.usb.AudioEngineRouter
 import org.openmultitrack.usb.FullUsbProbeResult
 import org.openmultitrack.usb.UsbAudioEnumerator
@@ -281,7 +282,15 @@ class MixerSessionController(
     fun finalizeIncompleteRecording(sessionDir: File) {
         scope.launch {
             withContext(Dispatchers.IO) {
-                SessionMetadata.read(sessionDir)?.markComplete(sessionDir)
+                SessionMetadata.read(sessionDir)?.let { meta ->
+                    meta.channels.forEach { ch ->
+                        val file = File(sessionDir, ch.fileName)
+                        if (file.exists() && file.length() > 44) {
+                            WavWriter.openForAppend(file, 1, meta.sampleRate).close()
+                        }
+                    }
+                    meta.markComplete(sessionDir)
+                }
             }
             _state.update {
                 it.copy(
