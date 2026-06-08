@@ -934,7 +934,8 @@ class MainViewModel(
         }
     }
 
-    private fun supportsScribbleImport(profile: MixerProfile): Boolean = supportsOscScribble(profile)
+    private fun supportsScribbleImport(profile: MixerProfile): Boolean =
+        supportsOscScribble(profile) || supportsFlow8Scribble(profile)
 
     private fun supportsOscScribble(profile: MixerProfile): Boolean {
         if (profile.productId == XR18_PRODUCT_ID) return true
