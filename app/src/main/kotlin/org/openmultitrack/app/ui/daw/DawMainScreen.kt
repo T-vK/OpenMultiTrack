@@ -595,6 +595,26 @@ private fun ChannelStripList(
             hideSolo,
         )
 
+        if (strips.isEmpty()) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    "No channels yet",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    "Grant USB permission if prompted, then use Menu → Refresh USB.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                )
+            }
+            return@BoxWithConstraints
+        }
+
         Column(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(gap),

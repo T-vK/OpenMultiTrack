@@ -119,6 +119,7 @@ class MainActivity : ComponentActivity() {
         }
 
         viewModel.refreshUsbAndOutputs()
+        requestPermissionsForConnectedMixers()
         handleUsbIntent(intent)
     }
 
@@ -185,6 +186,13 @@ class MainActivity : ComponentActivity() {
     private fun handleUsbIntent(intent: Intent?) {
         val device = parseUsbDevice(intent ?: return) ?: return
         requestUsbPermission(device)
+    }
+
+    private fun requestPermissionsForConnectedMixers() {
+        val usbManager = getSystemService(USB_SERVICE) as UsbManager
+        usbManager.deviceList.values
+            .filter { BehringerUsbIdentifiers.isLikelyBehringerMixer(it.vendorId, it.productName) }
+            .forEach { requestUsbPermission(it) }
     }
 
     private fun requestUsbPermission(device: UsbDevice) {

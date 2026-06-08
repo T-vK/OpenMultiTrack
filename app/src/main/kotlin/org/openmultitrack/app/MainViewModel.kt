@@ -79,16 +79,20 @@ class MainViewModel(
     private val observedMixerIds = mutableSetOf<String>()
 
     init {
+        sessionClient.onManagerLost {
+            observedMixerIds.clear()
+            OmtLog.w("ViewModel", "session service lost — will re-attach on reconnect")
+        }
         sessionClient.bind()
         loadMixers()
         refreshUsbAndOutputs()
         sessionClient.whenReady { manager ->
+            attachToSessionManager(manager)
             viewModelScope.launch {
                 manager.activeMixerId.collect { id ->
                     _uiState.update { it.copy(activeMixerId = id) }
                 }
             }
-            _uiState.value.mixers.forEach { observeMixerSession(it.id, manager) }
         }
     }
 
@@ -187,6 +191,12 @@ class MainViewModel(
     }
 
     fun onUsbPermissionGranted(deviceName: String) {
+        OmtLog.i("ViewModel", "USB permission granted for $deviceName")
+        sessionClient.withManager { mgr ->
+            _uiState.value.mixers
+                .filter { it.usbDeviceName == deviceName }
+                .forEach { autoProbeMixer(it, mgr) }
+        }
         refreshUsbAndOutputs()
     }
 
@@ -354,11 +364,19 @@ class MainViewModel(
     private fun loadMixers() {
         val mixers = mixerStore.listMixers()
         _uiState.update { it.copy(mixers = mixers, activeMixerId = it.activeMixerId ?: mixers.firstOrNull()?.id) }
-        sessionClient.withManager { mgr ->
-            mixers.forEach {
-                mgr.registerMixer(it)
-                observeMixerSession(it.id, mgr)
-            }
+    }
+
+    /**
+     * Registers mixers with the bound session service, subscribes to their state, and probes USB.
+     * Must run after [AudioSessionClient.whenReady] — early [withManager] calls are no-ops while binding.
+     */
+    private fun attachToSessionManager(manager: org.openmultitrack.app.service.MultiMixerSessionManager) {
+        val mixers = _uiState.value.mixers
+        OmtLog.i("ViewModel", "attachToSessionManager mixers=${mixers.size}")
+        mixers.forEach { profile ->
+            manager.registerMixer(profile)
+            observeMixerSession(profile.id, manager)
+            autoProbeMixer(profile, manager)
         }
     }
 
@@ -393,8 +411,18 @@ class MainViewModel(
     }
 
     private fun autoProbeMixer(profile: MixerProfile, manager: org.openmultitrack.app.service.MultiMixerSessionManager) {
-        val deviceName = profile.usbDeviceName ?: return
-        if (!enumerator.hasUsbPermission(deviceName)) return
+        val deviceName = profile.usbDeviceName
+        if (deviceName == null) {
+            OmtLog.w("ViewModel", "skip probe for ${profile.displayName}: no USB device name")
+            return
+        }
+        if (!enumerator.hasUsbPermission(deviceName)) {
+            OmtLog.w("ViewModel", "skip probe for ${profile.displayName}: USB permission not granted for $deviceName")
+            _uiState.update {
+                it.copy(globalStatus = "USB permission required for ${profile.displayName} — reconnect the device.")
+            }
+            return
+        }
         val usb = _uiState.value.availableUsbDevices.firstOrNull { it.deviceName == deviceName }
             ?: enumerator.listUsbDevices().firstOrNull { it.deviceName == deviceName }
             ?: return

@@ -142,6 +142,8 @@ class AudioSessionClient(private val context: Context) {
     private var service: AudioSessionService? = null
     private var mixerManager: MultiMixerSessionManager? = null
     private var pendingReady: ((MultiMixerSessionManager) -> Unit)? = null
+    private var onManagerReady: ((MultiMixerSessionManager) -> Unit)? = null
+    private var onManagerLost: (() -> Unit)? = null
     private var pendingForegroundStatus: String? = null
 
     private val connection = object : android.content.ServiceConnection {
@@ -150,8 +152,10 @@ class AudioSessionClient(private val context: Context) {
             service = local.getService()
             mixerManager = local.getMixerManager()
             OmtLog.d("ServiceClient", "bound to AudioSessionService")
-            pendingReady?.invoke(local.getMixerManager())
+            val manager = local.getMixerManager()
+            pendingReady?.invoke(manager)
             pendingReady = null
+            onManagerReady?.invoke(manager)
             pendingForegroundStatus?.let { status ->
                 local.getService().promoteToForeground(status)
                 pendingForegroundStatus = null
@@ -159,8 +163,10 @@ class AudioSessionClient(private val context: Context) {
         }
 
         override fun onServiceDisconnected(name: android.content.ComponentName?) {
+            OmtLog.w("ServiceClient", "AudioSessionService disconnected")
             service = null
             mixerManager = null
+            onManagerLost?.invoke()
         }
     }
 
@@ -177,8 +183,13 @@ class AudioSessionClient(private val context: Context) {
     }
 
     fun whenReady(block: (MultiMixerSessionManager) -> Unit) {
+        onManagerReady = block
         val m = mixerManager
         if (m != null) block(m) else pendingReady = block
+    }
+
+    fun onManagerLost(block: () -> Unit) {
+        onManagerLost = block
     }
 
     fun withManager(block: (MultiMixerSessionManager) -> Unit) {
