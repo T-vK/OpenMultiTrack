@@ -29,6 +29,7 @@ import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 import org.openmultitrack.domain.channel.ChannelStripState
 import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.domain.session.AppMode
+import org.openmultitrack.domain.session.TransportState
 import org.openmultitrack.usb.AudioOutputDeviceLabel
 import org.openmultitrack.usb.LabeledAudioDevice
 import org.openmultitrack.app.data.StripIconMode
@@ -193,6 +194,7 @@ class MainViewModel(
     fun setActiveMixer(id: String) {
         sessionClient.withManager { it.setActiveMixer(id) }
         _uiState.update { it.copy(activeMixerId = id) }
+        maybeAutoImportFlow8Scribble(id)
     }
 
     fun setAppMode(mixerId: String, mode: AppMode) {
@@ -533,12 +535,49 @@ class MainViewModel(
             _uiState.update { it.copy(pendingRecordingResume = resumePending, globalStatus = null) }
             if (resumePending) {
                 AppLogBuffer.append("I", "Scribble", "Skipped auto-import — incomplete recording to resume")
-            } else if (supportsFlow8Scribble(resolvedProfile)) {
-                _uiState.update { it.copy(flow8PairingDialog = Flow8PairingDialogState(resolvedProfile.id)) }
-            } else if (supportsScribbleImport(resolvedProfile)) {
+            } else if (supportsOscScribble(resolvedProfile)) {
                 importScribbleForMixer(resolvedProfile)
+            } else if (
+                supportsFlow8Scribble(resolvedProfile) &&
+                resolvedProfile.id == _uiState.value.activeMixerId
+            ) {
+                maybeAutoImportFlow8Scribble(resolvedProfile.id)
             }
         }
+    }
+
+    private fun maybeAutoImportFlow8Scribble(mixerId: String) {
+        val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
+        if (!supportsFlow8Scribble(profile)) return
+        if (profile.scribbleImported) return
+        if (IncompleteRecordingStore.hasIncompleteRecording(appContext, settings, mixerId)) {
+            AppLogBuffer.append("I", "Scribble", "Skipped FLOW 8 auto-import — incomplete recording to resume")
+            return
+        }
+        val session = _uiState.value.sessionByMixer[mixerId]
+        if (session == null || session.probing || session.probe == null) {
+            OmtLog.d("ViewModel", "defer FLOW 8 scribble until probe completes for ${profile.displayName}")
+            return
+        }
+        if (!canAutoImportScribble(session)) {
+            OmtLog.i("ViewModel", "skipped FLOW 8 auto-import — mixer is recording or soundchecking")
+            return
+        }
+        if (_uiState.value.flow8PairingDialog?.mixerId == mixerId) return
+        _uiState.update { it.copy(flow8PairingDialog = Flow8PairingDialogState(mixerId)) }
+    }
+
+    private fun canAutoImportScribble(session: MixerSessionUiState): Boolean {
+        if (session.isRecording) return false
+        if (session.transportState == TransportState.RECORDING ||
+            session.transportState == TransportState.RECORDING_DEGRADED
+        ) {
+            return false
+        }
+        if (session.appMode == AppMode.VIRTUAL_SOUNDCHECK) {
+            if (session.isPlaying || session.transportState == TransportState.PLAYING) return false
+        }
+        return true
     }
 
     private fun resolveUsbDevice(
@@ -595,8 +634,7 @@ class MainViewModel(
         }
     }
 
-    private fun supportsScribbleImport(profile: MixerProfile): Boolean =
-        supportsOscScribble(profile) || supportsFlow8Scribble(profile)
+    private fun supportsScribbleImport(profile: MixerProfile): Boolean = supportsOscScribble(profile)
 
     private fun supportsOscScribble(profile: MixerProfile): Boolean {
         if (profile.productId == XR18_PRODUCT_ID) return true
