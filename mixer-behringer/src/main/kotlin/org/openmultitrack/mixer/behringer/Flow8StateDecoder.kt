@@ -1,66 +1,21 @@
 package org.openmultitrack.mixer.behringer
 
 /**
- * Decodes FLOW 8 mixer channel slots from a BLE/SysEx state buffer (firmware v11749).
+ * Decodes FLOW 8 channel names from a BLE MixerState buffer.
  *
- * Each of the seven mixer strips has a 30-byte slot (stride `0x1E`) starting at `0x0554`.
- * Names are length-prefixed ASCII; icon id and stereo-link live in the trailing config bytes
- * (not in the name suffix used on X-Air mixers).
+ * The mixer always returns six names: Ch1–4, then Ch5+6, then Ch7+8.
  */
 object Flow8StateDecoder {
-    const val NAMES_START = 0x0554
-    const val NAMES_STRIDE = 0x1E
-    const val NAME_SCAN_LEN = 14
-    const val MIXER_SLOT_COUNT = 7
+    const val MIXER_NAME_COUNT = 6
 
-    /** Config byte within each 30-byte slot — bit 0 set when the strip is stereo-linked. */
-    const val SLOT_FLAGS_OFFSET = 0x0E
-    const val STEREO_LINK_FLAG_MASK = 0x01
-
-    /** Icon id (1–74) stored separately from the name string. */
-    const val SLOT_ICON_OFFSET = 0x0F
-
-    data class MixerChannelSlot(
-        val mixerIndex: Int,
-        val name: String?,
-        val iconId: Int?,
-        val stereoLinked: Boolean,
+    private val FIXED_OFFSETS = intArrayOf(
+        0x0554, 0x0572, 0x0590, 0x05AE, 0x05CC, 0x05EA,
     )
 
-    fun decodeSlots(buf: ByteArray, iconConfig: ByteArray? = null): List<MixerChannelSlot> {
-        val iconsFromQuery = iconConfig?.let(::parseIconConfig)
-        return (0 until MIXER_SLOT_COUNT).map { index ->
-            val slotOffset = NAMES_START + index * NAMES_STRIDE
-            val slotEnd = minOf(slotOffset + NAMES_STRIDE, buf.size)
-            val slotBytes = if (slotOffset < buf.size) {
-                buf.copyOfRange(slotOffset, slotEnd)
-            } else {
-                byteArrayOf()
-            }
-            val name = readLengthPrefixed(buf, slotOffset)
-            val flags = slotBytes.getOrNull(SLOT_FLAGS_OFFSET)?.toInt()?.and(0xFF) ?: 0
-            val iconFromSlot = readIconId(slotBytes)
-            val iconFromQuery = iconsFromQuery?.getOrNull(index)
-            MixerChannelSlot(
-                mixerIndex = index,
-                name = name,
-                iconId = iconFromQuery ?: iconFromSlot,
-                stereoLinked = (flags and STEREO_LINK_FLAG_MASK) != 0,
-            )
-        }
-    }
-
-    /**
-     * Optional BLE parameter `0x80` response (48 bytes = 12 × 4-byte channel groups).
-     * Icon ids are stored in the third byte of each group for the first seven mixer strips.
-     */
-    fun parseIconConfig(payload: ByteArray): List<Int?> {
-        return (0 until MIXER_SLOT_COUNT).map { index ->
-            val groupOffset = index * 4 + 2
-            if (groupOffset >= payload.size) return@map null
-            val icon = payload[groupOffset].toInt() and 0xFF
-            icon.takeIf { it in 1..MixingStationIcons.MAX_ID }
-        }
+    fun decodeNames(buf: ByteArray): List<String> {
+        val fixed = FIXED_OFFSETS.toList().mapNotNull { offset -> readLengthPrefixed(buf, offset) }
+        if (fixed.size >= MIXER_NAME_COUNT) return fixed.take(MIXER_NAME_COUNT)
+        return scanNames(buf).take(MIXER_NAME_COUNT)
     }
 
     internal fun readLengthPrefixed(buf: ByteArray, offset: Int): String? {
@@ -72,13 +27,19 @@ object Flow8StateDecoder {
         return String(slice, Charsets.US_ASCII)
     }
 
-    private fun readIconId(slotBytes: ByteArray): Int? {
-        val direct = slotBytes.getOrNull(SLOT_ICON_OFFSET)?.toInt()?.and(0xFF)
-        if (direct != null && direct in 1..MixingStationIcons.MAX_ID) return direct
-        for (i in NAME_SCAN_LEN until slotBytes.size) {
-            val value = slotBytes[i].toInt() and 0xFF
-            if (value in 1..MixingStationIcons.MAX_ID) return value
+    private fun scanNames(buf: ByteArray): List<String> {
+        val names = mutableListOf<String>()
+        var i = 0
+        while (i < buf.size) {
+            val name = readLengthPrefixed(buf, i)
+            if (name != null) {
+                val len = buf[i].toInt() and 0xFF
+                names.add(name)
+                i += 1 + len
+            } else {
+                i++
+            }
         }
-        return null
+        return names
     }
 }
