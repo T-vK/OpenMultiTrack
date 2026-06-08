@@ -36,13 +36,17 @@ class Flow8ScribbleStripInstrumentedTest {
                 discoveryTimeoutMs = Flow8BleScribbleImporter.INSTRUMENTED_DISCOVERY_TIMEOUT_MS,
             ).fetchChannelLabels().getOrThrow()
             assertThat(labels).isNotEmpty()
-            assertThat(labels.size).isAtMost(7)
+            assertThat(labels.size).isAtMost(10)
             assertThat(labels.count { !it.name.isNullOrBlank() }).isAtLeast(1)
 
             val named = labels.filter { !it.name.isNullOrBlank() }
             assertThat(named.first().name).isNotEmpty()
-            // Names should parse without raw _icon suffix in display form when present.
-            named.forEach { label ->
+            val mainL = labels.firstOrNull { it.usbChannel == 9 }
+            val mainR = labels.firstOrNull { it.usbChannel == 10 }
+            assertThat(mainL?.name).isEqualTo("Main L")
+            assertThat(mainR?.name).isEqualTo("Main R")
+
+            named.filter { it.usbChannel <= 8 }.forEach { label ->
                 val parsed = ScribbleStripLabel.parse(label.name)
                 assertThat(parsed.displayName).doesNotContainMatch("""_\d{1,2}$""")
             }

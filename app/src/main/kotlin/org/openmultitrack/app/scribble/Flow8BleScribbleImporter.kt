@@ -23,6 +23,8 @@ import org.openmultitrack.audio.OmtLog
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import org.openmultitrack.mixer.behringer.Flow8StateDecoder
+import org.openmultitrack.mixer.behringer.Flow8UsbScribbleMapper
 import org.openmultitrack.mixer.behringer.UsbChannelScribble
 import java.util.UUID
 import kotlin.coroutines.resume
@@ -58,7 +60,7 @@ class Flow8BleScribbleImporter(
         val adapter = bluetoothAdapter() ?: error("Bluetooth is not available on this device")
         if (!adapter.isEnabled) error("Bluetooth is off — turn it on and try again")
 
-        reportStatus(PAIRING_PROMPT_MESSAGE)
+        reportStatus(PAIRING_SCANNING_MESSAGE)
         OmtLog.i("Flow8Ble", "scanning ${discoveryTimeoutMs}ms for FLOW 8 in pairing mode")
 
         if (discoveryTimeoutMs <= DEFAULT_DISCOVERY_TIMEOUT_MS) {
@@ -244,14 +246,17 @@ class Flow8BleScribbleImporter(
             WaitingForHandshake,
             WaitingForHandshakeReply,
             CollectingState,
+            WaitingForIconConfig,
         }
 
         private var gatt: BluetoothGatt? = null
         private var characteristic: BluetoothGattCharacteristic? = null
         private val fragments = linkedMapOf<Int, ByteArray>()
         private var fragmentTotal = 0
+        private var iconConfig: ByteArray? = null
         private var connectionState = ConnectionState.Connecting
         private var completed = false
+        private var iconConfigTimeoutPosted = false
         private val mainHandler = Handler(Looper.getMainLooper())
         private val writeQueue = ArrayDeque<ByteArray>()
         private var writeInFlight = false
@@ -379,10 +384,37 @@ class Flow8BleScribbleImporter(
                         fragments[seq] = data.copyOfRange(4, data.size)
                         OmtLog.i("Flow8Ble", "MixerState fragment ${fragments.size}/$fragmentTotal")
                         if (fragmentTotal > 0 && fragments.size >= fragmentTotal) {
-                            finishDump()
+                            requestIconConfig(gatt)
                         }
                     }
+                    T_PARAM_RESPONSE -> {
+                        if (connectionState != ConnectionState.WaitingForIconConfig) return
+                        if (data.size < 4 || (data[2].toInt() and 0xFF) != T_QUERY_ICON_CONFIG) return
+                        val len = data[3].toInt() and 0xFF
+                        if (4 + len <= data.size) {
+                            iconConfig = data.copyOfRange(4, 4 + len)
+                            OmtLog.i("Flow8Ble", "icon config ${iconConfig?.size ?: 0} bytes")
+                        }
+                        finishDump()
+                    }
                 }
+            }
+
+            @SuppressLint("MissingPermission")
+            private fun requestIconConfig(gatt: BluetoothGatt) {
+                connectionState = ConnectionState.WaitingForIconConfig
+                if (!iconConfigTimeoutPosted) {
+                    iconConfigTimeoutPosted = true
+                    mainHandler.postDelayed({
+                        if (!completed && connectionState == ConnectionState.WaitingForIconConfig) {
+                            OmtLog.i("Flow8Ble", "icon config query timed out — continuing without it")
+                            finishDump()
+                        }
+                    }, ICON_CONFIG_TIMEOUT_MS)
+                }
+                mainHandler.postDelayed({
+                    queuePacket(gatt, frame(T_PARAM_QUERY, byteArrayOf(T_QUERY_ICON_CONFIG.toByte())))
+                }, WRITE_GAP_MS)
             }
 
             @SuppressLint("MissingPermission")
@@ -417,67 +449,29 @@ class Flow8BleScribbleImporter(
             }
 
             private fun finishDump() {
+                if (completed) return
                 val buf = buildList {
                     for (i in 0 until fragmentTotal) {
                         add(fragments[i] ?: byteArrayOf())
                     }
                 }.fold(byteArrayOf()) { acc, bytes -> acc + bytes }
-                val names = Flow8NameDecoder.decode(buf)
-                if (names.isEmpty()) {
+                val slots = Flow8StateDecoder.decodeSlots(buf, iconConfig)
+                val labels = Flow8UsbScribbleMapper.mapSlotsToUsb(slots)
+                val namedInputs = labels.count {
+                    it.usbChannel <= 8 && !it.name.isNullOrBlank()
+                }
+                if (namedInputs == 0) {
                     onComplete(Result.failure(IllegalStateException("No channel names in FLOW 8 state dump")))
                     return
                 }
-                val labels = names.take(CHANNEL_COUNT).mapIndexed { index, name ->
-                    UsbChannelScribble(
-                        usbChannel = index + 1,
-                        sourceLabel = "Ch${index + 1}",
-                        name = name,
-                        colorIndex = null,
-                    )
-                }
                 completed = true
-                OmtLog.i("Flow8Ble", "decoded ${labels.size} channel names")
+                OmtLog.i(
+                    "Flow8Ble",
+                    "mapped ${labels.size} USB labels ($namedInputs input names, Main L/R)",
+                )
                 onComplete(Result.success(labels))
                 close()
             }
-        }
-    }
-
-    private object Flow8NameDecoder {
-        private val OFFSETS = intArrayOf(0x0554, 0x0572, 0x0590, 0x05AE, 0x05CC, 0x05EA, 0x0608)
-        private const val STRIDE = 0x1E
-
-        fun decode(buf: ByteArray): List<String> {
-            val fixed = OFFSETS.map { off -> readLengthPrefixed(buf, off) }.filterNotNull()
-            if (fixed.size >= CHANNEL_COUNT) return fixed
-            return scanNames(buf)
-        }
-
-        private fun readLengthPrefixed(buf: ByteArray, offset: Int): String? {
-            if (offset >= buf.size) return null
-            val len = buf[offset].toInt() and 0xFF
-            if (len !in 2..18 || offset + 1 + len > buf.size) return null
-            val slice = buf.copyOfRange(offset + 1, offset + 1 + len)
-            if (!slice.all { it in 0x20..0x7E }) return null
-            return String(slice, Charsets.US_ASCII)
-        }
-
-        private fun scanNames(buf: ByteArray): List<String> {
-            val names = mutableListOf<String>()
-            var i = 0
-            while (i < buf.size) {
-                val len = buf[i].toInt() and 0xFF
-                if (len in 2..18 && i + 1 + len <= buf.size) {
-                    val slice = buf.copyOfRange(i + 1, i + 1 + len)
-                    if (slice.all { b -> b in 0x20..0x7E }) {
-                        names.add(String(slice, Charsets.US_ASCII))
-                        i += 1 + len
-                        continue
-                    }
-                }
-                i++
-            }
-            return names
         }
     }
 
@@ -487,15 +481,18 @@ class Flow8BleScribbleImporter(
         /** Longer window for instrumented hardware tests (operator can re-enable pairing). */
         const val INSTRUMENTED_DISCOVERY_TIMEOUT_MS = 90_000L
 
-        const val PAIRING_PROMPT_MESSAGE =
-            "FLOW 8: press the Bluetooth pairing button now — pairing stays active ~15 s"
+        const val PAIRING_DIALOG_TITLE = "FLOW 8 pairing required"
+        const val PAIRING_DIALOG_MESSAGE =
+            "On FLOW 8 enable pairing now, then click OK.\n\nMENU → PAIRING → PAIR APP"
+        const val PAIRING_SCANNING_MESSAGE =
+            "Scanning for FLOW 8 in pairing mode (~15 s)…"
         const val PAIRING_NOT_FOUND_MESSAGE =
-            "FLOW 8 not found in pairing mode. Press the Bluetooth pairing button and tap Import again."
+            "FLOW 8 not found in pairing mode. MENU → PAIRING → PAIR APP, then try again."
 
         private const val BETWEEN_ROUNDS_MS = 100L
         private const val PAIRING_FLAG_BYTE_INDEX = 24
+        private const val ICON_CONFIG_TIMEOUT_MS = 2_000L
 
-        private const val CHANNEL_COUNT = 7
         private const val DEFAULT_MTU = 255
         private const val WRITE_GAP_MS = 200L
         private val SERVICE_UUID = UUID.fromString("14839ad4-8d7e-415c-9a42-167340cf2339")
@@ -506,6 +503,9 @@ class Flow8BleScribbleImporter(
         private const val T_GET_MIXER_STATE = 0x37
         private const val T_MIXER_STATE = 0x38
         private const val T_HANDSHAKE_CLIENT = 0x39
+        private const val T_PARAM_QUERY = 0x26
+        private const val T_PARAM_RESPONSE = 0x25
+        private const val T_QUERY_ICON_CONFIG = 0x80
 
         private fun frame(type: Int, payload: ByteArray): ByteArray {
             val body = byteArrayOf(type.toByte(), 0x01) + payload

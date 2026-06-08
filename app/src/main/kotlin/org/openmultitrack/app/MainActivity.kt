@@ -105,6 +105,8 @@ class MainActivity : ComponentActivity() {
                         onMonitorGainChange = viewModel::setMonitorGain,
                         onRefreshUsb = viewModel::refreshUsbAndOutputs,
                         onRefreshScribble = viewModel::refreshScribble,
+                        onConfirmFlow8PairingImport = viewModel::confirmFlow8PairingImport,
+                        onDismissFlow8PairingDialog = viewModel::dismissFlow8PairingDialog,
                         onHideArmChange = viewModel::setHideArmButton,
                         onHideMonitorChange = viewModel::setHideMonitorButton,
                         onHideSoloChange = viewModel::setHideSoloButton,

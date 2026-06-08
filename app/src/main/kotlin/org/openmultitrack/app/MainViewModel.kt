@@ -9,7 +9,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.openmultitrack.app.data.AppSettingsStore
@@ -33,6 +32,10 @@ import org.openmultitrack.mixer.behringer.Xr18ScribbleImporter
 import org.openmultitrack.usb.UsbAudioEnumerator
 import org.openmultitrack.usb.UsbAudioProbeService
 
+data class Flow8PairingDialogState(
+    val mixerId: String,
+)
+
 data class DawUiState(
     val mixers: List<MixerProfile> = emptyList(),
     val activeMixerId: String? = null,
@@ -42,6 +45,7 @@ data class DawUiState(
     val showAddMixerDialog: Boolean = false,
     val showSettings: Boolean = false,
     val showLogViewer: Boolean = false,
+    val flow8PairingDialog: Flow8PairingDialogState? = null,
     val globalStatus: String? = null,
     val hideArmButton: Boolean = false,
     val hideMonitorButton: Boolean = false,
@@ -249,9 +253,26 @@ class MainViewModel(
             _uiState.update { it.copy(globalStatus = "Scribble import is not available for this mixer yet.") }
             return
         }
+        if (supportsFlow8Scribble(profile)) {
+            _uiState.update { it.copy(flow8PairingDialog = Flow8PairingDialogState(mixerId)) }
+            return
+        }
         viewModelScope.launch {
             importScribbleForMixer(profile)
         }
+    }
+
+    fun confirmFlow8PairingImport() {
+        val dialog = _uiState.value.flow8PairingDialog ?: return
+        _uiState.update { it.copy(flow8PairingDialog = null) }
+        val profile = _uiState.value.mixers.firstOrNull { it.id == dialog.mixerId } ?: return
+        viewModelScope.launch {
+            importScribbleForMixer(profile)
+        }
+    }
+
+    fun dismissFlow8PairingDialog() {
+        _uiState.update { it.copy(flow8PairingDialog = null) }
     }
 
     private suspend fun importScribbleForMixer(profile: MixerProfile) {
@@ -259,15 +280,11 @@ class MainViewModel(
         _uiState.update {
             it.copy(
                 globalStatus = if (flow8) {
-                    Flow8BleScribbleImporter.PAIRING_PROMPT_MESSAGE
+                    Flow8BleScribbleImporter.PAIRING_SCANNING_MESSAGE
                 } else {
                     "Importing scribble strip…"
                 },
             )
-        }
-        if (flow8) {
-            // Let the pairing prompt render before BLE work blocks the coroutine.
-            delay(150)
         }
         try {
             val result: Result<Pair<MixerProfile, List<org.openmultitrack.mixer.behringer.UsbChannelScribble>>> = when {
@@ -391,6 +408,8 @@ class MainViewModel(
             _uiState.update { it.copy(pendingRecordingResume = resumePending) }
             if (resumePending) {
                 AppLogBuffer.append("I", "Scribble", "Skipped auto-import — incomplete recording to resume")
+            } else if (supportsFlow8Scribble(profile)) {
+                _uiState.update { it.copy(flow8PairingDialog = Flow8PairingDialogState(profile.id)) }
             } else if (supportsScribbleImport(profile)) {
                 importScribbleForMixer(profile)
             }

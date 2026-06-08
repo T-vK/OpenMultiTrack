@@ -138,7 +138,7 @@ class MixerSessionController(
                     strip.copy(
                         label = raw,
                         displayName = parsed.displayName,
-                        iconId = parsed.iconId,
+                        iconId = scribble.iconId ?: parsed.iconId,
                         colorArgb = scribble.colorArgb ?: strip.colorArgb,
                     )
                 },

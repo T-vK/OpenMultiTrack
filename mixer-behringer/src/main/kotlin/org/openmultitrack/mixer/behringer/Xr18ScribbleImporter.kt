@@ -8,6 +8,8 @@ data class UsbChannelScribble(
     val sourceLabel: String,
     val name: String?,
     val colorIndex: Int?,
+    /** Explicit icon id (FLOW 8 stores icons outside the name string). */
+    val iconId: Int? = null,
 ) {
     val colorArgb: Int? get() = XAirScribbleColors.toArgb(colorIndex)
     val stripIndex: Int get() = usbChannel - 1

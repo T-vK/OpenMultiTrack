@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.openmultitrack.app.DawUiState
+import org.openmultitrack.app.scribble.Flow8BleScribbleImporter
 import org.openmultitrack.app.data.StripIconMode
 import org.openmultitrack.app.data.StripNumberMode
 import org.openmultitrack.app.service.MixerSessionUiState
@@ -110,6 +111,8 @@ fun DawMainScreen(
     onMonitorGainChange: (Float) -> Unit,
     onRefreshUsb: () -> Unit,
     onRefreshScribble: (String) -> Unit,
+    onConfirmFlow8PairingImport: () -> Unit,
+    onDismissFlow8PairingDialog: () -> Unit,
     onHideArmChange: (Boolean) -> Unit,
     onHideMonitorChange: (Boolean) -> Unit,
     onHideSoloChange: (Boolean) -> Unit,
@@ -210,6 +213,24 @@ fun DawMainScreen(
             devices = state.availableUsbDevices,
             onAdd = onAddMixerDevice,
             onDismiss = onDismissAddMixer,
+        )
+    }
+
+    state.flow8PairingDialog?.let {
+        AlertDialog(
+            onDismissRequest = onDismissFlow8PairingDialog,
+            title = { Text(Flow8BleScribbleImporter.PAIRING_DIALOG_TITLE) },
+            text = { Text(Flow8BleScribbleImporter.PAIRING_DIALOG_MESSAGE) },
+            confirmButton = {
+                Button(onClick = onConfirmFlow8PairingImport) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissFlow8PairingDialog) {
+                    Text("Cancel")
+                }
+            },
         )
     }
 
