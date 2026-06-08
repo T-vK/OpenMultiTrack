@@ -314,6 +314,26 @@ class MainViewModel(
         sessionClient.withManager { it.getOrCreate(mixerId).setAppMode(mode) }
     }
 
+    fun refreshSoundcheckLibrary(mixerId: String) {
+        sessionClient.withManager { it.getOrCreate(mixerId).refreshSoundcheckLibrary() }
+    }
+
+    fun selectSoundcheckSession(mixerId: String, sessionDir: String) {
+        sessionClient.withManager { it.getOrCreate(mixerId).selectSoundcheckSession(sessionDir) }
+    }
+
+    fun toggleSoundcheckPlayback(mixerId: String) {
+        sessionClient.withManager { it.getOrCreate(mixerId).toggleSoundcheckPlayback() }
+    }
+
+    fun stopSoundcheck(mixerId: String) {
+        sessionClient.withManager { it.getOrCreate(mixerId).stopSoundcheck() }
+    }
+
+    fun seekSoundcheck(mixerId: String, positionSec: Float) {
+        sessionClient.withManager { it.getOrCreate(mixerId).seekSoundcheck(positionSec) }
+    }
+
     fun toggleArm(mixerId: String, index: Int) {
         sessionClient.withManager { mgr ->
             mgr.getOrCreate(mixerId).updateChannelStrip(index) { it.copy(armed = !it.armed) }
@@ -674,7 +694,12 @@ class MainViewModel(
         OmtLog.i("ViewModel", "attachToSessionManager mixers=${mixers.size}")
         mixers.forEach { profile ->
             manager.registerMixer(profile)
-            manager.getOrCreate(profile.id).setAppMode(settings.appModeForMixer(profile.id))
+            val ctrl = manager.getOrCreate(profile.id)
+            val mode = settings.appModeForMixer(profile.id)
+            ctrl.setAppMode(mode)
+            if (mode == AppMode.VIRTUAL_SOUNDCHECK) {
+                ctrl.refreshSoundcheckLibrary()
+            }
             observeMixerSession(profile.id, manager)
         }
         _uiState.value.activeMixerId?.let { activeId ->

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
@@ -117,6 +118,11 @@ fun DawMainScreen(
     onCloseLog: () -> Unit,
     onMonitorGainChange: (Float) -> Unit,
     onLoadScribbleStrip: (String) -> Unit,
+    onRefreshSoundcheckLibrary: (String) -> Unit,
+    onSelectSoundcheckSession: (String, String) -> Unit,
+    onToggleSoundcheckPlayback: (String) -> Unit,
+    onStopSoundcheck: (String) -> Unit,
+    onSeekSoundcheck: (String, Float) -> Unit,
     onConfirmFlow8PairingImport: () -> Unit,
     onDismissFlow8PairingDialog: () -> Unit,
     onHideArmChange: (Boolean) -> Unit,
@@ -178,6 +184,8 @@ fun DawMainScreen(
                         onStopMonitor = { onStopMonitor(activeId) },
                         onStartRecord = { onStartRecord(activeId) },
                         onStopRecord = { onStopRecord(activeId) },
+                        onToggleSoundcheckPlayback = { onToggleSoundcheckPlayback(activeId) },
+                        onStopSoundcheck = { onStopSoundcheck(activeId) },
                     )
                 }
             }
@@ -201,7 +209,18 @@ fun DawMainScreen(
                     }
                     session?.warningMessage?.let { WarningBanner(it) }
                     when (session?.appMode) {
-                        AppMode.VIRTUAL_SOUNDCHECK -> SoundcheckPlaceholder()
+                        AppMode.VIRTUAL_SOUNDCHECK -> session?.let { s ->
+                            SoundcheckPanel(
+                                sessions = s.soundcheckSessions,
+                                selectedDir = s.selectedSoundcheckDir,
+                                isPlaying = s.isPlaying,
+                                positionSec = s.playbackPositionSec,
+                                durationSec = s.playbackDurationSec,
+                                onRefresh = { onRefreshSoundcheckLibrary(activeId!!) },
+                                onSelectSession = { onSelectSoundcheckSession(activeId!!, it) },
+                                onSeek = { onSeekSoundcheck(activeId!!, it) },
+                            )
+                        }
                         else -> session?.let { s ->
                             ChannelStripList(
                                 strips = s.channelStrips,
@@ -327,6 +346,8 @@ private fun TransportToolbar(
     onStopMonitor: () -> Unit,
     onStartRecord: () -> Unit,
     onStopRecord: () -> Unit,
+    onToggleSoundcheckPlayback: () -> Unit,
+    onStopSoundcheck: () -> Unit,
 ) {
     var mixerMenuOpen by remember { mutableStateOf(false) }
     var removeMixerConfirm by remember { mutableStateOf<MixerProfile?>(null) }
@@ -432,12 +453,21 @@ private fun TransportToolbar(
                     onSetMonitorOutput = onSetMonitorOutput,
                 )
 
-                RecordControl(
-                    session = session,
-                    showLabels = showLabels,
-                    onStartRecord = onStartRecord,
-                    onStopRecord = onStopRecord,
-                )
+                if (session.appMode == AppMode.VIRTUAL_SOUNDCHECK) {
+                    SoundcheckPlayControl(
+                        session = session,
+                        showLabels = showLabels,
+                        onTogglePlay = onToggleSoundcheckPlayback,
+                        onStop = onStopSoundcheck,
+                    )
+                } else {
+                    RecordControl(
+                        session = session,
+                        showLabels = showLabels,
+                        onStartRecord = onStartRecord,
+                        onStopRecord = onStopRecord,
+                    )
+                }
 
                 if (session.transportState == TransportState.RECORDING_DEGRADED) {
                     TransportWarningChip()
@@ -702,6 +732,45 @@ private fun MonitorControl(
 }
 
 @Composable
+private fun SoundcheckPlayControl(
+    session: MixerSessionUiState,
+    showLabels: Boolean,
+    onTogglePlay: () -> Unit,
+    onStop: () -> Unit,
+) {
+    val enabled = session.selectedSoundcheckDir != null && session.probe != null
+    if (session.isPlaying) {
+        ToolbarActionButton(
+            onClick = onStop,
+            active = true,
+            activeColor = MonitorBlue,
+        ) {
+            Icon(Icons.Default.Stop, contentDescription = "Stop playback", modifier = Modifier.size(18.dp))
+            if (showLabels) {
+                Spacer(Modifier.width(6.dp))
+                Text("Stop", style = MaterialTheme.typography.labelLarge)
+            }
+        }
+    } else {
+        ToolbarChip(
+            onClick = onTogglePlay,
+            enabled = enabled,
+        ) {
+            Icon(
+                Icons.Default.PlayArrow,
+                contentDescription = "Play to USB returns",
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            if (showLabels) {
+                Spacer(Modifier.width(6.dp))
+                Text("Play", style = MaterialTheme.typography.labelLarge)
+            }
+        }
+    }
+}
+
+@Composable
 private fun RecordControl(
     session: MixerSessionUiState,
     showLabels: Boolean,
@@ -737,13 +806,6 @@ private fun RecordControl(
                 Text("Record", style = MaterialTheme.typography.labelLarge)
             }
         }
-    }
-}
-
-@Composable
-private fun SoundcheckPlaceholder() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("Soundcheck library — coming soon", style = MaterialTheme.typography.bodyLarge)
     }
 }
 
