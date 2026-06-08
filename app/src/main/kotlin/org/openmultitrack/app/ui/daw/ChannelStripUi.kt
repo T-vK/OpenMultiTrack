@@ -56,6 +56,9 @@ internal fun stripLabelColumnWidth(
     numberMode: StripNumberMode,
     iconMode: StripIconMode,
     labelFontSize: Float,
+    hideArm: Boolean,
+    hideMonitor: Boolean,
+    hideSolo: Boolean,
 ): Dp {
     if (numberMode == StripNumberMode.NUMBERS_ONLY) return 28.dp
     val hasLabels = strips.any { it.displayName.isNotBlank() || it.label.isNotBlank() }
@@ -76,7 +79,12 @@ internal fun stripLabelColumnWidth(
     } else {
         0.dp
     }
-    val glyphWidth = with(density) { (labelFontSize * 2.6f).sp.toDp() }
+    val showsGlyphs = !hideArm || !hideMonitor || !hideSolo
+    val glyphWidth = if (showsGlyphs) {
+        with(density) { (labelFontSize * 2.6f).sp.toDp() }
+    } else {
+        0.dp
+    }
 
     return with(density) {
         (3.dp + maxTextPx.toDp() + iconWidth + glyphWidth + 8.dp).coerceAtLeast(28.dp)
@@ -91,6 +99,9 @@ internal fun StripIdentityCell(
     numberMode: StripNumberMode,
     iconMode: StripIconMode,
     colorBarHeight: Dp,
+    hideArm: Boolean,
+    hideMonitor: Boolean,
+    hideSolo: Boolean,
     onClick: () -> Unit,
 ) {
     val parsed = remember(strip.label, strip.displayName, strip.iconId) {
@@ -129,32 +140,49 @@ internal fun StripIdentityCell(
                 overflow = TextOverflow.Visible,
             )
         }
-        StripStatusGlyphs(
-            strip = strip,
-            fontSize = (labelFontSize * 0.85f).coerceAtLeast(9f),
-        )
+        if (!hideArm || !hideMonitor || !hideSolo) {
+            StripStatusGlyphs(
+                strip = strip,
+                fontSize = (labelFontSize * 0.85f).coerceAtLeast(9f),
+                hideArm = hideArm,
+                hideMonitor = hideMonitor,
+                hideSolo = hideSolo,
+            )
+        }
     }
 }
 
 @Composable
-private fun StripStatusGlyphs(strip: ChannelStripState, fontSize: Float) {
+private fun StripStatusGlyphs(
+    strip: ChannelStripState,
+    fontSize: Float,
+    hideArm: Boolean,
+    hideMonitor: Boolean,
+    hideSolo: Boolean,
+) {
     Row(horizontalArrangement = Arrangement.spacedBy(1.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            "●",
-            fontSize = fontSize.sp,
-            color = if (strip.armed) RecordRed else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
-        )
-        Text(
-            "🎧",
-            fontSize = fontSize.sp,
-            color = if (strip.monitoring) MonitorBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
-        )
-        Text(
-            "S",
-            fontSize = (fontSize * 0.9f).sp,
-            fontWeight = FontWeight.Bold,
-            color = if (strip.solo) SoloAmber else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
-        )
+        if (!hideArm) {
+            Text(
+                "●",
+                fontSize = fontSize.sp,
+                color = if (strip.armed) RecordRed else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+            )
+        }
+        if (!hideMonitor) {
+            Text(
+                "🎧",
+                fontSize = fontSize.sp,
+                color = if (strip.monitoring) MonitorBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+            )
+        }
+        if (!hideSolo) {
+            Text(
+                "S",
+                fontSize = (fontSize * 0.9f).sp,
+                fontWeight = FontWeight.Bold,
+                color = if (strip.solo) SoloAmber else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+            )
+        }
     }
 }
 

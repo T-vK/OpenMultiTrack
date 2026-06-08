@@ -478,7 +478,7 @@ class Flow8BleScribbleImporter(
                     onComplete(Result.failure(IllegalStateException("No channel names in FLOW 8 state dump")))
                     return
                 }
-                val icons = iconPayload?.let { Flow8StateDecoder.parseIconConfig(it) }
+                val icons = iconPayload?.let { Flow8StateDecoder.parseIconConfig(it, buf) }
                 val labels = Flow8UsbScribbleMapper.mapNamesToUsb(names, icons)
                 completed = true
                 val iconSummary = icons?.count { it != null } ?: 0

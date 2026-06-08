@@ -8,8 +8,10 @@ object MixingStationIcons {
     const val MAX_ID = 74
 
     const val ELECTRIC_BASS = 17
+    const val ACOUSTIC_GUITAR = 23
     const val VIOLIN = 39
     const val HANDHELD_MIC = 50
+    const val TAPE = 60
     const val PC = 62
     const val SPEAKER_RIGHT = 64
     const val SPEAKER_LEFT = 65

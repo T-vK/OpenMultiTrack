@@ -43,9 +43,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -70,6 +68,8 @@ import org.openmultitrack.app.DawUiState
 import org.openmultitrack.app.scribble.Flow8BleScribbleImporter
 import org.openmultitrack.app.data.StripIconMode
 import org.openmultitrack.app.data.StripNumberMode
+import org.openmultitrack.app.ui.settings.SettingsSheet
+import org.openmultitrack.app.ui.settings.SettingsUiState
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.app.util.AppLogBuffer
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
@@ -255,35 +255,25 @@ fun DawMainScreen(
     }
 
     if (state.showSettings) {
-        ModalBottomSheet(onDismissRequest = onCloseSettings) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Settings", style = MaterialTheme.typography.titleLarge)
-                Text("Monitor gain")
-                Slider(value = monitorGain, onValueChange = onMonitorGainChange, valueRange = 0.5f..8f)
-                Text("Gain: ${"%.1f".format(monitorGain)}×")
-                Text("Channel strip buttons", style = MaterialTheme.typography.titleMedium)
-                SettingsSwitch("Hide record arm button", state.hideArmButton, onHideArmChange)
-                SettingsSwitch("Hide monitor button", state.hideMonitorButton, onHideMonitorChange)
-                SettingsSwitch("Hide solo button", state.hideSoloButton, onHideSoloChange)
-                SettingsSwitch("Show waveforms", state.showWaveforms, onShowWaveformsChange)
-                Text("Channel strip display", style = MaterialTheme.typography.titleMedium)
-                StripModePicker(
-                    title = "Channel numbers",
-                    options = StripNumberMode.entries,
-                    selected = state.stripNumberMode,
-                    label = { it.label },
-                    onSelect = onStripNumberModeChange,
-                )
-                StripModePicker(
-                    title = "Channel icons",
-                    options = StripIconMode.entries,
-                    selected = state.stripIconMode,
-                    label = { it.label },
-                    onSelect = onStripIconModeChange,
-                )
-                Spacer(Modifier.height(32.dp))
-            }
-        }
+        SettingsSheet(
+            state = SettingsUiState(
+                hideArmIcon = state.hideArmButton,
+                hideMonitorIcon = state.hideMonitorButton,
+                hideSoloIcon = state.hideSoloButton,
+                showWaveforms = state.showWaveforms,
+                stripNumberMode = state.stripNumberMode,
+                stripIconMode = state.stripIconMode,
+            ),
+            monitorGain = monitorGain,
+            onMonitorGainChange = onMonitorGainChange,
+            onDismiss = onCloseSettings,
+            onHideArmChange = onHideArmChange,
+            onHideMonitorChange = onHideMonitorChange,
+            onHideSoloChange = onHideSoloChange,
+            onShowWaveformsChange = onShowWaveformsChange,
+            onStripNumberModeChange = onStripNumberModeChange,
+            onStripIconModeChange = onStripIconModeChange,
+        )
     }
 
     if (state.showLogViewer) {
@@ -543,18 +533,6 @@ private fun EmptyMixersPrompt(onAddMixer: () -> Unit, onRefresh: () -> Unit) {
 }
 
 @Composable
-private fun SettingsSwitch(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
-    }
-}
-
-@Composable
 private fun StatusBanner(message: String) {
     Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primaryContainer) {
         Text(
@@ -577,27 +555,6 @@ private fun WarningBanner(message: String) {
             color = MaterialTheme.colorScheme.onErrorContainer,
             style = MaterialTheme.typography.bodySmall,
         )
-    }
-}
-
-@Composable
-private fun <T> StripModePicker(
-    title: String,
-    options: List<T>,
-    selected: T,
-    label: (T) -> String,
-    onSelect: (T) -> Unit,
-) {
-    Text(title, style = MaterialTheme.typography.labelLarge)
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        options.forEach { option ->
-            TextButton(onClick = { onSelect(option) }) {
-                Text(
-                    if (option == selected) "✓ ${label(option)}" else label(option),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-        }
     }
 }
 
@@ -628,7 +585,15 @@ private fun ChannelStripList(
         val stripHeight = ((maxHeight - totalGaps) / count).coerceIn(MinStripHeight, MaxStripHeight)
         val innerPad = (stripHeight * 0.12f).coerceIn(3.dp, 8.dp)
         val labelFontSize = (stripHeight.value * 0.30f).coerceIn(10f, 13f)
-        val labelColumnWidth = stripLabelColumnWidth(strips, numberMode, iconMode, labelFontSize)
+        val labelColumnWidth = stripLabelColumnWidth(
+            strips,
+            numberMode,
+            iconMode,
+            labelFontSize,
+            hideArm,
+            hideMonitor,
+            hideSolo,
+        )
 
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -646,6 +611,9 @@ private fun ChannelStripList(
                     showWaveform = showWaveforms,
                     numberMode = numberMode,
                     iconMode = iconMode,
+                    hideArm = hideArm,
+                    hideMonitor = hideMonitor,
+                    hideSolo = hideSolo,
                     onOpenControls = { overlayIndex = strip.index },
                 )
             }
@@ -656,9 +624,9 @@ private fun ChannelStripList(
         val strip = strips.firstOrNull { it.index == index } ?: return@let
         ChannelStripControlDialog(
             strip = strip,
-            hideArm = hideArm,
-            hideMonitor = hideMonitor,
-            hideSolo = hideSolo,
+            hideArm = false,
+            hideMonitor = false,
+            hideSolo = false,
             onDismiss = { overlayIndex = null },
             onArm = { onArm(strip.index) },
             onMonitor = { onMonitor(strip.index) },
@@ -679,6 +647,9 @@ private fun ChannelStripRow(
     showWaveform: Boolean,
     numberMode: StripNumberMode,
     iconMode: StripIconMode,
+    hideArm: Boolean,
+    hideMonitor: Boolean,
+    hideSolo: Boolean,
     onOpenControls: () -> Unit,
 ) {
     val colorBarHeight = stripHeight - innerPad * 2
@@ -699,6 +670,9 @@ private fun ChannelStripRow(
             numberMode = numberMode,
             iconMode = iconMode,
             colorBarHeight = colorBarHeight,
+            hideArm = hideArm,
+            hideMonitor = hideMonitor,
+            hideSolo = hideSolo,
             onClick = onOpenControls,
         )
         if (showWaveform) {

@@ -3,8 +3,7 @@
 import asyncio, os, sys
 from bleak import BleakScanner, BleakClient
 
-from extract_channel_names import MAIN_L_NAME, MAIN_R_NAME, NAME_LABELS
-from extract_flow8_channels import decode_entries, usb_mapping
+from extract_flow8_channels import decode_entries, print_scribble_report
 
 CHAR = "0034594a-a8e7-4b1a-a6b1-cd5243059a57"
 
@@ -292,19 +291,7 @@ async def main():
         print(f"No names parsed. Dump preview: {buf[:64].hex()}")
         sys.exit(3)
 
-    print("\nMixer names (always 6):")
-    print(f"  {'#':<3}  {'Strip':<8}  {'Icon':>4}  Name")
-    print("  " + "-" * 44)
-    for e in entries:
-        icon = str(e["icon_id"]) if e["icon_id"] is not None else "—"
-        name = e["name"] or "(empty)"
-        print(f"  {e['index'] + 1:<3}  {NAME_LABELS[e['index']]:<8}  {icon:>4}  \"{name}\"")
-
-    print("\n  USB capture channels:")
-    print(f"  {'USB':>4}  {'Source':<8}  Name")
-    print("  " + "-" * 36)
-    for usb, source, name in usb_mapping(entries):
-        print(f"  {usb:>4}  {source:<8}  \"{name}\"")
+    print_scribble_report(entries)
 
 if __name__ == "__main__":
     asyncio.run(main())

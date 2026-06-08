@@ -7,7 +7,8 @@ Usage:
     python3 extract_flow8_channels.py dump.bin
     python3 extract_flow8_channels.py dump.bin --icon-config icon_config.bin
 
-See ../04-channel-name-extraction.md and ../06-channel-icons-and-stereo-link.md.
+See ../04-channel-name-extraction.md and ../06-channel-icons-and-stereo-link.md
+(icon tables in appendices A and C).
 """
 from __future__ import annotations
 
@@ -21,51 +22,17 @@ from extract_channel_names import (
     NAME_LABELS,
     NAMES_START,
     NAMES_STRIDE,
-    decode_name,
     extract_sysex,
     load_bytes,
     validate,
 )
+from flow8_icon_decode import decode_icon_meta, parse_icon_config
+from mixing_station_icons import SPEAKER_LEFT, SPEAKER_RIGHT, format_icon
 
-ICON_MIN = 1
-ICON_MAX = 74
 SYSEX_NAME_REGION_MIN_SIZE = 0x0600
 SYSEX_START = 0xF0
 
 SYSEX_NAME_OFFSETS = [NAMES_START + i * NAMES_STRIDE for i in range(CHANNEL_COUNT)]
-
-
-def decode_ble_icon_group(strip_index: int, marker: int, code: int) -> int | None:
-    """Map FLOW 8 BLE icon marker/code pairs to Mixing Station icon ids (1–74)."""
-    if marker == 0x03:
-        if code == 0x04:
-            return 50  # handheld mic
-        if code == 0x07:
-            return 62 if strip_index == 5 else 50  # playback vs mic
-        return code if ICON_MIN <= code <= ICON_MAX else None
-    if marker == 0x00:
-        if code == 0x02:
-            return 17  # electric bass
-        if code == 0x04:
-            return 39  # violin
-        return code if ICON_MIN <= code <= ICON_MAX else None
-    if ICON_MIN <= marker <= ICON_MAX:
-        return marker
-    if ICON_MIN <= code <= ICON_MAX:
-        return code
-    return None
-
-
-def parse_icon_config(payload: bytes) -> list[int | None]:
-    icons: list[int | None] = []
-    for i in range(min(CHANNEL_COUNT, len(payload) // 4)):
-        base = i * 4
-        marker = payload[base]
-        code = payload[base + 1] if base + 1 < len(payload) else 0
-        icons.append(decode_ble_icon_group(i, marker, code))
-    while len(icons) < CHANNEL_COUNT:
-        icons.append(None)
-    return icons
 
 
 def read_length_prefixed(buf: bytes, offset: int) -> str | None:
@@ -110,35 +77,92 @@ def decode_names(buf: bytes) -> list[str]:
 
 
 def decode_entries(buf: bytes, icon_config: bytes | None) -> list[dict]:
-    icons = parse_icon_config(icon_config) if icon_config else [None] * CHANNEL_COUNT
+    icon_meta = (
+        decode_icon_meta(icon_config, buf, CHANNEL_COUNT)
+        if icon_config
+        else [None] * CHANNEL_COUNT
+    )
     names = decode_names(buf)
     entries = []
     for i in range(CHANNEL_COUNT):
+        meta = icon_meta[i] if i < len(icon_meta) else {}
+        icon_id = meta.get("icon_id") if meta else None
+        flow_label = meta.get("flow_label") if meta else None
         entries.append(
             {
                 "index": i,
                 "label": NAME_LABELS[i],
                 "name": names[i] if i < len(names) else "",
-                "icon_id": icons[i] if i < len(icons) else None,
+                "icon_id": icon_id,
+                "flow_label": flow_label,
+                "input_type": meta.get("input_type") if meta else None,
+                "preset": meta.get("preset") if meta else None,
+                "icon_display": format_icon(icon_id, flow_label),
             }
         )
     return entries
 
 
-def usb_mapping(entries: list[dict]) -> list[tuple[int, str, str]]:
-    rows: list[tuple[int, str, str]] = []
+def scribble_usb_rows(entries: list[dict]) -> list[dict]:
+    """Ten USB capture channels with names and resolved icon ids."""
+    rows: list[dict] = []
+
+    def row(usb: int, source: str, name: str, entry: dict) -> dict:
+        return {
+            "usb": usb,
+            "source": source,
+            "name": name,
+            "icon_id": entry["icon_id"],
+            "icon_display": entry["icon_display"],
+        }
+
     for i in range(4):
         name = entries[i]["name"] or "(empty)"
-        rows.append((i + 1, NAME_LABELS[i], name))
+        rows.append(row(i + 1, NAME_LABELS[i], name, entries[i]))
+
     name56 = entries[4]["name"] or "(empty)"
-    rows.append((5, "Ch5+6", name56))
-    rows.append((6, "Ch5+6", name56))
+    rows.append(row(5, "Ch5+6", name56, entries[4]))
+    rows.append(row(6, "Ch5+6", name56, entries[4]))
+
     name78 = entries[5]["name"] or "(empty)"
-    rows.append((7, "Ch7+8", name78))
-    rows.append((8, "Ch7+8", name78))
-    rows.append((9, "Main L", MAIN_L_NAME))
-    rows.append((10, "Main R", MAIN_R_NAME))
+    rows.append(row(7, "Ch7+8", name78, entries[5]))
+    rows.append(row(8, "Ch7+8", name78, entries[5]))
+
+    rows.append(
+        row(
+            9,
+            "Main L",
+            MAIN_L_NAME,
+            {"icon_id": SPEAKER_LEFT, "icon_display": format_icon(SPEAKER_LEFT, "Main L")},
+        )
+    )
+    rows.append(
+        row(
+            10,
+            "Main R",
+            MAIN_R_NAME,
+            {"icon_id": SPEAKER_RIGHT, "icon_display": format_icon(SPEAKER_RIGHT, "Main R")},
+        )
+    )
     return rows
+
+
+def print_scribble_report(entries: list[dict]) -> None:
+    print()
+    print("  Mixer strips (6 names from FLOW 8):")
+    print(f"  {'#':<3}  {'Strip':<8}  {'Icon':<28}  Name")
+    print("  " + "-" * 72)
+    for e in entries:
+        name = e["name"] or "(empty)"
+        print(f"  {e['index'] + 1:<3}  {e['label']:<8}  {e['icon_display']:<28}  \"{name}\"")
+
+    print()
+    print("  USB scribble strip (10 capture channels):")
+    print(f"  {'USB':>4}  {'Source':<8}  {'Icon':<28}  Name")
+    print("  " + "-" * 72)
+    for r in scribble_usb_rows(entries):
+        print(f"  {r['usb']:>4}  {r['source']:<8}  {r['icon_display']:<28}  \"{r['name']}\"")
+    print()
 
 
 def process(path: str, icon_config: bytes | None) -> int:
@@ -157,21 +181,7 @@ def process(path: str, icon_config: bytes | None) -> int:
         print("  ERROR: no names decoded.")
         return 1
 
-    print()
-    print(f"  {'#':<3}  {'Strip':<8}  {'Icon':>4}  Name")
-    print("  " + "-" * 48)
-    for e in entries:
-        icon = str(e["icon_id"]) if e["icon_id"] is not None else "—"
-        name = e["name"] or "(empty)"
-        print(f"  {e['index'] + 1:<3}  {e['label']:<8}  {icon:>4}  \"{name}\"")
-
-    print()
-    print("  USB capture channels:")
-    print(f"  {'USB':>4}  {'Source':<8}  Name")
-    print("  " + "-" * 36)
-    for usb, source, name in usb_mapping(entries):
-        print(f"  {usb:>4}  {source:<8}  \"{name}\"")
-    print()
+    print_scribble_report(entries)
     return 0
 
 
