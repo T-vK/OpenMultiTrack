@@ -29,25 +29,52 @@ object Flow8StateDecoder {
 
     /**
      * Parses the 48-byte ParamQuery `0x80` payload (12 groups × 4 bytes).
-     * Icon for strip *i* is [payload[i*4]] when 1–74, else [payload[i*4+1]].
+     *
+     * FLOW 8 encodes icons as a two-byte marker/code pair per strip, not a raw
+     * Mixing Station id in the first byte. Byte `0x03` is a type prefix (not icon 3).
      */
     fun parseIconConfig(payload: ByteArray, maxStrips: Int = MIXER_NAME_COUNT): List<Int?> {
-        val icons = mutableListOf<Int?>()
         val groups = payload.size / 4
-        for (i in 0 until minOf(maxStrips, groups)) {
-            val base = i * 4
-            val primary = payload[base].toInt() and 0xFF
-            val fallback = payload[base + 1].toInt() and 0xFF
-            icons.add(
-                when {
-                    primary in 1..74 -> primary
-                    fallback in 1..74 -> fallback
-                    else -> null
-                },
-            )
+        return (0 until minOf(maxStrips, groups)).map { index ->
+            val base = index * 4
+            val marker = payload[base].toInt() and 0xFF
+            val code = payload[base + 1].toInt() and 0xFF
+            decodeBleIconGroup(index, marker, code)
         }
-        return icons
     }
+
+    internal fun decodeBleIconGroup(stripIndex: Int, marker: Int, code: Int): Int? {
+        if (marker == ICON_MARKER_TYPED) {
+            return when (code) {
+                ICON_CODE_HANDHELD_MIC -> MixingStationIcons.HANDHELD_MIC
+                ICON_CODE_MIC_OR_PLAYBACK -> if (stripIndex == 5) {
+                    MixingStationIcons.PC
+                } else {
+                    MixingStationIcons.HANDHELD_MIC
+                }
+                else -> code.takeIf { it in 1..MixingStationIcons.MAX_ID }
+            }
+        }
+        if (marker == ICON_MARKER_PLAIN) {
+            return when (code) {
+                ICON_CODE_ELECTRIC_BASS -> MixingStationIcons.ELECTRIC_BASS
+                ICON_CODE_VIOLIN -> MixingStationIcons.VIOLIN
+                else -> code.takeIf { it in 1..MixingStationIcons.MAX_ID }
+            }
+        }
+        return when {
+            marker in 1..MixingStationIcons.MAX_ID -> marker
+            code in 1..MixingStationIcons.MAX_ID -> code
+            else -> null
+        }
+    }
+
+    private const val ICON_MARKER_TYPED = 0x03
+    private const val ICON_MARKER_PLAIN = 0x00
+    private const val ICON_CODE_HANDHELD_MIC = 0x04
+    private const val ICON_CODE_MIC_OR_PLAYBACK = 0x07
+    private const val ICON_CODE_ELECTRIC_BASS = 0x02
+    private const val ICON_CODE_VIOLIN = 0x04
 
     private fun scanNames(buf: ByteArray): List<String> {
         val names = mutableListOf<String>()

@@ -35,8 +35,20 @@ object Flow8UsbScribbleMapper {
             putName(byUsb, 8, "Ch7/8", name, iconId)
         }
 
-        byUsb[9] = UsbChannelScribble(9, "Main L", MAIN_L_NAME, colorIndex = null)
-        byUsb[10] = UsbChannelScribble(10, "Main R", MAIN_R_NAME, colorIndex = null)
+        byUsb[9] = UsbChannelScribble(
+            9,
+            "Main L",
+            MAIN_L_NAME,
+            colorIndex = null,
+            iconId = MixingStationIcons.SPEAKER_LEFT,
+        )
+        byUsb[10] = UsbChannelScribble(
+            10,
+            "Main R",
+            MAIN_R_NAME,
+            colorIndex = null,
+            iconId = MixingStationIcons.SPEAKER_RIGHT,
+        )
 
         return byUsb.values.sortedBy { it.usbChannel }
     }

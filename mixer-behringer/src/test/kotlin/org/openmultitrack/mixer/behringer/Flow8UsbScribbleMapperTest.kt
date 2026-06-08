@@ -52,7 +52,7 @@ class Flow8UsbScribbleMapperTest {
         val payload = readRepoFixture("icon_config.bin")
         val icons = Flow8StateDecoder.parseIconConfig(payload)
 
-        assertThat(icons).containsExactly(3, 3, 3, 4, 2, 3).inOrder()
+        assertThat(icons).containsExactly(50, 50, 50, 39, 17, 62).inOrder()
     }
 
     @Test
@@ -63,14 +63,14 @@ class Flow8UsbScribbleMapperTest {
         val icons = Flow8StateDecoder.parseIconConfig(iconPayload)
         val labels = Flow8UsbScribbleMapper.mapNamesToUsb(names, icons)
 
-        assertThat(labels.first { it.usbChannel == 1 }.iconId).isEqualTo(3)
-        assertThat(labels.first { it.usbChannel == 4 }.iconId).isEqualTo(4)
-        assertThat(labels.first { it.usbChannel == 5 }.iconId).isEqualTo(2)
-        assertThat(labels.first { it.usbChannel == 6 }.iconId).isEqualTo(2)
-        assertThat(labels.first { it.usbChannel == 7 }.iconId).isEqualTo(3)
-        assertThat(labels.first { it.usbChannel == 8 }.iconId).isEqualTo(3)
-        assertThat(labels.first { it.usbChannel == 9 }.iconId).isNull()
-        assertThat(labels.first { it.usbChannel == 10 }.iconId).isNull()
+        assertThat(labels.first { it.usbChannel == 1 }.iconId).isEqualTo(50)
+        assertThat(labels.first { it.usbChannel == 4 }.iconId).isEqualTo(39)
+        assertThat(labels.first { it.usbChannel == 5 }.iconId).isEqualTo(17)
+        assertThat(labels.first { it.usbChannel == 6 }.iconId).isEqualTo(17)
+        assertThat(labels.first { it.usbChannel == 7 }.iconId).isEqualTo(62)
+        assertThat(labels.first { it.usbChannel == 8 }.iconId).isEqualTo(62)
+        assertThat(labels.first { it.usbChannel == 9 }.iconId).isEqualTo(MixingStationIcons.SPEAKER_LEFT)
+        assertThat(labels.first { it.usbChannel == 10 }.iconId).isEqualTo(MixingStationIcons.SPEAKER_RIGHT)
     }
 
     private fun readRepoFixture(name: String): ByteArray {

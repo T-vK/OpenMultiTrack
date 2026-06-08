@@ -35,18 +35,34 @@ SYSEX_START = 0xF0
 SYSEX_NAME_OFFSETS = [NAMES_START + i * NAMES_STRIDE for i in range(CHANNEL_COUNT)]
 
 
+def decode_ble_icon_group(strip_index: int, marker: int, code: int) -> int | None:
+    """Map FLOW 8 BLE icon marker/code pairs to Mixing Station icon ids (1–74)."""
+    if marker == 0x03:
+        if code == 0x04:
+            return 50  # handheld mic
+        if code == 0x07:
+            return 62 if strip_index == 5 else 50  # playback vs mic
+        return code if ICON_MIN <= code <= ICON_MAX else None
+    if marker == 0x00:
+        if code == 0x02:
+            return 17  # electric bass
+        if code == 0x04:
+            return 39  # violin
+        return code if ICON_MIN <= code <= ICON_MAX else None
+    if ICON_MIN <= marker <= ICON_MAX:
+        return marker
+    if ICON_MIN <= code <= ICON_MAX:
+        return code
+    return None
+
+
 def parse_icon_config(payload: bytes) -> list[int | None]:
     icons: list[int | None] = []
     for i in range(min(CHANNEL_COUNT, len(payload) // 4)):
         base = i * 4
-        primary = payload[base]
-        fallback = payload[base + 1] if base + 1 < len(payload) else 0
-        if ICON_MIN <= primary <= ICON_MAX:
-            icons.append(primary)
-        elif ICON_MIN <= fallback <= ICON_MAX:
-            icons.append(fallback)
-        else:
-            icons.append(None)
+        marker = payload[base]
+        code = payload[base + 1] if base + 1 < len(payload) else 0
+        icons.append(decode_ble_icon_group(i, marker, code))
     while len(icons) < CHANNEL_COUNT:
         icons.append(None)
     return icons
