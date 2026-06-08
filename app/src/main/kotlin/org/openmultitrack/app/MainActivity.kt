@@ -26,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.openmultitrack.app.data.AppSettingsStore
+import org.openmultitrack.app.data.MixerDeviceStore
+import org.openmultitrack.app.scribble.Flow8BlePermissions
 import org.openmultitrack.app.ui.daw.DawMainScreen
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
@@ -45,6 +47,14 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         OmtLog.i("Activity", "POST_NOTIFICATIONS granted=$granted")
+    }
+
+    private val bluetoothPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { results ->
+        val granted = results.values.all { it }
+        OmtLog.i("Activity", "Bluetooth permissions granted=$granted")
+        viewModel.onBluetoothPermissionsResult(granted)
     }
 
     private val usbReceiver = object : BroadcastReceiver() {
@@ -135,11 +145,20 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.bluetoothPermissionRequests.collect {
+                    requestBluetoothPermissionsIfNeeded()
+                }
+            }
+        }
+        requestBluetoothPermissionsForFlow8IfNeeded()
     }
 
     override fun onResume() {
         super.onResume()
         requestPermissionsForConnectedMixers()
+        requestBluetoothPermissionsForFlow8IfNeeded()
         viewModel.onAppResumed()
     }
 
@@ -208,6 +227,25 @@ class MainActivity : ComponentActivity() {
         requestUsbPermission(device)
     }
 
+    private fun requestBluetoothPermissionsIfNeeded() {
+        val missing = Flow8BlePermissions.missing(this)
+        if (missing.isNotEmpty()) {
+            bluetoothPermissionLauncher.launch(missing.toTypedArray())
+        } else {
+            viewModel.onBluetoothPermissionsResult(granted = true)
+        }
+    }
+
+    private fun requestBluetoothPermissionsForFlow8IfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val hasFlow8 = MixerDeviceStore(applicationContext).listMixers().any { it.productId == FLOW8_PRODUCT_ID }
+        if (!hasFlow8) return
+        val missing = Flow8BlePermissions.missing(this)
+        if (missing.isNotEmpty()) {
+            bluetoothPermissionLauncher.launch(missing.toTypedArray())
+        }
+    }
+
     private fun requestPermissionsForConnectedMixers() {
         val usbManager = getSystemService(USB_SERVICE) as UsbManager
         usbManager.deviceList.values
@@ -225,5 +263,9 @@ class MainActivity : ComponentActivity() {
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         val pi = PendingIntent.getBroadcast(this, device.deviceId, permissionIntent, flags)
         usbManager.requestPermission(device, pi)
+    }
+
+    private companion object {
+        private const val FLOW8_PRODUCT_ID = 0x050c
     }
 }

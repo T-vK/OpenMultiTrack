@@ -35,6 +35,7 @@ import org.openmultitrack.usb.AudioOutputDeviceLabel
 import org.openmultitrack.usb.LabeledAudioDevice
 import org.openmultitrack.app.data.StripIconMode
 import org.openmultitrack.app.data.StripNumberMode
+import org.openmultitrack.app.scribble.Flow8BlePermissions
 import org.openmultitrack.app.scribble.Flow8BleScribbleImporter
 import org.openmultitrack.app.scribble.IncompleteRecordingStore
 import org.openmultitrack.app.scribble.OscLanDiscovery
@@ -45,6 +46,11 @@ import org.openmultitrack.usb.UsbAudioProbeService
 data class Flow8PairingDialogState(
     val mixerId: String,
 )
+
+private sealed class PendingFlow8Action {
+    data class ShowPairingDialog(val mixerId: String) : PendingFlow8Action()
+    data class Import(val mixerId: String) : PendingFlow8Action()
+}
 
 data class DawUiState(
     val mixers: List<MixerProfile> = emptyList(),
@@ -95,6 +101,9 @@ class MainViewModel(
 
     private val _usbPermissionRequests = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val usbPermissionRequests: SharedFlow<String> = _usbPermissionRequests.asSharedFlow()
+    private val _bluetoothPermissionRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
+    val bluetoothPermissionRequests: SharedFlow<Unit> = _bluetoothPermissionRequests.asSharedFlow()
+    private var pendingFlow8Action: PendingFlow8Action? = null
 
     init {
         sessionClient.onManagerLost {
@@ -120,6 +129,28 @@ class MainViewModel(
 
     fun onAppResumed() {
         refreshUsbAndOutputs()
+    }
+
+    fun onBluetoothPermissionsResult(granted: Boolean) {
+        if (!granted) {
+            pendingFlow8Action = null
+            _uiState.update {
+                it.copy(globalStatus = "Bluetooth permission is required for FLOW 8 scribble import.")
+            }
+            return
+        }
+        when (val action = pendingFlow8Action) {
+            null -> Unit
+            is PendingFlow8Action.ShowPairingDialog -> {
+                pendingFlow8Action = null
+                maybeAutoImportFlow8Scribble(action.mixerId)
+            }
+            is PendingFlow8Action.Import -> {
+                pendingFlow8Action = null
+                val profile = _uiState.value.mixers.firstOrNull { it.id == action.mixerId } ?: return
+                viewModelScope.launch { importScribbleForMixer(profile) }
+            }
+        }
     }
 
     fun refreshUsbAndOutputs() {
@@ -331,7 +362,7 @@ class MainViewModel(
             return
         }
         if (supportsFlow8Scribble(profile)) {
-            _uiState.update { it.copy(flow8PairingDialog = Flow8PairingDialogState(mixerId)) }
+            requestFlow8PairingDialog(mixerId)
             return
         }
         viewModelScope.launch {
@@ -343,6 +374,9 @@ class MainViewModel(
         val dialog = _uiState.value.flow8PairingDialog ?: return
         _uiState.update { it.copy(flow8PairingDialog = null) }
         val profile = _uiState.value.mixers.firstOrNull { it.id == dialog.mixerId } ?: return
+        if (!ensureFlow8BluetoothPermission(PendingFlow8Action.Import(profile.id))) {
+            return
+        }
         viewModelScope.launch {
             importScribbleForMixer(profile)
         }
@@ -574,10 +608,33 @@ class MainViewModel(
         AppLogBuffer.append("I", "Scribble", "Loaded cached strip labels (${labels.size} channels)")
     }
 
+    private fun requestFlow8PairingDialog(mixerId: String) {
+        if (!ensureFlow8BluetoothPermission(PendingFlow8Action.ShowPairingDialog(mixerId))) {
+            return
+        }
+        _uiState.update { it.copy(flow8PairingDialog = Flow8PairingDialogState(mixerId)) }
+    }
+
+    private fun ensureFlow8BluetoothPermission(pending: PendingFlow8Action? = null): Boolean {
+        if (Flow8BlePermissions.hasAll(appContext)) {
+            pendingFlow8Action = null
+            return true
+        }
+        pendingFlow8Action = pending
+        _bluetoothPermissionRequests.tryEmit(Unit)
+        _uiState.update {
+            it.copy(globalStatus = "Allow Bluetooth access for FLOW 8 scribble import.")
+        }
+        return false
+    }
+
     private fun maybeAutoImportFlow8Scribble(mixerId: String) {
         val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
         if (!supportsFlow8Scribble(profile)) return
         if (scribbleStripCache.hasCache(mixerId)) return
+        if (!ensureFlow8BluetoothPermission(PendingFlow8Action.ShowPairingDialog(mixerId))) {
+            return
+        }
         if (IncompleteRecordingStore.hasIncompleteRecording(appContext, settings, mixerId)) {
             AppLogBuffer.append("I", "Scribble", "Skipped FLOW 8 auto-import — incomplete recording to resume")
             return

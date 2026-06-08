@@ -57,6 +57,9 @@ class Flow8BleScribbleImporter(
 
     @SuppressLint("MissingPermission")
     private suspend fun findFlowDevice(): BluetoothDevice? {
+        if (!Flow8BlePermissions.hasAll(context)) {
+            error("Bluetooth permission required for FLOW 8 scribble import")
+        }
         val adapter = bluetoothAdapter() ?: error("Bluetooth is not available on this device")
         if (!adapter.isEnabled) error("Bluetooth is off — turn it on and try again")
 
@@ -136,7 +139,7 @@ class Flow8BleScribbleImporter(
                 .setReportDelay(0L)
                 .build()
             mainHandler.post {
-                adapter.cancelDiscovery()
+                runCatching { adapter.cancelDiscovery() }
                 val started = runCatching {
                     if (filtered) {
                         val filters = listOf(
