@@ -19,8 +19,9 @@ fun interface OscSocketSetup {
 class OscUdpClient(
     private val host: String,
     private val port: Int,
+    private val setup: OscSocketSetup? = null,
 ) : AutoCloseable {
-    private val socket = openUdpSocket()
+    private val socket = openUdpSocket(setup)
     private val address: InetAddress = InetAddress.getByName(host)
 
     suspend fun send(path: String, args: List<OscArgument> = emptyList()) = withContext(Dispatchers.IO) {
@@ -67,8 +68,8 @@ class OscUdpClient(
         fun openUdpSocket(setup: OscSocketSetup? = null): DatagramSocket =
             DatagramSocket(null).apply {
                 reuseAddress = true
-                bind(InetSocketAddress(0))
                 setup?.configure(this)
+                bind(InetSocketAddress(0))
             }
 
         fun localIpv4Addresses(): List<InetAddress> {
@@ -107,13 +108,73 @@ class OscUdpClient(
             timeoutMs: Long = 3000,
             port: Int = Xr18Mixer.DEFAULT_PORT,
             setup: OscSocketSetup? = null,
+            subnetPrefixes: List<String> = emptyList(),
+            broadcastAddrs: List<InetAddress> = emptyList(),
         ): String? {
-            val broadcastBudget = minOf(timeoutMs / 3, 1500L)
-            discoverViaBroadcast(broadcastBudget, port, setup)?.let { return it }
-            return discoverViaSubnetUnicast(timeoutMs - broadcastBudget, port, setup)
+            val broadcastOnly = subnetPrefixes.isEmpty() && broadcastAddrs.isNotEmpty()
+            val broadcastBudget = if (broadcastOnly) {
+                timeoutMs
+            } else {
+                minOf(timeoutMs / 3, 1500L)
+            }
+            discoverViaBroadcast(
+                timeoutMs = broadcastBudget,
+                port = port,
+                setup = setup,
+                broadcastAddrs = broadcastAddrs,
+            )?.let { return it }
+            if (broadcastOnly) return null
+            return discoverViaSubnetUnicast(
+                timeoutMs = timeoutMs - broadcastBudget,
+                port = port,
+                setup = setup,
+                subnetPrefixes = subnetPrefixes,
+            )
         }
 
-        private fun discoverViaBroadcast(timeoutMs: Long, port: Int, setup: OscSocketSetup?): String? {
+        /** Scan [subnetPrefixes] for a mixer, reusing one UDP socket for the whole sweep. */
+        fun scanSubnetsForMixer(
+            timeoutMs: Long,
+            port: Int = Xr18Mixer.DEFAULT_PORT,
+            setup: OscSocketSetup? = null,
+            subnetPrefixes: List<String>,
+        ): String? {
+            if (timeoutMs <= 0 || subnetPrefixes.isEmpty()) return null
+            val socket = try {
+                openUdpSocket(setup).apply { soTimeout = 25 }
+            } catch (_: Exception) {
+                return null
+            }
+            val perHostMs = 25L
+            val deadline = System.nanoTime() + timeoutMs * 1_000_000
+            return try {
+                for (prefix in subnetPrefixes) {
+                    for (last in 1..254) {
+                        if (System.nanoTime() > deadline) return null
+                        val host = "$prefix.$last"
+                        val target = runCatching { InetAddress.getByName(host) }.getOrNull() ?: continue
+                        for (path in listOf(OscPath.xinfo(), OscPath.info())) {
+                            val payload = encodeOscMessage(path, emptyList())
+                            socket.send(DatagramPacket(payload, payload.size, target, port))
+                            waitForMixerReply(socket, perHostMs, host)?.let { return it }
+                        }
+                    }
+                }
+                null
+            } catch (e: Exception) {
+                OscDiscoveryLog.sendFailed("scan port $port", e)
+                null
+            } finally {
+                runCatching { socket.close() }
+            }
+        }
+
+        private fun discoverViaBroadcast(
+            timeoutMs: Long,
+            port: Int,
+            setup: OscSocketSetup?,
+            broadcastAddrs: List<InetAddress>,
+        ): String? {
             val socket = try {
                 openUdpSocket(setup).apply {
                     soTimeout = 250
@@ -122,22 +183,33 @@ class OscUdpClient(
             } catch (_: Exception) {
                 return null
             }
+            val targets = when {
+                broadcastAddrs.isNotEmpty() -> broadcastAddrs
+                else -> broadcastTargets()
+            }
+            if (targets.isEmpty()) return null
             return try {
                 val payload = encodeOscMessage(OscPath.xinfo(), emptyList())
-                for (target in broadcastTargets()) {
+                for (target in targets) {
                     socket.send(DatagramPacket(payload, payload.size, target, port))
                 }
                 waitForXinfoReply(socket, timeoutMs)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                OscDiscoveryLog.sendFailed("broadcast", e)
                 null
             } finally {
                 runCatching { socket.close() }
             }
         }
 
-        private fun discoverViaSubnetUnicast(timeoutMs: Long, port: Int, setup: OscSocketSetup?): String? {
+        private fun discoverViaSubnetUnicast(
+            timeoutMs: Long,
+            port: Int,
+            setup: OscSocketSetup?,
+            subnetPrefixes: List<String>,
+        ): String? {
             if (timeoutMs <= 0) return null
-            val prefixes = localIpv4SubnetPrefixes()
+            val prefixes = subnetPrefixes.ifEmpty { localIpv4SubnetPrefixes() }
             if (prefixes.isEmpty()) return null
             val perHostMs = 35L
             val deadline = System.nanoTime() + timeoutMs * 1_000_000
@@ -160,19 +232,20 @@ class OscUdpClient(
             val socket = try {
                 openUdpSocket(setup).apply {
                     soTimeout = timeoutMs.toInt().coerceAtLeast(20)
-                    connect(InetAddress.getByName(host), port)
                 }
             } catch (_: Exception) {
                 return null
             }
+            val target = runCatching { InetAddress.getByName(host) }.getOrNull() ?: return null
             return try {
                 for (path in listOf(OscPath.xinfo(), OscPath.info())) {
                     val payload = encodeOscMessage(path, emptyList())
-                    socket.send(DatagramPacket(payload, payload.size))
+                    socket.send(DatagramPacket(payload, payload.size, target, port))
                     waitForMixerReply(socket, timeoutMs / 2, host)?.let { return it }
                 }
                 null
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                OscDiscoveryLog.sendFailed("probe $host:$port", e)
                 null
             } finally {
                 runCatching { socket.close() }
@@ -188,10 +261,9 @@ class OscUdpClient(
                     val buf = ByteArray(4096)
                     val packet = DatagramPacket(buf, buf.size)
                     socket.receive(packet)
-                    val from = packet.address.hostAddress ?: continue
                     val msg = OscMessageDecoder.decode(buf.copyOf(packet.length)) ?: continue
                     if (msg.path == "/xinfo" || msg.path == "/info") {
-                        return if (expectedHost.isNotEmpty()) expectedHost else from
+                        return if (expectedHost.isNotEmpty()) expectedHost else packet.address.hostAddress
                     }
                 } catch (_: java.net.SocketTimeoutException) {
                     continue

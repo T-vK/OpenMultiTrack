@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.data.MixerDeviceStore
@@ -78,6 +80,7 @@ class MainViewModel(
     val uiState: StateFlow<DawUiState> = _uiState.asStateFlow()
 
     private val observedMixerIds = mutableSetOf<String>()
+    private val scribbleImportMutex = Mutex()
 
     init {
         sessionClient.onManagerLost {
@@ -318,6 +321,12 @@ class MainViewModel(
     }
 
     private suspend fun importScribbleForMixer(profile: MixerProfile) {
+        scribbleImportMutex.withLock {
+            importScribbleForMixerLocked(profile)
+        }
+    }
+
+    private suspend fun importScribbleForMixerLocked(profile: MixerProfile) {
         val flow8 = supportsFlow8Scribble(profile)
         _uiState.update {
             it.copy(
@@ -338,12 +347,9 @@ class MainViewModel(
                 }
                 supportsOscScribble(profile) -> {
                     val host = withContext(Dispatchers.IO) {
-                        profile.oscHost?.let { saved ->
-                            OscLanDiscovery.probeMixerAt(appContext, saved, timeoutMs = 3000)
-                        } ?: OscLanDiscovery.discoverMixerIp(
-                            appContext,
-                            preferHost = profile.oscHost,
-                        )
+                        val saved = profile.oscHost
+                        saved?.let { OscLanDiscovery.probeMixerAt(appContext, it, timeoutMs = 3000) }
+                            ?: OscLanDiscovery.discoverMixerIp(appContext, preferHost = saved)
                     }
                     if (host == null) {
                         _uiState.update {
