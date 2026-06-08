@@ -22,3 +22,4 @@ android-sdk/
 keystore/*
 !keystore/debug.keystore
 !keystore/EXPECTED_SIGNER.txt
+scripts/tmp/
