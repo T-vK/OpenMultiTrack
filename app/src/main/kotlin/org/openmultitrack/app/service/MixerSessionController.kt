@@ -244,7 +244,7 @@ class MixerSessionController(
         }
     }
 
-    fun resumeRecording(sessionDir: File) {
+    fun resumeRecording(sessionDir: File, scribbleLabels: List<UsbChannelScribble>? = null) {
         val descriptor = activeDescriptor ?: return
         val probe = activeProbe ?: return
         scope.launch {
@@ -258,6 +258,9 @@ class MixerSessionController(
                             ensureCapture(descriptor, probe).getOrThrow()
                         } else {
                             syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
+                        }
+                        if (!scribbleLabels.isNullOrEmpty()) {
+                            applyScribbleLabels(scribbleLabels)
                         }
                         captureEngine.resumeRecording(sessionDir).getOrThrow()
                     }
@@ -419,9 +422,16 @@ class MixerSessionController(
                 val existing = s.channelStrips.getOrNull(i) ?: ChannelStripState(index = i)
                 val metaCh = meta.channels.firstOrNull { it.index == i }
                 if (metaCh != null) {
+                    val hasCachedLabel = existing.displayName.isNotBlank() || existing.label.isNotBlank()
                     existing.copy(
-                        displayName = metaCh.displayName,
-                        colorArgb = metaCh.colorArgb,
+                        displayName = if (hasCachedLabel) existing.displayName else metaCh.displayName,
+                        label = if (hasCachedLabel) {
+                            existing.label
+                        } else {
+                            labelFromSessionFileName(metaCh.fileName)
+                        },
+                        colorArgb = if (hasCachedLabel) existing.colorArgb else metaCh.colorArgb,
+                        iconId = existing.iconId,
                         armed = true,
                     )
                 } else {
@@ -430,6 +440,12 @@ class MixerSessionController(
             }
             s.copy(channelStrips = strips, captureChannelCount = chCount)
         }
+    }
+
+    private fun labelFromSessionFileName(fileName: String): String {
+        val withoutExt = fileName.removeSuffix(".wav")
+        val dash = withoutExt.indexOf(" - ")
+        return if (dash >= 0) withoutExt.substring(dash + 3) else ""
     }
 
     private fun stopWaveformUpdatesIfIdle() {

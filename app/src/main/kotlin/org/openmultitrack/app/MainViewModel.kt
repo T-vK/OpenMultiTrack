@@ -395,9 +395,15 @@ class MainViewModel(
             showStatus("Could not resume recording — allow microphone permission and try again.", mixerId)
             return
         }
-        sessionClient.withManager { it.getOrCreate(mixerId).resumeRecording(sessionDir) }
+        val cachedLabels = scribbleStripCache.load(mixerId)
+        sessionClient.withManager {
+            it.getOrCreate(mixerId).resumeRecording(sessionDir, cachedLabels)
+        }
         _uiState.update { it.copy(pendingRecordingResume = false) }
         showStatus("Recording resumed automatically.", mixerId)
+        if (!cachedLabels.isNullOrEmpty()) {
+            AppLogBuffer.append("I", "Scribble", "Applied cached strip labels on recording resume (${cachedLabels.size} channels)")
+        }
         AppLogBuffer.append("I", "Record", "Resumed incomplete session at ${sessionDir.absolutePath}")
     }
 
@@ -407,6 +413,9 @@ class MainViewModel(
         val sessionDir = IncompleteRecordingStore.latestIncompleteSession(appContext, settings, mixerId)
             ?: return
         if (!ensureAudioPermission(PendingAudioAction.Resume(mixerId, sessionDir))) return
+        if (scribbleStripCache.hasCache(mixerId)) {
+            applyCachedScribble(mixerId)
+        }
         resumeRecordingInternal(mixerId, sessionDir)
     }
 
@@ -750,7 +759,7 @@ class MainViewModel(
             val resumePending = IncompleteRecordingStore.hasIncompleteRecording(appContext, settings, resolvedProfile.id)
             _uiState.update { it.copy(pendingRecordingResume = resumePending) }
             if (resumePending) {
-                AppLogBuffer.append("I", "Scribble", "Skipped auto-import — incomplete recording to resume")
+                AppLogBuffer.append("I", "Scribble", "Will apply cached labels when resuming incomplete recording")
                 maybeAutoResumeRecording(resolvedProfile.id)
             } else if (supportsOscScribble(resolvedProfile)) {
                 onOscMixerReady(resolvedProfile.id)
