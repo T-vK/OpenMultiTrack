@@ -22,6 +22,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.openmultitrack.app.audio.CaptureSessionEngine
+import org.openmultitrack.app.audio.LiveWaveformSnapshot
 import org.openmultitrack.app.audio.MonitorMixConfig
 import org.openmultitrack.app.audio.SessionPlayer
 import org.openmultitrack.app.data.AppSettingsStore
@@ -62,7 +63,7 @@ data class MixerSessionUiState(
     val monitorOutputDeviceId: Int = -1,
     val captureChannelCount: Int = 0,
     val recordElapsedSec: Float = 0f,
-    val waveformPeaks: Map<Int, FloatArray> = emptyMap(),
+    val waveformPeaks: Map<Int, LiveWaveformSnapshot> = emptyMap(),
 )
 
 class MixerSessionController(

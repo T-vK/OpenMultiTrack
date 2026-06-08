@@ -72,6 +72,7 @@ import org.openmultitrack.app.data.StripIconMode
 import org.openmultitrack.app.data.StripNumberMode
 import org.openmultitrack.app.ui.settings.SettingsSheet
 import org.openmultitrack.app.ui.settings.SettingsUiState
+import org.openmultitrack.app.audio.LiveWaveformSnapshot
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.app.util.AppLogBuffer
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
@@ -591,7 +592,7 @@ private fun WarningBanner(message: String) {
 private fun ChannelStripList(
     strips: List<ChannelStripState>,
     normalized: Boolean,
-    waveformPeaks: Map<Int, FloatArray>,
+    waveformPeaks: Map<Int, LiveWaveformSnapshot>,
     showWaveforms: Boolean,
     hideArm: Boolean,
     hideMonitor: Boolean,
@@ -665,7 +666,7 @@ private fun ChannelStripList(
                     innerPad = innerPad,
                     labelFontSize = labelFontSize,
                     labelColumnWidth = labelColumnWidth,
-                    peaks = if (showWaveforms) waveformPeaks[strip.index] else null,
+                    waveform = if (showWaveforms) waveformPeaks[strip.index] else null,
                     normalized = normalized,
                     showWaveform = showWaveforms,
                     numberMode = numberMode,
@@ -701,7 +702,7 @@ private fun ChannelStripRow(
     innerPad: Dp,
     labelFontSize: Float,
     labelColumnWidth: Dp,
-    peaks: FloatArray?,
+    waveform: LiveWaveformSnapshot?,
     normalized: Boolean,
     showWaveform: Boolean,
     numberMode: StripNumberMode,
@@ -735,7 +736,7 @@ private fun ChannelStripRow(
         )
         if (showWaveform) {
             WaveformView(
-                peaks = peaks,
+                waveform = waveform,
                 color = Color(strip.colorArgb),
                 normalized = normalized,
                 modifier = Modifier
@@ -752,13 +753,14 @@ private fun ChannelStripRow(
 
 @Composable
 private fun WaveformView(
-    peaks: FloatArray?,
+    waveform: LiveWaveformSnapshot?,
     color: Color,
     normalized: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val data = peaks
-    if (data == null || data.isEmpty()) {
+    val data = waveform?.peaks
+    val capacity = waveform?.capacity ?: 0
+    if (data == null || data.isEmpty() || capacity <= 0) {
         Box(modifier = modifier)
         return
     }
@@ -768,16 +770,17 @@ private fun WaveformView(
         val h = size.height
         if (w <= 0f || h <= 0f) return@Canvas
         val mid = h / 2f
-        val step = w / displayPeaks.size.coerceAtLeast(1)
-        val stroke = (step * 0.75f).coerceIn(1f, 4f)
+        val slotWidth = w / capacity
+        val stroke = (slotWidth * 0.75f).coerceIn(1f, 4f)
         val minBar = h * 0.06f
         displayPeaks.forEachIndexed { i, peak ->
             val amp = peak.coerceIn(0f, 1f)
             val barH = maxOf(amp * h * 0.9f, if (amp > 0.02f) minBar else 0f)
+            val x = (i + 0.5f) * slotWidth
             drawLine(
                 color = color.copy(alpha = 0.9f),
-                start = Offset(i * step + step / 2f, mid - barH / 2f),
-                end = Offset(i * step + step / 2f, mid + barH / 2f),
+                start = Offset(x, mid - barH / 2f),
+                end = Offset(x, mid + barH / 2f),
                 strokeWidth = stroke,
             )
         }

@@ -247,8 +247,8 @@ class CaptureSessionEngine {
 
     fun droppedFrameCount(): Long = droppedFrames
 
-    fun waveformSnapshots(normalize: Boolean): Map<Int, FloatArray> {
-        val out = LinkedHashMap<Int, FloatArray>()
+    fun waveformSnapshots(normalize: Boolean): Map<Int, LiveWaveformSnapshot> {
+        val out = LinkedHashMap<Int, LiveWaveformSnapshot>()
         for (ch in 0 until channelCount) {
             waveformRings[ch]?.let { ring ->
                 out[ch] = ring.snapshot(normalize)

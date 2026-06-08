@@ -6,6 +6,12 @@ import kotlin.concurrent.write
 import kotlin.math.abs
 import kotlin.math.max
 
+data class LiveWaveformSnapshot(
+    val peaks: FloatArray,
+    /** Total time slots in the rolling window (e.g. 15 s × 30 Hz = 450). */
+    val capacity: Int,
+)
+
 /** Thread-safe rolling peak buffer for live waveform display (one channel). */
 class LiveWaveformRing(
     private val capacityPeaks: Int,
@@ -23,8 +29,8 @@ class LiveWaveformRing(
         }
     }
 
-    /** Returns peaks oldest→newest for UI (may be shorter than capacity until filled). */
-    fun snapshot(normalize: Boolean = false): FloatArray = lock.read {
+    /** Returns peaks oldest→newest for UI (may be shorter than [capacity] until the window fills). */
+    fun snapshot(normalize: Boolean = false): LiveWaveformSnapshot = lock.read {
         val out = FloatArray(filled)
         val start = if (filled < capacityPeaks) 0 else writeIndex
         for (i in 0 until filled) {
@@ -36,7 +42,7 @@ class LiveWaveformRing(
                 for (i in out.indices) out[i] /= peak
             }
         }
-        out
+        LiveWaveformSnapshot(out, capacityPeaks)
     }
 
     companion object {
