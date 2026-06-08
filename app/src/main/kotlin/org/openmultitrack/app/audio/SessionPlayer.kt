@@ -15,6 +15,8 @@ import org.openmultitrack.sessionio.wav.WavReader
 import org.openmultitrack.usb.AudioEngineRouter
 import org.openmultitrack.usb.PlaybackRoute
 import java.io.File
+import kotlin.math.abs
+import kotlin.math.max
 
 class SessionPlayer {
     private var playbackJob: Job? = null
@@ -25,6 +27,8 @@ class SessionPlayer {
     private var seekReader: ((Long) -> Unit)? = null
     private var playbackEpoch: Int = 0
     private val readerLock = Any()
+    private val meterLevels = FloatArray(32)
+    private var meterChannelCount = 0
 
     @Volatile
     var status: TransportStatus = TransportStatus()
@@ -32,6 +36,16 @@ class SessionPlayer {
 
     val isPlaying: Boolean
         get() = playbackJob?.isActive == true && status.state == TransportState.PLAYING
+
+    fun meterLevelsSnapshot(): Map<Int, Float> {
+        val count = meterChannelCount
+        if (count <= 0) return emptyMap()
+        return buildMap(count) {
+            for (ch in 0 until count) {
+                put(ch, meterLevels[ch])
+            }
+        }
+    }
 
     fun play(
         scope: CoroutineScope,
@@ -212,10 +226,40 @@ class SessionPlayer {
                     continue
                 }
                 submitted += written
+                updateMeterLevels(scratch, written, channels, frameOffset = submitted)
                 status = status.copy(positionFrames = status.positionFrames + written)
                 maybeLoopRewind()
             }
         }
+    }
+
+    private fun updateMeterLevels(
+        scratch: FloatArray,
+        frames: Int,
+        channels: Int,
+        frameOffset: Int,
+    ) {
+        meterChannelCount = channels
+        for (ch in 0 until channels) {
+            var peak = 0f
+            for (f in 0 until frames) {
+                val sample = scratch[(frameOffset + f) * channels + ch]
+                peak = max(peak, abs(sample))
+            }
+            val display = scalePlaybackMeterPeak(peak)
+            meterLevels[ch] = max(display, meterLevels[ch] * 0.82f)
+        }
+    }
+
+    private fun scalePlaybackMeterPeak(raw: Float): Float {
+        if (raw <= 1e-6f) return 0f
+        val gain = if (raw < 0.15f) 1f / raw else 1f
+        return (raw * gain).coerceIn(0f, 1f)
+    }
+
+    private fun resetMeterLevels() {
+        meterChannelCount = 0
+        meterLevels.fill(0f)
     }
 
     private fun maybeLoopRewind() {
@@ -249,5 +293,6 @@ class SessionPlayer {
         loopStartFrame = null
         loopEndFrame = null
         loopEnabled = false
+        resetMeterLevels()
     }
 }

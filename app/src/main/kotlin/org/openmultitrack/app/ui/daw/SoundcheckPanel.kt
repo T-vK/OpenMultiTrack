@@ -137,6 +137,8 @@ fun SoundcheckPanel(
                     loopEndSec = session.soundcheckLoopEndSec,
                     loopEnabled = session.soundcheckLoopEnabled,
                     loopSelecting = session.soundcheckLoopSelecting,
+                    isPlaying = session.isPlaying,
+                    meterLevels = session.soundcheckMeterLevels,
                     overview = overview,
                     normalized = normalized,
                     showWaveforms = showWaveforms,
@@ -250,6 +252,8 @@ private fun SoundcheckWaveformStripList(
     loopEndSec: Float?,
     loopEnabled: Boolean,
     loopSelecting: Boolean,
+    isPlaying: Boolean,
+    meterLevels: Map<Int, Float>,
     overview: SessionWaveformOverview,
     normalized: Boolean,
     showWaveforms: Boolean,
@@ -322,7 +326,7 @@ private fun SoundcheckWaveformStripList(
             hideSolo,
         )
         val labelGap = innerPad / 2
-        val waveformAreaStart = innerPad + labelColumnWidth + labelGap
+        val waveformAreaStart = innerPad + labelColumnWidth + labelGap + StripVuMeterWidth + labelGap
         var waveformWidthPx by remember { mutableFloatStateOf(0f) }
         val waveformWidthState by rememberUpdatedState(waveformWidthPx)
 
@@ -440,24 +444,29 @@ private fun SoundcheckWaveformStripList(
                 Column(modifier = stripListModifier, verticalArrangement = Arrangement.spacedBy(gap)) {
                     strips.forEach { strip ->
                         key(strip.index) {
-                            SoundcheckStripRow(
-                                strip = strip,
-                                stripHeight = stripHeight,
-                                innerPad = innerPad,
-                                labelFontSize = labelFontSize,
-                                labelColumnWidth = labelColumnWidth,
-                                labelGap = labelGap,
-                                overview = overview,
-                                viewStartSec = viewStart,
-                                viewWindowSec = viewWindow,
-                                normalized = normalized,
-                                showWaveform = showWaveforms,
-                                numberMode = numberMode,
-                                iconMode = iconMode,
-                                hideArm = hideArm,
-                                hideMonitor = hideMonitor,
-                                hideSolo = hideSolo,
-                            )
+                        SoundcheckStripRow(
+                            strip = strip,
+                            stripHeight = stripHeight,
+                            innerPad = innerPad,
+                            labelFontSize = labelFontSize,
+                            labelColumnWidth = labelColumnWidth,
+                            labelGap = labelGap,
+                            overview = overview,
+                            viewStartSec = viewStart,
+                            viewWindowSec = viewWindow,
+                            meterLevel = if (isPlaying) {
+                                meterLevels[strip.index] ?: 0f
+                            } else {
+                                peakLevelAtTime(overview, strip.index, playheadSec, normalized)
+                            },
+                            normalized = normalized,
+                            showWaveform = showWaveforms,
+                            numberMode = numberMode,
+                            iconMode = iconMode,
+                            hideArm = hideArm,
+                            hideMonitor = hideMonitor,
+                            hideSolo = hideSolo,
+                        )
                         }
                     }
                 }
@@ -596,6 +605,7 @@ private fun SoundcheckStripRow(
     overview: SessionWaveformOverview,
     viewStartSec: Float,
     viewWindowSec: Float,
+    meterLevel: Float,
     normalized: Boolean,
     showWaveform: Boolean,
     numberMode: StripNumberMode,
@@ -632,6 +642,10 @@ private fun SoundcheckStripRow(
             hideMonitor = hideMonitor,
             hideSolo = hideSolo,
             onClick = {},
+        )
+        StripVuMeter(
+            level = meterLevel,
+            height = colorBarHeight,
         )
         if (showWaveform) {
             Box(
@@ -837,6 +851,18 @@ private fun formatRulerTime(sec: Float): String {
 }
 
 internal fun formatDuration(sec: Float): String = formatRulerTime(sec)
+
+internal fun peakLevelAtTime(
+    overview: SessionWaveformOverview,
+    channelIndex: Int,
+    timeSec: Float,
+    normalized: Boolean,
+): Float {
+    val peaks = overview.peaksByChannel[channelIndex] ?: return 0f
+    if (peaks.isEmpty() || overview.peaksPerSec <= 0f) return 0f
+    val idx = (timeSec * overview.peaksPerSec).toInt().coerceIn(0, peaks.size - 1)
+    return scalePeaksForDisplay(floatArrayOf(peaks[idx]), normalized).first()
+}
 
 /** USB peaks are often very small floats; scale for display so waveforms stay visible. */
 internal fun scalePeaksForDisplay(peaks: FloatArray, normalized: Boolean): FloatArray {

@@ -25,6 +25,19 @@ class SoundcheckWaveformTest {
     }
 
     @Test
+    fun peakLevelAtTime_readsOverviewAtIndex() {
+        val peaks = FloatArray(40) { 0.1f }
+        peaks[20] = 0.8f
+        val overview = SessionWaveformOverview(
+            peaksByChannel = mapOf(0 to peaks),
+            peaksPerSec = 4f,
+            durationSec = 10f,
+        )
+        val level = peakLevelAtTime(overview, 0, 5f, normalized = false)
+        assertThat(level).isWithin(0.01f).of(0.8f)
+    }
+
+    @Test
     fun scalePeaksForDisplay_boostsQuietPeaks() {
         val quiet = floatArrayOf(0.01f, 0.02f, 0.015f)
         val scaled = scalePeaksForDisplay(quiet, normalized = false)

@@ -97,6 +97,7 @@ data class MixerSessionUiState(
     val soundcheckLoopEndSec: Float? = null,
     val soundcheckLoopEnabled: Boolean = false,
     val soundcheckLoopSelecting: Boolean = false,
+    val soundcheckMeterLevels: Map<Int, Float> = emptyMap(),
 )
 
 class MixerSessionController(
@@ -438,6 +439,7 @@ class MixerSessionController(
                 isPlaying = false,
                 transportState = TransportState.IDLE,
                 playbackPositionSec = posSec,
+                soundcheckMeterLevels = emptyMap(),
             )
         }
     }
@@ -738,21 +740,29 @@ class MixerSessionController(
             while (isActive) {
                 val st = player.status
                 if (st.state != TransportState.PLAYING) {
-                    _state.update { it.copy(isPlaying = false, transportState = TransportState.IDLE) }
+                    _state.update {
+                        it.copy(
+                            isPlaying = false,
+                            transportState = TransportState.IDLE,
+                            soundcheckMeterLevels = emptyMap(),
+                        )
+                    }
                     break
                 }
                 val posSec = if (sampleRate > 0) st.positionFrames.toFloat() / sampleRate else 0f
                 val durSec = if (sampleRate > 0) st.durationFrames.toFloat() / sampleRate else 0f
+                val meters = player.meterLevelsSnapshot()
                 if (abs(posSec - lastPosSec) >= 0.08f) {
                     lastPosSec = posSec
-                    _state.update { s ->
-                        s.copy(
-                            isPlaying = true,
-                            transportState = TransportState.PLAYING,
-                            playbackPositionSec = posSec,
-                            playbackDurationSec = durSec.coerceAtLeast(s.playbackDurationSec),
-                        )
-                    }
+                }
+                _state.update { s ->
+                    s.copy(
+                        isPlaying = true,
+                        transportState = TransportState.PLAYING,
+                        playbackPositionSec = posSec,
+                        playbackDurationSec = durSec.coerceAtLeast(s.playbackDurationSec),
+                        soundcheckMeterLevels = meters,
+                    )
                 }
                 delay(80)
             }

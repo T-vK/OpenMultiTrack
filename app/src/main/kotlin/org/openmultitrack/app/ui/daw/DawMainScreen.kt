@@ -1109,6 +1109,10 @@ private fun ChannelStripRow(
             hideSolo = hideSolo,
             onClick = onOpenControls,
         )
+        StripVuMeter(
+            level = liveVuLevel(waveform, normalized),
+            height = colorBarHeight,
+        )
         if (showWaveform) {
             WaveformView(
                 waveform = waveform,
