@@ -25,6 +25,14 @@ class ScribbleStripCache(context: Context) {
         }.getOrNull()
     }
 
+    fun loadFingerprint(mixerId: String): String? {
+        val file = cacheFile(mixerId)
+        if (!file.isFile) return null
+        return runCatching {
+            JSONObject(file.readText()).optString("fingerprint").takeIf { it.isNotBlank() }
+        }.getOrNull()
+    }
+
     fun save(mixerId: String, labels: List<UsbChannelScribble>) {
         val fingerprint = fingerprint(labels)
         val root = JSONObject().apply {
