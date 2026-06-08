@@ -54,6 +54,8 @@ class CaptureSessionEngine(
     private var perChannelWriter: PerChannelWavWriter? = null
     private var legacyWavWriter: WavWriter? = null
     private var sessionDir: File? = null
+    val activeSessionDir: File?
+        get() = sessionDir
     private var recordingConfig: RecordingConfig? = null
     private var channelCount: Int = 2
     private var sampleRate: Int = 48_000

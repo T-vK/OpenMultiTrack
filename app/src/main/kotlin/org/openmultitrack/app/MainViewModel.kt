@@ -79,7 +79,8 @@ data class DawUiState(
     val showWaveforms: Boolean = true,
     val stripNumberMode: StripNumberMode = StripNumberMode.BOTH,
     val stripIconMode: StripIconMode = StripIconMode.SHOW,
-    val pendingRecordingResume: Boolean = false,
+    /** mixerId → sessionDir for recordings interrupted by an unexpected app exit. */
+    val interruptedRecordings: Map<String, String> = emptyMap(),
 )
 
 class MainViewModel(
@@ -354,6 +355,14 @@ class MainViewModel(
         sessionClient.withManager { it.getOrCreate(mixerId).toggleSoundcheckLoopButton() }
     }
 
+    fun setSoundcheckLoopIn(mixerId: String) {
+        sessionClient.withManager { it.getOrCreate(mixerId).setSoundcheckLoopIn() }
+    }
+
+    fun setSoundcheckLoopOut(mixerId: String) {
+        sessionClient.withManager { it.getOrCreate(mixerId).setSoundcheckLoopOut() }
+    }
+
     fun setPlaybackWaveformWindowSec(sec: Float) {
         val rounded = sec.coerceIn(30f, 600f).let { kotlin.math.round(it) }
         settings.playbackWaveformWindowSec = rounded
@@ -422,14 +431,28 @@ class MainViewModel(
 
     fun stopRecord(mixerId: String) {
         sessionClient.withManager { it.getOrCreate(mixerId).stopRecording() }
-        clearPendingRecordingResumeIfNeeded(mixerId)
+        clearInterruptedRecordingIfNeeded(mixerId)
+    }
+
+    fun resumeInterruptedRecording(mixerId: String) {
+        val sessionDir = _uiState.value.interruptedRecordings[mixerId]?.let { java.io.File(it) }
+            ?: IncompleteRecordingStore.recoverableSession(appContext, settings, mixerId)
+            ?: return
+        if (!ensureAudioPermission(PendingAudioAction.Resume(mixerId, sessionDir))) return
+        if (scribbleStripCache.hasCache(mixerId)) {
+            applyCachedScribble(mixerId)
+        }
+        resumeRecordingInternal(mixerId, sessionDir)
+        _uiState.update { it.copy(interruptedRecordings = it.interruptedRecordings - mixerId) }
     }
 
     fun finalizeIncompleteRecording(mixerId: String) {
-        val sessionDir = IncompleteRecordingStore.latestIncompleteSession(appContext, settings, mixerId)
+        val sessionDir = _uiState.value.interruptedRecordings[mixerId]?.let { java.io.File(it) }
+            ?: IncompleteRecordingStore.recoverableSession(appContext, settings, mixerId)
+            ?: IncompleteRecordingStore.latestIncompleteSession(appContext, settings, mixerId)
             ?: return
         sessionClient.withManager { it.getOrCreate(mixerId).finalizeIncompleteRecording(sessionDir) }
-        _uiState.update { it.copy(pendingRecordingResume = false) }
+        _uiState.update { it.copy(interruptedRecordings = it.interruptedRecordings - mixerId) }
         showStatus("Incomplete recording finalized.", mixerId)
         val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
         if (ScribbleImportSupport.supportsOsc(profile)) {
@@ -448,29 +471,29 @@ class MainViewModel(
         sessionClient.withManager {
             it.getOrCreate(mixerId).resumeRecording(sessionDir, cachedLabels)
         }
-        _uiState.update { it.copy(pendingRecordingResume = false) }
-        showStatus("Recording resumed automatically.", mixerId)
+        _uiState.update { it.copy(interruptedRecordings = it.interruptedRecordings - mixerId) }
+        showStatus("Recording resumed.", mixerId)
         if (!cachedLabels.isNullOrEmpty()) {
             AppLogBuffer.append("I", "Scribble", "Applied cached strip labels on recording resume (${cachedLabels.size} channels)")
         }
         AppLogBuffer.append("I", "Record", "Resumed incomplete session at ${sessionDir.absolutePath}")
     }
 
-    private fun maybeAutoResumeRecording(mixerId: String) {
-        val session = _uiState.value.sessionByMixer[mixerId]
-        if (session?.isRecording == true) return
-        val sessionDir = IncompleteRecordingStore.latestIncompleteSession(appContext, settings, mixerId)
-            ?: return
-        if (!ensureAudioPermission(PendingAudioAction.Resume(mixerId, sessionDir))) return
-        if (scribbleStripCache.hasCache(mixerId)) {
-            applyCachedScribble(mixerId)
+    private fun refreshInterruptedRecording(mixerId: String) {
+        val sessionDir = IncompleteRecordingStore.recoverableSession(appContext, settings, mixerId)
+        _uiState.update { ui ->
+            val updated = if (sessionDir != null) {
+                ui.interruptedRecordings + (mixerId to sessionDir.absolutePath)
+            } else {
+                ui.interruptedRecordings - mixerId
+            }
+            ui.copy(interruptedRecordings = updated)
         }
-        resumeRecordingInternal(mixerId, sessionDir)
     }
 
-    private fun clearPendingRecordingResumeIfNeeded(mixerId: String) {
-        if (!IncompleteRecordingStore.hasIncompleteRecording(appContext, settings, mixerId)) {
-            _uiState.update { it.copy(pendingRecordingResume = false) }
+    private fun clearInterruptedRecordingIfNeeded(mixerId: String) {
+        if (IncompleteRecordingStore.recoverableSession(appContext, settings, mixerId) == null) {
+            _uiState.update { it.copy(interruptedRecordings = it.interruptedRecordings - mixerId) }
         }
     }
 
@@ -810,11 +833,18 @@ class MainViewModel(
             manager.onProbeComplete(resolvedProfile.id, usb, result)
             OmtLog.i("ViewModel", "auto-probed ${resolvedProfile.displayName}")
             usbRecoveryJob?.cancel()
-            val resumePending = IncompleteRecordingStore.hasIncompleteRecording(appContext, settings, resolvedProfile.id)
-            _uiState.update { it.copy(pendingRecordingResume = resumePending) }
+            refreshInterruptedRecording(resolvedProfile.id)
+            val resumePending = IncompleteRecordingStore.recoverableSession(
+                appContext,
+                settings,
+                resolvedProfile.id,
+            ) != null
             if (resumePending) {
-                AppLogBuffer.append("I", "Scribble", "Will apply cached labels when resuming incomplete recording")
-                maybeAutoResumeRecording(resolvedProfile.id)
+                AppLogBuffer.append(
+                    "I",
+                    "Record",
+                    "Interrupted recording detected for ${resolvedProfile.displayName} — tap Resume to continue",
+                )
             } else if (ScribbleImportSupport.supportsOsc(resolvedProfile)) {
                 onOscMixerReady(resolvedProfile.id)
             } else if (
@@ -868,8 +898,8 @@ class MainViewModel(
     private fun maybeBackgroundRefreshOscScribble(mixerId: String, quiet: Boolean) {
         val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
         if (!ScribbleImportSupport.supportsOsc(profile)) return
-        if (IncompleteRecordingStore.hasIncompleteRecording(appContext, settings, mixerId)) {
-            AppLogBuffer.append("I", "Scribble", "Skipped OSC scribble refresh — incomplete recording to resume")
+        if (IncompleteRecordingStore.recoverableSession(appContext, settings, mixerId) != null) {
+            AppLogBuffer.append("I", "Scribble", "Skipped OSC scribble refresh — interrupted recording pending")
             return
         }
         val session = _uiState.value.sessionByMixer[mixerId] ?: return
@@ -912,8 +942,8 @@ class MainViewModel(
         if (!ensureFlow8BluetoothPermission(PendingFlow8Action.ShowPairingDialog(mixerId))) {
             return
         }
-        if (IncompleteRecordingStore.hasIncompleteRecording(appContext, settings, mixerId)) {
-            AppLogBuffer.append("I", "Scribble", "Skipped FLOW 8 auto-import — incomplete recording to resume")
+        if (IncompleteRecordingStore.recoverableSession(appContext, settings, mixerId) != null) {
+            AppLogBuffer.append("I", "Scribble", "Skipped FLOW 8 auto-import — interrupted recording pending")
             return
         }
         val session = _uiState.value.sessionByMixer[mixerId] ?: return

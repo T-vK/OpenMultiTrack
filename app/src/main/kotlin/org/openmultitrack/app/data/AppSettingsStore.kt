@@ -63,6 +63,26 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getString(KEY_LAST_ACTIVE_MIXER, null)
         set(value) = prefs.edit().putString(KEY_LAST_ACTIVE_MIXER, value).apply()
 
+    val activeRecordingMixerId: String?
+        get() = prefs.getString(KEY_ACTIVE_RECORDING_MIXER, null)
+
+    val activeRecordingSessionDir: String?
+        get() = prefs.getString(KEY_ACTIVE_RECORDING_DIR, null)
+
+    fun setActiveRecording(mixerId: String, sessionDir: String) {
+        prefs.edit()
+            .putString(KEY_ACTIVE_RECORDING_MIXER, mixerId)
+            .putString(KEY_ACTIVE_RECORDING_DIR, sessionDir)
+            .commit()
+    }
+
+    fun clearActiveRecording() {
+        prefs.edit()
+            .remove(KEY_ACTIVE_RECORDING_MIXER)
+            .remove(KEY_ACTIVE_RECORDING_DIR)
+            .commit()
+    }
+
     fun appModeForMixer(mixerId: String): AppMode {
         val json = prefs.getString(KEY_APP_MODES_BY_MIXER, null) ?: return AppMode.MULTITRACK_RECORD
         return runCatching {
@@ -106,6 +126,8 @@ class AppSettingsStore(context: Context) {
         private const val KEY_STRIP_NUMBER_MODE = "strip_number_mode"
         private const val KEY_STRIP_ICON_MODE = "strip_icon_mode"
         private const val KEY_LAST_ACTIVE_MIXER = "last_active_mixer_id"
+        private const val KEY_ACTIVE_RECORDING_MIXER = "active_recording_mixer_id"
+        private const val KEY_ACTIVE_RECORDING_DIR = "active_recording_session_dir"
         private const val KEY_APP_MODES_BY_MIXER = "app_modes_by_mixer"
     }
 }

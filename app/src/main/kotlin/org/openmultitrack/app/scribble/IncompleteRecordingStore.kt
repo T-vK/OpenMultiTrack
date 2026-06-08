@@ -17,6 +17,27 @@ object IncompleteRecordingStore {
     ): File? = findIncompleteSessions(context, settings, mixerId)
         .maxByOrNull { SessionMetadata.read(it)?.startedAtEpochMs ?: 0L }
 
+    /**
+     * Returns an incomplete session only when the app was actively recording it before exit.
+     * Orphan incomplete folders (no persisted active recording) are ignored for auto-recovery.
+     */
+    fun recoverableSession(
+        context: Context,
+        settings: AppSettingsStore,
+        mixerId: String,
+    ): File? {
+        val dirPath = settings.activeRecordingSessionDir ?: return null
+        if (settings.activeRecordingMixerId != mixerId) return null
+        val dir = File(dirPath)
+        if (!dir.isDirectory) return null
+        val meta = SessionMetadata.read(dir) ?: return null
+        if (!meta.incomplete || meta.mixerId != mixerId) return null
+        val root = settings.storageRootPath?.let { File(it) }
+            ?: File(context.getExternalFilesDir(null), "OpenMultiTrack")
+        if (!dir.absolutePath.startsWith(root.absolutePath)) return null
+        return dir
+    }
+
     fun findIncompleteSessions(
         context: Context,
         settings: AppSettingsStore,

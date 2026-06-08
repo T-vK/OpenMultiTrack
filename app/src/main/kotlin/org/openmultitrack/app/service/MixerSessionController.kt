@@ -253,13 +253,17 @@ class MixerSessionController(
     fun setSoundcheckLoopRegion(startSec: Float, endSec: Float) {
         val duration = _state.value.playbackDurationSec
         if (duration <= 0f) return
-        val start = startSec.coerceIn(0f, duration)
-        val end = endSec.coerceIn(0f, duration)
+        var start = min(startSec, endSec).coerceIn(0f, duration)
+        var end = max(startSec, endSec).coerceIn(0f, duration)
+        if (end <= start + 0.05f) {
+            end = (start + 0.25f).coerceAtMost(duration)
+            if (end <= start + 0.05f) start = (end - 0.25f).coerceAtLeast(0f)
+        }
         if (end <= start + 0.05f) return
         _state.update {
             it.copy(
-                soundcheckLoopStartSec = min(start, end),
-                soundcheckLoopEndSec = max(start, end),
+                soundcheckLoopStartSec = start,
+                soundcheckLoopEndSec = end,
                 soundcheckLoopSelecting = false,
             )
         }
@@ -278,6 +282,24 @@ class MixerSessionController(
 
     fun setSoundcheckLoopSelecting(selecting: Boolean) {
         _state.update { it.copy(soundcheckLoopSelecting = selecting) }
+    }
+
+    fun setSoundcheckLoopIn() {
+        val s = _state.value
+        val duration = s.playbackDurationSec
+        if (duration <= 0f) return
+        val pos = s.playbackPositionSec.coerceIn(0f, duration)
+        val end = s.soundcheckLoopEndSec ?: duration
+        setSoundcheckLoopRegion(pos, max(end, pos + 0.1f).coerceAtMost(duration))
+    }
+
+    fun setSoundcheckLoopOut() {
+        val s = _state.value
+        val duration = s.playbackDurationSec
+        if (duration <= 0f) return
+        val pos = s.playbackPositionSec.coerceIn(0f, duration)
+        val start = s.soundcheckLoopStartSec ?: 0f
+        setSoundcheckLoopRegion(min(start, pos - 0.1f).coerceAtLeast(0f), pos)
     }
 
     fun toggleSoundcheckLoopButton() {
@@ -519,12 +541,17 @@ class MixerSessionController(
                     }
                 }
                 startWaveformUpdates()
+                val sessionDir = captureEngine.activeSessionDir
+                if (sessionDir != null) {
+                    settings.setActiveRecording(prof.id, sessionDir.absolutePath)
+                }
                 _state.update {
                     it.copy(
                         isRecording = true,
                         transportState = TransportState.RECORDING,
                         statusMessage = "Recording…",
                         warningMessage = null,
+                        lastRecordingPath = sessionDir?.absolutePath ?: it.lastRecordingPath,
                     )
                 }
             } catch (e: Exception) {
@@ -537,12 +564,11 @@ class MixerSessionController(
     fun resumeRecording(sessionDir: File, scribbleLabels: List<UsbChannelScribble>? = null) {
         val descriptor = activeDescriptor ?: return
         val probe = activeProbe ?: return
+        val meta = SessionMetadata.read(sessionDir) ?: return
         scope.launch {
             try {
                 captureMutex.withLock {
                     withContext(Dispatchers.IO) {
-                        val meta = SessionMetadata.read(sessionDir)
-                            ?: error("No session metadata in ${sessionDir.absolutePath}")
                         restoreChannelStripsFromMetadata(meta)
                         if (!captureEngine.isCaptureActive) {
                             ensureCapture(descriptor, probe).getOrThrow()
@@ -556,6 +582,10 @@ class MixerSessionController(
                     }
                 }
                 startWaveformUpdates()
+                settings.setActiveRecording(
+                    meta.mixerId.takeIf { it.isNotBlank() } ?: profile?.id ?: mixerId,
+                    sessionDir.absolutePath,
+                )
                 _state.update {
                     it.copy(
                         isRecording = true,
@@ -585,6 +615,9 @@ class MixerSessionController(
                     meta.markComplete(sessionDir)
                 }
             }
+            if (settings.activeRecordingSessionDir == sessionDir.absolutePath) {
+                settings.clearActiveRecording()
+            }
             _state.update {
                 it.copy(
                     statusMessage = "Incomplete session finalized",
@@ -601,6 +634,7 @@ class MixerSessionController(
                 releaseCaptureIfIdleLocked()
                 ended
             }
+            settings.clearActiveRecording()
             _state.update {
                 it.copy(
                     isRecording = false,

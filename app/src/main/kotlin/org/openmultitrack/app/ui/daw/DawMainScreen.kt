@@ -129,6 +129,9 @@ fun DawMainScreen(
     onSetSoundcheckView: (String, Float, Float) -> Unit,
     onSetSoundcheckLoopRegion: (String, Float, Float) -> Unit,
     onToggleSoundcheckLoop: (String) -> Unit,
+    onSetSoundcheckLoopIn: (String) -> Unit,
+    onSetSoundcheckLoopOut: (String) -> Unit,
+    onResumeInterruptedRecording: (String) -> Unit,
     onConfirmFlow8PairingImport: () -> Unit,
     onDismissFlow8PairingDialog: () -> Unit,
     onHideArmChange: (Boolean) -> Unit,
@@ -194,6 +197,8 @@ fun DawMainScreen(
                         onToggleSoundcheckPlayback = { onToggleSoundcheckPlayback(activeId) },
                         onStopSoundcheck = { onStopSoundcheck(activeId) },
                         onToggleSoundcheckLoop = { onToggleSoundcheckLoop(activeId) },
+                        onSetSoundcheckLoopIn = { onSetSoundcheckLoopIn(activeId) },
+                        onSetSoundcheckLoopOut = { onSetSoundcheckLoopOut(activeId) },
                     )
                 }
             }
@@ -208,12 +213,14 @@ fun DawMainScreen(
                 if (state.mixers.isEmpty()) {
                     EmptyMixersPrompt(onAddMixer = onAddMixer)
                 } else {
-                    if (state.pendingRecordingResume) {
-                        IncompleteRecordingBanner(
-                            message = "Interrupted recording detected — resuming automatically. " +
-                                "Silence is inserted for any time not captured.",
-                            onFinalize = activeId?.let { id -> { onFinalizeIncompleteRecording(id) } },
-                        )
+                    activeId?.let { id ->
+                        state.interruptedRecordings[id]?.let {
+                            IncompleteRecordingBanner(
+                                message = "Recording was interrupted. Resume to continue, or finalize to keep what was captured.",
+                                onResume = { onResumeInterruptedRecording(id) },
+                                onFinalize = { onFinalizeIncompleteRecording(id) },
+                            )
+                        }
                     }
                     session?.warningMessage?.let { WarningBanner(it) }
                     when (session?.appMode) {
@@ -367,6 +374,8 @@ private fun TransportToolbar(
     onToggleSoundcheckPlayback: () -> Unit,
     onStopSoundcheck: () -> Unit,
     onToggleSoundcheckLoop: () -> Unit,
+    onSetSoundcheckLoopIn: () -> Unit,
+    onSetSoundcheckLoopOut: () -> Unit,
 ) {
     var mixerMenuOpen by remember { mutableStateOf(false) }
     var removeMixerConfirm by remember { mutableStateOf<MixerProfile?>(null) }
@@ -473,6 +482,12 @@ private fun TransportToolbar(
                 )
 
                 if (session.appMode == AppMode.VIRTUAL_SOUNDCHECK) {
+                    SoundcheckLoopInOutControls(
+                        session = session,
+                        showLabels = showLabels,
+                        onLoopIn = onSetSoundcheckLoopIn,
+                        onLoopOut = onSetSoundcheckLoopOut,
+                    )
                     SoundcheckLoopControl(
                         session = session,
                         showLabels = showLabels,
@@ -756,6 +771,31 @@ private fun MonitorControl(
 }
 
 @Composable
+private fun SoundcheckLoopInOutControls(
+    session: MixerSessionUiState,
+    showLabels: Boolean,
+    onLoopIn: () -> Unit,
+    onLoopOut: () -> Unit,
+) {
+    val enabled = session.selectedSoundcheckDir != null
+    ToolbarActionButton(onClick = onLoopIn, enabled = enabled) {
+        Text("In", style = MaterialTheme.typography.labelLarge)
+        if (showLabels) {
+            Spacer(Modifier.width(4.dp))
+            Text("Loop in", style = MaterialTheme.typography.labelSmall)
+        }
+    }
+    Spacer(Modifier.width(4.dp))
+    ToolbarActionButton(onClick = onLoopOut, enabled = enabled) {
+        Text("Out", style = MaterialTheme.typography.labelLarge)
+        if (showLabels) {
+            Spacer(Modifier.width(4.dp))
+            Text("Loop out", style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
 private fun SoundcheckLoopControl(
     session: MixerSessionUiState,
     showLabels: Boolean,
@@ -774,7 +814,7 @@ private fun SoundcheckLoopControl(
             Spacer(Modifier.width(6.dp))
             Text(
                 when {
-                    session.soundcheckLoopSelecting -> "Set loop"
+                    session.soundcheckLoopSelecting -> "Tap start/end"
                     hasRegion && session.soundcheckLoopEnabled -> "Loop on"
                     hasRegion -> "Loop off"
                     else -> "Loop"
@@ -897,7 +937,8 @@ private fun WarningBanner(message: String) {
 @Composable
 private fun IncompleteRecordingBanner(
     message: String,
-    onFinalize: (() -> Unit)?,
+    onResume: () -> Unit,
+    onFinalize: () -> Unit,
 ) {
     Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.errorContainer) {
         Row(
@@ -912,10 +953,11 @@ private fun IncompleteRecordingBanner(
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 style = MaterialTheme.typography.bodySmall,
             )
-            onFinalize?.let { finalize ->
-                TextButton(onClick = finalize) {
-                    Text("Finalize")
-                }
+            TextButton(onClick = onResume) {
+                Text("Resume")
+            }
+            TextButton(onClick = onFinalize) {
+                Text("Finalize")
             }
         }
     }
