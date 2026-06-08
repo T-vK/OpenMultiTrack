@@ -31,54 +31,62 @@ import kotlin.coroutines.resumeWithException
 /**
  * Reads FLOW 8 channel strip names over BLE (see docs/flow8-reverse-engineering/).
  *
- * Requires pairing mode on the mixer (short ~15 s bursts — scan retries for several minutes).
+ * Requires pairing mode on the mixer (~15 s per button press). The in-app default scan
+ * window matches that window; instrumented tests may pass a longer [discoveryTimeoutMs].
  */
 class Flow8BleScribbleImporter(
     private val context: Context,
     private val discoveryTimeoutMs: Long = DEFAULT_DISCOVERY_TIMEOUT_MS,
+    private val onStatus: (String) -> Unit = {},
 ) {
     suspend fun fetchChannelLabels(): Result<List<UsbChannelScribble>> = withContext(Dispatchers.IO) {
         runCatching {
-            val device = findFlowDevice() ?: error(
-                "FLOW 8 not found over BLE — enable pairing mode on the mixer and try again",
-            )
+            val device = findFlowDevice() ?: error(PAIRING_NOT_FOUND_MESSAGE)
+            reportStatus("FLOW 8 found — reading channel names…")
             fetchFromDevice(device)
         }
     }
 
+    private fun reportStatus(message: String) {
+        OmtLog.i("Flow8Ble", message)
+        AppLogBuffer.append("I", "Flow8Ble", message)
+        onStatus(message)
+    }
+
     @SuppressLint("MissingPermission")
     private suspend fun findFlowDevice(): BluetoothDevice? {
-        val adapter = bluetoothAdapter() ?: error("Bluetooth is not available")
-        if (!adapter.isEnabled) error("Bluetooth is disabled")
+        val adapter = bluetoothAdapter() ?: error("Bluetooth is not available on this device")
+        if (!adapter.isEnabled) error("Bluetooth is off — turn it on and try again")
+
+        reportStatus(PAIRING_PROMPT_MESSAGE)
+        OmtLog.i("Flow8Ble", "scanning ${discoveryTimeoutMs}ms for FLOW 8 in pairing mode")
+
+        if (discoveryTimeoutMs <= DEFAULT_DISCOVERY_TIMEOUT_MS) {
+            return scanOnce(adapter, discoveryTimeoutMs)
+        }
 
         val deadline = System.currentTimeMillis() + discoveryTimeoutMs
         var round = 0
-        OmtLog.i(
-            "Flow8Ble",
-            "scanning up to ${discoveryTimeoutMs / 1000}s — enable FLOW 8 pairing (~15 s per press); re-enable anytime",
-        )
         while (System.currentTimeMillis() < deadline) {
             round++
             val remaining = deadline - System.currentTimeMillis()
             if (remaining <= 0) break
-
-            val burstMs = minOf(SCAN_BURST_MS, remaining)
-            val msg = "BLE scan round $round (${burstMs / 1000}s) — enable pairing now if not visible"
-            OmtLog.i("Flow8Ble", msg)
-            AppLogBuffer.append("I", "Flow8Ble", msg)
-
-            // Official app scans by service UUID and only connects when pairing flag is set.
-            scanBurst(adapter, filtered = true, timeoutMs = burstMs)?.let { return it }
-            scanBurst(adapter, filtered = false, timeoutMs = burstMs)?.let { return it }
-
+            if (round > 1) {
+                reportStatus("Still scanning… press the FLOW 8 Bluetooth pairing button again")
+            }
+            scanOnce(adapter, remaining)?.let { return it }
             delay(BETWEEN_ROUNDS_MS)
         }
+        return null
+    }
 
-        LastKnownFlow8Store.load(context)?.let { address ->
-            runCatching { adapter.getRemoteDevice(address) }.getOrNull()?.let { cached ->
-                OmtLog.i("Flow8Ble", "falling back to cached FLOW 8 address $address")
-                return cached
-            }
+    private suspend fun scanOnce(adapter: BluetoothAdapter, budgetMs: Long): BluetoothDevice? {
+        val filteredMs = budgetMs / 2
+        val unfilteredMs = budgetMs - filteredMs
+        // Official app scans by service UUID and only connects when pairing flag is set.
+        scanBurst(adapter, filtered = true, timeoutMs = filteredMs)?.let { return it }
+        if (unfilteredMs > 0) {
+            scanBurst(adapter, filtered = false, timeoutMs = unfilteredMs)?.let { return it }
         }
         return null
     }
@@ -474,9 +482,16 @@ class Flow8BleScribbleImporter(
     }
 
     companion object {
-        /** Pairing mode on FLOW 8 is only visible for ~15 s — retry many bursts over several minutes. */
-        const val DEFAULT_DISCOVERY_TIMEOUT_MS = 300_000L
-        private const val SCAN_BURST_MS = 18_000L
+        /** Matches FLOW 8 pairing visibility (~15 s per button press). */
+        const val DEFAULT_DISCOVERY_TIMEOUT_MS = 15_000L
+        /** Longer window for instrumented hardware tests (operator can re-enable pairing). */
+        const val INSTRUMENTED_DISCOVERY_TIMEOUT_MS = 90_000L
+
+        const val PAIRING_PROMPT_MESSAGE =
+            "FLOW 8: press the Bluetooth pairing button now — pairing stays active ~15 s"
+        const val PAIRING_NOT_FOUND_MESSAGE =
+            "FLOW 8 not found in pairing mode. Press the Bluetooth pairing button and tap Import again."
+
         private const val BETWEEN_ROUNDS_MS = 100L
         private const val PAIRING_FLAG_BYTE_INDEX = 24
 

@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.openmultitrack.app.data.AppSettingsStore
@@ -254,11 +255,27 @@ class MainViewModel(
     }
 
     private suspend fun importScribbleForMixer(profile: MixerProfile) {
-        _uiState.update { it.copy(globalStatus = "Importing scribble strip…") }
+        val flow8 = supportsFlow8Scribble(profile)
+        _uiState.update {
+            it.copy(
+                globalStatus = if (flow8) {
+                    Flow8BleScribbleImporter.PAIRING_PROMPT_MESSAGE
+                } else {
+                    "Importing scribble strip…"
+                },
+            )
+        }
+        if (flow8) {
+            // Let the pairing prompt render before BLE work blocks the coroutine.
+            delay(150)
+        }
         try {
             val result: Result<Pair<MixerProfile, List<org.openmultitrack.mixer.behringer.UsbChannelScribble>>> = when {
-                supportsFlow8Scribble(profile) -> withContext(Dispatchers.IO) {
-                    Flow8BleScribbleImporter(appContext).fetchChannelLabels().map { profile to it }
+                flow8 -> withContext(Dispatchers.IO) {
+                    Flow8BleScribbleImporter(
+                        context = appContext,
+                        onStatus = { status -> _uiState.update { ui -> ui.copy(globalStatus = status) } },
+                    ).fetchChannelLabels().map { profile to it }
                 }
                 supportsOscScribble(profile) -> {
                     val host = profile.oscHost ?: OscLanDiscovery.discoverMixerIp(appContext)
@@ -289,12 +306,27 @@ class MainViewModel(
                 OmtLog.i("ViewModel", "scribble imported $named labels for ${profile.id}")
             }.onFailure { e ->
                 OmtLog.e("ViewModel", "scribble import failed", e)
-                _uiState.update { it.copy(globalStatus = "Scribble import failed: ${e.message}") }
+                _uiState.update {
+                    it.copy(globalStatus = flow8ScribbleFailureMessage(e))
+                }
             }
         } catch (e: Exception) {
             OmtLog.e("ViewModel", "scribble import failed", e)
-            _uiState.update { it.copy(globalStatus = "Scribble import failed: ${e.message}") }
+            _uiState.update {
+                it.copy(globalStatus = if (flow8) flow8ScribbleFailureMessage(e) else "Scribble import failed: ${e.message}")
+            }
         }
+    }
+
+    private fun flow8ScribbleFailureMessage(error: Throwable): String {
+        val msg = error.message.orEmpty()
+        if (msg.contains("pairing", ignoreCase = true) || msg.contains("not found", ignoreCase = true)) {
+            return msg
+        }
+        if (msg.contains("GATT write failed", ignoreCase = true) || msg.contains("status=133")) {
+            return "FLOW 8 pairing expired. Press the Bluetooth pairing button and tap Import again."
+        }
+        return "FLOW 8 scribble import failed: $msg"
     }
 
     override fun onCleared() {

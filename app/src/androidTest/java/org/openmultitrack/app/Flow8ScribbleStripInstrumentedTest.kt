@@ -33,7 +33,7 @@ class Flow8ScribbleStripInstrumentedTest {
             val context = usbAppProcessRule.runOnActivity { it.applicationContext }
             val labels = Flow8BleScribbleImporter(
                 context,
-                discoveryTimeoutMs = Flow8BleScribbleImporter.DEFAULT_DISCOVERY_TIMEOUT_MS,
+                discoveryTimeoutMs = Flow8BleScribbleImporter.INSTRUMENTED_DISCOVERY_TIMEOUT_MS,
             ).fetchChannelLabels().getOrThrow()
             assertThat(labels).isNotEmpty()
             assertThat(labels.size).isAtMost(7)
