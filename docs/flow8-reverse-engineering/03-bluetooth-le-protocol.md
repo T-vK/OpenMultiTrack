@@ -69,7 +69,8 @@ function frame(type, payload):
 
 The device only broadcasts the `0x35` HandshakeHost notification when **pairing mode
 is active** on the mixer. Pairing mode is enabled from the mixer's physical controls
-and times out after ~60 seconds. Without a `0x35` the handshake cannot proceed.
+and times out after **~15 seconds** per press (re-enable as needed). Without a `0x35`
+the handshake cannot proceed.
 
 ## Handshake state machine (event-driven)
 
