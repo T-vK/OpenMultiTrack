@@ -83,6 +83,7 @@ dependencies {
     implementation(project(":session-io"))
 
     implementation(libs.androidx.core.ktx)
+    implementation("androidx.core:core:1.15.0")
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)

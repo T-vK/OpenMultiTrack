@@ -42,6 +42,7 @@ add_library(openmultitrack_audio SHARED
     audio_probe.cpp
     audio_recorder.cpp
     audio_player.cpp
+    audio_monitor.cpp
     jni_bridge.cpp
     uac2/android_usb_io.cpp
     uac2/libusb_session.cpp

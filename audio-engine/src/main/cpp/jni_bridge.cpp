@@ -4,6 +4,7 @@
 #include <string>
 
 #include "audio_log.h"
+#include "audio_monitor.h"
 #include "audio_player.h"
 #include "audio_probe.h"
 #include "audio_recorder.h"
@@ -170,4 +171,55 @@ Java_org_openmultitrack_audio_NativeAudioEngine_nativeWritePlaybackFrames(
         elements, static_cast<size_t>(frameCount));
     env->ReleaseFloatArrayElements(src, elements, JNI_ABORT);
     return static_cast<jint>(written);
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_org_openmultitrack_audio_NativeAudioMonitor_nativeStart(
+    JNIEnv* env,
+    jobject /*thiz*/,
+    jint deviceId,
+    jint channelCount,
+    jint sampleRate) {
+    const openmultitrack::MonitorStatus status =
+        openmultitrack::AudioMonitor::instance().start(deviceId, channelCount, sampleRate);
+    jclass cls = env->FindClass("org/openmultitrack/audio/NativeEngineStatus");
+    if (cls == nullptr) return nullptr;
+    jmethodID ctor = env->GetMethodID(cls, "<init>", "(ZIILjava/lang/String;)V");
+    if (ctor == nullptr) return nullptr;
+    return env->NewObject(
+        cls,
+        ctor,
+        static_cast<jboolean>(status.running),
+        static_cast<jint>(status.channelCount),
+        static_cast<jint>(status.sampleRate),
+        toJstring(env, status.error));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_openmultitrack_audio_NativeAudioMonitor_nativeStop(
+    JNIEnv* /*env*/,
+    jobject /*thiz*/) {
+    openmultitrack::AudioMonitor::instance().stop();
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_openmultitrack_audio_NativeAudioMonitor_nativeWriteFrames(
+    JNIEnv* env,
+    jobject /*thiz*/,
+    jfloatArray src,
+    jint frameCount) {
+    jfloat* elements = env->GetFloatArrayElements(src, nullptr);
+    if (elements == nullptr) return 0;
+    const size_t written = openmultitrack::AudioMonitor::instance().writeFrames(
+        elements, static_cast<size_t>(frameCount));
+    env->ReleaseFloatArrayElements(src, elements, JNI_ABORT);
+    return static_cast<jint>(written);
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_org_openmultitrack_audio_NativeAudioMonitor_nativeUnderrunFrames(
+    JNIEnv* /*env*/,
+    jobject /*thiz*/) {
+    return static_cast<jlong>(
+        openmultitrack::AudioMonitor::instance().status().underrunFrames);
 }

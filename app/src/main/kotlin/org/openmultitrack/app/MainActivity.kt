@@ -1,20 +1,24 @@
 package org.openmultitrack.app
 
+import android.Manifest
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.openmultitrack.app.ui.MainScreen
 import org.openmultitrack.audio.OmtLog
@@ -26,6 +30,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private val usbPermissionAction = "${BuildConfig.APPLICATION_ID}.USB_PERMISSION"
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        OmtLog.i("Activity", "POST_NOTIFICATIONS granted=$granted")
+    }
 
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -57,8 +67,14 @@ class MainActivity : ComponentActivity() {
                     viewModel.refreshDevices()
                 }
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
-                    OmtLog.i("Usb", "device detached")
-                    viewModel.refreshDevices()
+                    val detached = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+                    }
+                    OmtLog.i("Usb", "device detached: ${detached?.deviceName}")
+                    viewModel.onUsbDetached(detached?.deviceName)
                 }
             }
         }
@@ -67,6 +83,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         OmtLog.d("Activity", "onCreate")
+        requestNotificationPermissionIfNeeded()
         registerUsbReceiver()
 
         setContent {
@@ -82,6 +99,13 @@ class MainActivity : ComponentActivity() {
                         onStopRecord = viewModel::stopRecording,
                         onPlay = viewModel::playLastRecording,
                         onStopPlayback = viewModel::stopPlayback,
+                        onStartMonitor = viewModel::startMonitoring,
+                        onStopMonitor = viewModel::stopMonitoring,
+                        onToggleMonitorChannel = viewModel::toggleMonitorChannel,
+                        onSelectMonitorOutput = viewModel::setMonitorOutputDevice,
+                        onEnableVirtualMic = viewModel::enableVirtualMic,
+                        onDisableVirtualMic = viewModel::disableVirtualMic,
+                        onToggleVirtualMicChannel = viewModel::toggleVirtualMicChannel,
                     )
                 }
             }
@@ -99,6 +123,16 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         unregisterReceiver(usbReceiver)
         super.onDestroy()
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
     }
 
     private fun registerUsbReceiver() {
