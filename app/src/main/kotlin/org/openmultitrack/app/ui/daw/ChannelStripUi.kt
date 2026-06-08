@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -76,8 +75,9 @@ internal fun stripLabelColumnWidth(
 
     val showsIcon = iconMode != StripIconMode.HIDE &&
         strips.any { MixingStationIcons.emoji(it.iconId) != null }
+    val iconGap = 7.dp
     val bigIconWidth = if (showsIcon) {
-        (stripHeight * 0.72f).coerceIn(22.dp, 48.dp)
+        (stripHeight * 0.60f).coerceIn(18.dp, 36.dp)
     } else {
         0.dp
     }
@@ -89,7 +89,7 @@ internal fun stripLabelColumnWidth(
     }
     val labelWidth = with(density) { maxTextPx.toDp() }
 
-    return (3.dp + bigIconWidth + maxOf(labelWidth, glyphWidth) + 14.dp).coerceAtLeast(36.dp)
+    return (3.dp + bigIconWidth + iconGap + maxOf(labelWidth, glyphWidth) + 14.dp).coerceAtLeast(36.dp)
 }
 
 @Composable
@@ -110,24 +110,22 @@ internal fun StripIdentityCell(
     }
     val iconEmoji = parsed.iconEmoji
     val lineText = parsed.lineText
-    val bigIconSize = (colorBarHeight * 0.72f).coerceIn(22.dp, 48.dp)
-    val bigIconFontSize = (labelFontSize * 2.1f).coerceIn(18f, 36f)
+    val iconGap = 7.dp
+    val bigIconSize = minOf((colorBarHeight * 0.60f).coerceIn(18.dp, 36.dp), colorBarHeight)
+    val bigIconFontSize = (labelFontSize * 1.75f).coerceIn(15f, 28f)
     val controlIconSize = (labelFontSize * 0.95f).coerceIn(10f, 16f).dp
     val colorBarWidth = 3.dp
-    val rowSpacing = 4.dp
     val iconColumnWidth = if (iconEmoji != null) bigIconSize else 0.dp
-    val textAreaWidth = (columnWidth - colorBarWidth - iconColumnWidth - rowSpacing * 2 - 2.dp)
+    val textAreaWidth = (columnWidth - colorBarWidth - iconColumnWidth - iconGap - 2.dp)
         .coerceAtLeast(24.dp)
 
     Row(
         modifier = Modifier
             .width(columnWidth)
             .height(colorBarHeight)
-            .clip(RoundedCornerShape(4.dp))
             .clickable(onClick = onClick)
             .padding(end = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(rowSpacing),
     ) {
         Box(
             Modifier
@@ -140,7 +138,7 @@ internal fun StripIdentityCell(
             Box(
                 modifier = Modifier
                     .size(bigIconSize)
-                    .fillMaxHeight(),
+                    .padding(vertical = 1.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -148,8 +146,10 @@ internal fun StripIdentityCell(
                     fontSize = bigIconFontSize.sp,
                     maxLines = 1,
                     lineHeight = bigIconFontSize.sp,
+                    softWrap = false,
                 )
             }
+            Spacer(Modifier.width(iconGap))
         }
         Column(
             modifier = Modifier.width(textAreaWidth),

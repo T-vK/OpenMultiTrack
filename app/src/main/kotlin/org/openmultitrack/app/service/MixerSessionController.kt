@@ -331,14 +331,14 @@ class MixerSessionController(
     }
 
     private fun startWaveformUpdates() {
-        if (waveformJob?.isActive == true) return
+        waveformJob?.cancel()
         waveformJob = scope.launch {
             while (isActive) {
                 if (captureEngine.isCaptureActive) {
-                    val peaks = captureEngine.waveformSnapshots(settings.waveformNormalized)
+                    val peaks = captureEngine.waveformSnapshots(normalize = true)
                     _state.update { it.copy(waveformPeaks = peaks) }
                 }
-                delay(50)
+                delay(40)
             }
         }
     }

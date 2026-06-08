@@ -242,8 +242,7 @@ class CaptureSessionEngine {
         val out = LinkedHashMap<Int, FloatArray>()
         for (ch in 0 until channelCount) {
             waveformRings[ch]?.let { ring ->
-                val snap = ring.snapshot(normalize)
-                if (snap.isNotEmpty()) out[ch] = snap
+                out[ch] = ring.snapshot(normalize)
             }
         }
         return out
@@ -419,7 +418,7 @@ class CaptureSessionEngine {
     }
 
     private companion object {
-        const val WAVEFORM_DECIMATE_CHUNKS = 4
+        const val WAVEFORM_DECIMATE_CHUNKS = 2
         const val RECORD_WAVEFORM_WINDOW_SEC = 15f
     }
 

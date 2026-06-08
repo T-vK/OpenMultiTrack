@@ -759,24 +759,38 @@ private fun WaveformView(
         Box(modifier = modifier)
         return
     }
+    val displayPeaks = scalePeaksForDisplay(data, normalized)
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
         if (w <= 0f || h <= 0f) return@Canvas
         val mid = h / 2f
-        val step = w / data.size.coerceAtLeast(1)
-        val stroke = (step * 0.7f).coerceAtLeast(1f)
-        data.forEachIndexed { i, peak ->
+        val step = w / displayPeaks.size.coerceAtLeast(1)
+        val stroke = (step * 0.75f).coerceIn(1f, 4f)
+        val minBar = h * 0.06f
+        displayPeaks.forEachIndexed { i, peak ->
             val amp = peak.coerceIn(0f, 1f)
-            val barH = amp * h * 0.92f
+            val barH = maxOf(amp * h * 0.9f, if (amp > 0.02f) minBar else 0f)
             drawLine(
-                color = color.copy(alpha = 0.85f),
+                color = color.copy(alpha = 0.9f),
                 start = Offset(i * step + step / 2f, mid - barH / 2f),
                 end = Offset(i * step + step / 2f, mid + barH / 2f),
                 strokeWidth = stroke,
             )
         }
     }
+}
+
+/** USB peaks are often very small floats; scale for display so live waveforms stay visible. */
+private fun scalePeaksForDisplay(peaks: FloatArray, normalized: Boolean): FloatArray {
+    if (peaks.isEmpty()) return peaks
+    val maxPeak = peaks.max()
+    if (maxPeak <= 1e-6f) return peaks
+    if (normalized) {
+        return FloatArray(peaks.size) { i -> (peaks[i] / maxPeak).coerceIn(0f, 1f) }
+    }
+    val gain = if (maxPeak < 0.15f) 1f / maxPeak else 1f
+    return FloatArray(peaks.size) { i -> (peaks[i] * gain).coerceIn(0f, 1f) }
 }
 
 @Composable
