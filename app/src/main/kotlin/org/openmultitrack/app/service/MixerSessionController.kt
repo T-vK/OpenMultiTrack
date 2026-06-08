@@ -918,6 +918,7 @@ class MixerSessionController(
         waveformJob = scope.launch {
             while (isActive) {
                 if (captureEngine.isCaptureActive) {
+                    val levels = captureEngine.captureMeterLevels()
                     val recording = _state.value.isRecording
                     val monitoring = _state.value.isMonitoring
                     when {
@@ -927,12 +928,11 @@ class MixerSessionController(
                                 it.copy(
                                     waveformPeaks = peaks,
                                     recordElapsedSec = captureEngine.recordElapsedSec(),
-                                    captureMeterLevels = emptyMap(),
+                                    captureMeterLevels = levels,
                                 )
                             }
                         }
                         monitoring -> {
-                            val levels = captureEngine.captureMeterLevels()
                             _state.update {
                                 it.copy(
                                     captureMeterLevels = levels,
@@ -943,7 +943,7 @@ class MixerSessionController(
                         }
                     }
                 }
-                delay(if (_state.value.isRecording) 40 else 80)
+                delay(40)
             }
         }
     }

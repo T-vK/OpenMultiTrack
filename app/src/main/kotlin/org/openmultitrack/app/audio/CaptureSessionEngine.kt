@@ -81,7 +81,9 @@ class CaptureSessionEngine(
     private var virtualMicOutputRunning = false
     private val waveformRings = Array<LiveWaveformRing?>(64) { null }
     private val pendingWaveformPeaks = FloatArray(64)
+    private val pendingMeterPeaks = FloatArray(64)
     private val meterHold = FloatArray(64)
+    private val meterLock = Any()
     private var waveformWindowSec = DEFAULT_WAVEFORM_WINDOW_SEC
     private var waveformPeaksPerSecond = DEFAULT_WAVEFORM_PEAKS_PER_SEC
     private var lastWaveformEmitNs = 0L
@@ -288,21 +290,21 @@ class CaptureSessionEngine(
 
     fun droppedFrameCount(): Long = droppedFrames
 
-    /** Live input levels for VU meters while monitoring (no waveform history). */
-    fun captureMeterLevels(): Map<Int, Float> {
+    /** Live per-channel input levels for VU meters (independent of waveform history). */
+    fun captureMeterLevels(): Map<Int, Float> = synchronized(meterLock) {
         val out = LinkedHashMap<Int, Float>()
         for (ch in 0 until channelCount) {
-            val raw = pendingWaveformPeaks[ch]
+            val raw = pendingMeterPeaks[ch]
             if (raw > 0f) {
                 meterHold[ch] = maxOf(scaleMeterPeak(raw), meterHold[ch])
-                pendingWaveformPeaks[ch] = 0f
+                pendingMeterPeaks[ch] = 0f
             }
-            meterHold[ch] *= 0.85f
+            meterHold[ch] *= 0.9f
             if (meterHold[ch] > 1e-4f) {
                 out[ch] = meterHold[ch]
             }
         }
-        return out
+        out
     }
 
     fun waveformSnapshots(normalize: Boolean): Map<Int, LiveWaveformSnapshot> {
@@ -318,6 +320,7 @@ class CaptureSessionEngine(
     fun clearWaveforms() {
         for (i in waveformRings.indices) waveformRings[i] = null
         pendingWaveformPeaks.fill(0f)
+        pendingMeterPeaks.fill(0f)
         meterHold.fill(0f)
         lastWaveformEmitNs = 0L
     }
@@ -542,13 +545,16 @@ class CaptureSessionEngine(
     }
 
     private fun accumulateWaveformPeaks(scratch: FloatArray, frames: Int, channels: Int) {
-        for (ch in 0 until channels) {
-            var peak = 0f
-            for (frame in 0 until frames) {
-                val sample = scratch[frame * channels + ch]
-                peak = maxOf(peak, kotlin.math.abs(sample))
+        synchronized(meterLock) {
+            for (ch in 0 until channels) {
+                var peak = 0f
+                for (frame in 0 until frames) {
+                    val sample = scratch[frame * channels + ch]
+                    peak = maxOf(peak, kotlin.math.abs(sample))
+                }
+                pendingWaveformPeaks[ch] = maxOf(pendingWaveformPeaks[ch], peak)
+                pendingMeterPeaks[ch] = maxOf(pendingMeterPeaks[ch], peak)
             }
-            pendingWaveformPeaks[ch] = maxOf(pendingWaveformPeaks[ch], peak)
         }
     }
 

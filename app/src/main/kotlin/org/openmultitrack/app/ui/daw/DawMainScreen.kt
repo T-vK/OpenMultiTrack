@@ -1048,8 +1048,8 @@ private fun ChannelStripList(
                     labelFontSize = labelFontSize,
                     labelColumnWidth = labelColumnWidth,
                     waveform = if (showWaveforms && isRecording) waveformPeaks[strip.index] else null,
-                    captureMeterLevel = if (isMonitoring && !isRecording) {
-                        captureMeterLevels[strip.index] ?: 0f
+                    captureMeterLevel = if (isMonitoring || isRecording) {
+                        captureMeterLevels[strip.index]
                     } else {
                         null
                     },
