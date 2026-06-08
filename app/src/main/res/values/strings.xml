@@ -10,4 +10,16 @@
     <string name="stop_record">Stop</string>
     <string name="play_soundcheck">Play last</string>
     <string name="stop_playback">Stop play</string>
+    <string name="live_monitor">Live monitor</string>
+    <string name="monitor_channels_hint">Select channels to hear on headphones/Bluetooth (works without recording).</string>
+    <string name="monitor_output">Monitor output device</string>
+    <string name="start_monitor">Start monitor</string>
+    <string name="stop_monitor">Stop monitor</string>
+    <string name="virtual_mic_root">Virtual microphone (root)</string>
+    <string name="virtual_mic_hint">Select 1 channel (mono) or 2 (stereo). Requires root + snd-aloop. Other apps can select the loopback input.</string>
+    <string name="enable_virtual_mic">Enable virtual mic</string>
+    <string name="disable_virtual_mic">Disable virtual mic</string>
+    <string name="notification_channel_name">Audio session</string>
+    <string name="notification_title">OpenMultiTrack</string>
+    <string name="notification_stop">Stop all</string>
 </resources>
