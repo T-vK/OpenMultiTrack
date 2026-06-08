@@ -52,8 +52,10 @@ private val RecordRed = Color(0xFFE53935)
 private val MonitorBlue = Color(0xFF1E88E5)
 private val SoloAmber = Color(0xFFFFB300)
 
+private val ColorBarIconGap = 6.dp
+
 private fun iconContainerSize(colorBarHeight: Dp): Dp =
-    (colorBarHeight * 0.58f).coerceIn(20.dp, 38.dp)
+    (colorBarHeight * 0.68f).coerceIn(24.dp, 44.dp)
 
 @Composable
 internal fun stripLabelColumnWidth(
@@ -92,7 +94,9 @@ internal fun stripLabelColumnWidth(
     }
     val labelWidth = with(density) { maxTextPx.toDp() }
 
-    return (3.dp + bigIconWidth + iconGap + maxOf(labelWidth, glyphWidth) + 14.dp).coerceAtLeast(36.dp)
+    val colorBarGap = if (showsIcon) ColorBarIconGap else 0.dp
+    return (3.dp + colorBarGap + bigIconWidth + iconGap + maxOf(labelWidth, glyphWidth) + 14.dp)
+        .coerceAtLeast(36.dp)
 }
 
 @Composable
@@ -117,8 +121,9 @@ internal fun StripIdentityCell(
     val bigIconSize = iconContainerSize(colorBarHeight)
     val controlIconSize = (labelFontSize * 0.95f).coerceIn(10f, 16f).dp
     val colorBarWidth = 3.dp
+    val colorBarGap = if (iconEmoji != null) ColorBarIconGap else 0.dp
     val iconColumnWidth = if (iconEmoji != null) bigIconSize else 0.dp
-    val textAreaWidth = (columnWidth - colorBarWidth - iconColumnWidth - iconGap - 2.dp)
+    val textAreaWidth = (columnWidth - colorBarWidth - colorBarGap - iconColumnWidth - iconGap - 2.dp)
         .coerceAtLeast(24.dp)
 
     Row(
