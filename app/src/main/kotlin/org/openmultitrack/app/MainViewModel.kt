@@ -23,6 +23,7 @@ import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.usb.AudioOutputDeviceLabel
 import org.openmultitrack.usb.LabeledAudioDevice
+import org.openmultitrack.app.scribble.OscLanDiscovery
 import org.openmultitrack.mixer.behringer.Xr18ScribbleImporter
 import org.openmultitrack.usb.UsbAudioEnumerator
 import org.openmultitrack.usb.UsbAudioProbeService
@@ -230,27 +231,33 @@ class MainViewModel(
         }
         viewModelScope.launch {
             _uiState.update { it.copy(globalStatus = "Importing scribble strip…") }
-            val importer = Xr18ScribbleImporter()
-            val host = profile.oscHost ?: withContext(Dispatchers.IO) { importer.discoverMixerIp() }
-            if (host == null) {
-                _uiState.update {
-                    it.copy(globalStatus = "Mixer not found on network. Connect tablet and XR18 to the same LAN.")
+            try {
+                val importer = Xr18ScribbleImporter()
+                val host = profile.oscHost
+                    ?: OscLanDiscovery.discoverMixerIp(appContext)
+                if (host == null) {
+                    _uiState.update {
+                        it.copy(globalStatus = "Mixer not found on network. Connect tablet and XR18 to the same LAN.")
+                    }
+                    return@launch
                 }
-                return@launch
-            }
-            val result = withContext(Dispatchers.IO) { importer.fetchUsbLabels(host) }
-            result.onSuccess { labels ->
-                sessionClient.withManager { mgr ->
-                    mgr.getOrCreate(mixerId).applyScribbleLabels(labels)
+                val result = withContext(Dispatchers.IO) { importer.fetchUsbLabels(host) }
+                result.onSuccess { labels ->
+                    sessionClient.withManager { mgr ->
+                        mgr.getOrCreate(mixerId).applyScribbleLabels(labels)
+                    }
+                    val updated = profile.copy(oscHost = host, scribbleImported = true)
+                    mixerStore.saveMixer(updated)
+                    loadMixers()
+                    val named = labels.count { !it.name.isNullOrBlank() }
+                    AppLogBuffer.append("I", "Scribble", "Imported $named channel labels from $host")
+                    _uiState.update { it.copy(globalStatus = "Scribble: $named channel labels from $host") }
+                    OmtLog.i("ViewModel", "scribble imported $named labels from $host")
+                }.onFailure { e ->
+                    OmtLog.e("ViewModel", "scribble import failed", e)
+                    _uiState.update { it.copy(globalStatus = "Scribble import failed: ${e.message}") }
                 }
-                val updated = profile.copy(oscHost = host, scribbleImported = true)
-                mixerStore.saveMixer(updated)
-                loadMixers()
-                val named = labels.count { !it.name.isNullOrBlank() }
-                AppLogBuffer.append("I", "Scribble", "Imported $named channel labels from $host")
-                _uiState.update { it.copy(globalStatus = "Scribble: $named channel labels from $host") }
-                OmtLog.i("ViewModel", "scribble imported $named labels from $host")
-            }.onFailure { e ->
+            } catch (e: Exception) {
                 OmtLog.e("ViewModel", "scribble import failed", e)
                 _uiState.update { it.copy(globalStatus = "Scribble import failed: ${e.message}") }
             }
