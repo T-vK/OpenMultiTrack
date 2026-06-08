@@ -5,10 +5,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -81,23 +87,36 @@ class MainViewModel(
 
     private val observedMixerIds = mutableSetOf<String>()
     private val scribbleImportMutex = Mutex()
+    private var usbRecoveryJob: Job? = null
+    private var sessionAttached = false
+
+    private val _usbPermissionRequests = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val usbPermissionRequests: SharedFlow<String> = _usbPermissionRequests.asSharedFlow()
 
     init {
         sessionClient.onManagerLost {
             observedMixerIds.clear()
+            sessionAttached = false
             OmtLog.w("ViewModel", "session service lost — will re-attach on reconnect")
         }
         sessionClient.bind()
         loadMixers()
-        refreshUsbAndOutputs()
         sessionClient.whenReady { manager ->
-            attachToSessionManager(manager)
+            if (!sessionAttached) {
+                attachToSessionManager(manager)
+                sessionAttached = true
+            }
             viewModelScope.launch {
                 manager.activeMixerId.collect { id ->
                     _uiState.update { it.copy(activeMixerId = id) }
                 }
             }
+            refreshUsbAndOutputs()
         }
+    }
+
+    fun onAppResumed() {
+        refreshUsbAndOutputs()
     }
 
     fun refreshUsbAndOutputs() {
@@ -112,8 +131,9 @@ class MainViewModel(
             }
             syncMixerUsbNames(usb)
             sessionClient.withManager { mgr ->
-                _uiState.value.mixers.forEach { autoProbeMixer(it, mgr) }
+                mixerStore.listMixers().forEach { autoProbeMixer(it, mgr, usb) }
             }
+            scheduleUsbRecoveryIfNeeded()
         }
     }
 
@@ -227,10 +247,17 @@ class MainViewModel(
 
     fun onUsbPermissionGranted(deviceName: String) {
         OmtLog.i("ViewModel", "USB permission granted for $deviceName")
+        val usbDevice = enumerator.getUsbDevice(deviceName)
         sessionClient.withManager { mgr ->
-            _uiState.value.mixers
-                .filter { it.usbDeviceName == deviceName }
-                .forEach { autoProbeMixer(it, mgr) }
+            val usb = enumerator.listUsbDevices()
+            mixerStore.listMixers()
+                .filter { profile ->
+                    profile.usbDeviceName == deviceName ||
+                        (usbDevice != null &&
+                            profile.vendorId == usbDevice.vendorId &&
+                            profile.productId == usbDevice.productId)
+                }
+                .forEach { autoProbeMixer(it, mgr, usb) }
         }
         refreshUsbAndOutputs()
     }
@@ -431,7 +458,6 @@ class MainViewModel(
         mixers.forEach { profile ->
             manager.registerMixer(profile)
             observeMixerSession(profile.id, manager)
-            autoProbeMixer(profile, manager)
         }
     }
 
@@ -465,36 +491,106 @@ class MainViewModel(
         }
     }
 
-    private fun autoProbeMixer(profile: MixerProfile, manager: org.openmultitrack.app.service.MultiMixerSessionManager) {
-        val deviceName = profile.usbDeviceName
-        if (deviceName == null) {
-            OmtLog.w("ViewModel", "skip probe for ${profile.displayName}: no USB device name")
-            return
-        }
-        if (!enumerator.hasUsbPermission(deviceName)) {
-            OmtLog.w("ViewModel", "skip probe for ${profile.displayName}: USB permission not granted for $deviceName")
+    private fun autoProbeMixer(
+        profile: MixerProfile,
+        manager: org.openmultitrack.app.service.MultiMixerSessionManager,
+        usbDevices: List<UsbAudioDeviceDescriptor> = _uiState.value.availableUsbDevices,
+    ) {
+        val usb = resolveUsbDevice(profile, usbDevices)
+        if (usb == null) {
+            OmtLog.w("ViewModel", "USB device not found for ${profile.displayName} (vid=${profile.vendorId} pid=${profile.productId})")
             _uiState.update {
-                it.copy(globalStatus = "USB permission required for ${profile.displayName} — reconnect the device.")
+                it.copy(
+                    globalStatus = "${profile.displayName} not on USB — reconnecting automatically…",
+                )
             }
             return
         }
-        val usb = _uiState.value.availableUsbDevices.firstOrNull { it.deviceName == deviceName }
-            ?: enumerator.listUsbDevices().firstOrNull { it.deviceName == deviceName }
-            ?: return
+        val resolvedProfile = if (usb.deviceName != profile.usbDeviceName || usb.productName != profile.productName) {
+            val updated = profile.copy(usbDeviceName = usb.deviceName, productName = usb.productName)
+            mixerStore.saveMixer(updated)
+            loadMixers()
+            updated
+        } else {
+            profile
+        }
+        if (!enumerator.hasUsbPermission(usb.deviceName)) {
+            OmtLog.w("ViewModel", "USB permission needed for ${resolvedProfile.displayName} (${usb.deviceName})")
+            _usbPermissionRequests.tryEmit(usb.deviceName)
+            _uiState.update {
+                it.copy(globalStatus = "Allow USB access for ${resolvedProfile.displayName} when prompted.")
+            }
+            return
+        }
         viewModelScope.launch {
-            manager.getOrCreate(profile.id).setProbing(true)
-            AppLogBuffer.append("I", "Probe", "Auto-probing ${profile.displayName}")
+            manager.getOrCreate(resolvedProfile.id).setProbing(true)
+            AppLogBuffer.append("I", "Probe", "Auto-probing ${resolvedProfile.displayName} on ${usb.deviceName}")
             val result = withContext(Dispatchers.IO) { probeService.probe(usb) }
-            manager.onProbeComplete(profile.id, usb, result)
-            OmtLog.i("ViewModel", "auto-probed ${profile.displayName}")
-            val resumePending = IncompleteRecordingStore.hasIncompleteRecording(appContext, settings, profile.id)
-            _uiState.update { it.copy(pendingRecordingResume = resumePending) }
+            manager.onProbeComplete(resolvedProfile.id, usb, result)
+            OmtLog.i("ViewModel", "auto-probed ${resolvedProfile.displayName}")
+            usbRecoveryJob?.cancel()
+            val resumePending = IncompleteRecordingStore.hasIncompleteRecording(appContext, settings, resolvedProfile.id)
+            _uiState.update { it.copy(pendingRecordingResume = resumePending, globalStatus = null) }
             if (resumePending) {
                 AppLogBuffer.append("I", "Scribble", "Skipped auto-import — incomplete recording to resume")
-            } else if (supportsFlow8Scribble(profile)) {
-                _uiState.update { it.copy(flow8PairingDialog = Flow8PairingDialogState(profile.id)) }
-            } else if (supportsScribbleImport(profile)) {
-                importScribbleForMixer(profile)
+            } else if (supportsFlow8Scribble(resolvedProfile)) {
+                _uiState.update { it.copy(flow8PairingDialog = Flow8PairingDialogState(resolvedProfile.id)) }
+            } else if (supportsScribbleImport(resolvedProfile)) {
+                importScribbleForMixer(resolvedProfile)
+            }
+        }
+    }
+
+    private fun resolveUsbDevice(
+        profile: MixerProfile,
+        usbDevices: List<UsbAudioDeviceDescriptor>,
+    ): UsbAudioDeviceDescriptor? = enumerator.findMatchingDevice(
+        vendorId = profile.vendorId,
+        productId = profile.productId,
+        serialNumber = profile.serialNumber,
+        preferredDeviceName = profile.usbDeviceName,
+    ) ?: usbDevices.firstOrNull { device ->
+        device.vendorId == profile.vendorId &&
+            device.productId == profile.productId &&
+            (profile.serialNumber == null || device.serialNumber == profile.serialNumber)
+    }
+
+    private fun scheduleUsbRecoveryIfNeeded() {
+        val needsRecovery = mixerStore.listMixers().any { profile ->
+            val session = _uiState.value.sessionByMixer[profile.id]
+            val stripsEmpty = session?.channelStrips.isNullOrEmpty()
+            val usbMissing = resolveUsbDevice(profile, _uiState.value.availableUsbDevices) == null
+            stripsEmpty || usbMissing
+        }
+        if (!needsRecovery) {
+            usbRecoveryJob?.cancel()
+            return
+        }
+        if (usbRecoveryJob?.isActive == true) return
+        usbRecoveryJob = viewModelScope.launch {
+            repeat(10) { attempt ->
+                if (!isActive) return@launch
+                delay(2_000)
+                OmtLog.i("ViewModel", "USB auto-recovery attempt ${attempt + 1}/10")
+                val usb = withContext(Dispatchers.IO) { enumerator.listUsbDevices() }
+                _uiState.update { it.copy(availableUsbDevices = usb) }
+                syncMixerUsbNames(usb)
+                sessionClient.withManager { mgr ->
+                    mixerStore.listMixers().forEach { autoProbeMixer(it, mgr, usb) }
+                }
+                val recovered = mixerStore.listMixers().all { profile ->
+                    val session = _uiState.value.sessionByMixer[profile.id]
+                    !session?.channelStrips.isNullOrEmpty()
+                }
+                if (recovered) {
+                    _uiState.update { it.copy(globalStatus = null) }
+                    return@launch
+                }
+            }
+            _uiState.update {
+                it.copy(
+                    globalStatus = "USB mixer still not ready. Unplug and replug the USB cable, then wait a few seconds.",
+                )
             }
         }
     }

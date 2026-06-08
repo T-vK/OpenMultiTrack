@@ -277,8 +277,14 @@ class MixerSessionController(
     }
 
     fun onUsbAttached(descriptor: UsbAudioDeviceDescriptor) {
+        val profileMatch = profile?.let {
+            it.vendorId == descriptor.vendorId &&
+                it.productId == descriptor.productId &&
+                (it.serialNumber == null || it.serialNumber == descriptor.serialNumber)
+        } == true
         if (activeDescriptor?.deviceName != descriptor.deviceName &&
-            profile?.usbDeviceName != descriptor.deviceName
+            profile?.usbDeviceName != descriptor.deviceName &&
+            !profileMatch
         ) {
             return
         }

@@ -90,6 +90,23 @@ class UsbAudioEnumerator(
         return usbManager.hasPermission(device)
     }
 
+    fun findMatchingDevice(
+        vendorId: Int,
+        productId: Int,
+        serialNumber: String? = null,
+        preferredDeviceName: String? = null,
+    ): UsbAudioDeviceDescriptor? {
+        val devices = listUsbDevices()
+        preferredDeviceName?.let { name ->
+            devices.firstOrNull { it.deviceName == name }?.let { return it }
+        }
+        return devices.firstOrNull { device ->
+            device.vendorId == vendorId &&
+                device.productId == productId &&
+                (serialNumber == null || device.serialNumber == serialNumber)
+        }
+    }
+
     fun getUsbDevice(deviceName: String): UsbDevice? = usbManager.deviceList[deviceName]
 
     /**

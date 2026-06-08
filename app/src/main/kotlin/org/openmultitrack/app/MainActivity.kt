@@ -15,6 +15,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -26,6 +29,7 @@ import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.ui.daw.DawMainScreen
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
+import kotlinx.coroutines.launch
 import org.openmultitrack.usb.BehringerUsbIdentifiers
 import org.openmultitrack.usb.UsbAudioEnumerator
 
@@ -119,9 +123,24 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        viewModel.refreshUsbAndOutputs()
         requestPermissionsForConnectedMixers()
         handleUsbIntent(intent)
+
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.usbPermissionRequests.collect { deviceName ->
+                    val usbManager = getSystemService(USB_SERVICE) as UsbManager
+                    val device = usbManager.deviceList[deviceName] ?: return@collect
+                    requestUsbPermission(device)
+                }
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        requestPermissionsForConnectedMixers()
+        viewModel.onAppResumed()
     }
 
     override fun onNewIntent(intent: Intent) {

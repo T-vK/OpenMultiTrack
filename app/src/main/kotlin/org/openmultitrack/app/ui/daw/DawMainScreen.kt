@@ -648,7 +648,7 @@ private fun ChannelStripList(
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Text(
-                    "Grant USB permission if prompted, then use Menu → Refresh USB.",
+                    "Allow USB access if prompted. The app will reconnect automatically when the mixer is plugged in.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
