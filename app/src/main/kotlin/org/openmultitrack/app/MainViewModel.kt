@@ -334,6 +334,30 @@ class MainViewModel(
         sessionClient.withManager { it.getOrCreate(mixerId).seekSoundcheck(positionSec) }
     }
 
+    fun panSoundcheckView(mixerId: String, deltaSec: Float) {
+        sessionClient.withManager { it.getOrCreate(mixerId).panSoundcheckView(deltaSec) }
+    }
+
+    fun zoomSoundcheckView(mixerId: String, scale: Float, focalSec: Float) {
+        sessionClient.withManager { it.getOrCreate(mixerId).zoomSoundcheckView(scale, focalSec) }
+    }
+
+    fun setSoundcheckLoopRegion(mixerId: String, startSec: Float, endSec: Float) {
+        sessionClient.withManager { it.getOrCreate(mixerId).setSoundcheckLoopRegion(startSec, endSec) }
+    }
+
+    fun toggleSoundcheckLoop(mixerId: String) {
+        sessionClient.withManager { it.getOrCreate(mixerId).toggleSoundcheckLoopButton() }
+    }
+
+    fun setPlaybackWaveformWindowSec(sec: Float) {
+        val rounded = sec.coerceIn(30f, 600f).let { kotlin.math.round(it) }
+        settings.playbackWaveformWindowSec = rounded
+        sessionClient.withManager { mgr ->
+            mgr.mixerIds().forEach { mgr.getOrCreate(it).updateSoundcheckViewConfig() }
+        }
+    }
+
     fun toggleArm(mixerId: String, index: Int) {
         sessionClient.withManager { mgr ->
             mgr.getOrCreate(mixerId).updateChannelStrip(index) { it.copy(armed = !it.armed) }

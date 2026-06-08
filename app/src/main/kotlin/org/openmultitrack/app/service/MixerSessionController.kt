@@ -36,8 +36,12 @@ import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.TransportState
 import org.openmultitrack.sessionio.session.SessionLibrary
 import org.openmultitrack.sessionio.session.SessionMetadata
+import org.openmultitrack.sessionio.wav.SessionWaveformExtractor
+import org.openmultitrack.sessionio.wav.SessionWaveformOverview
 import org.openmultitrack.sessionio.wav.WavReader
 import org.openmultitrack.sessionio.wav.WavWriter
+import kotlin.math.max
+import kotlin.math.min
 import org.openmultitrack.usb.AudioEngineRouter
 import org.openmultitrack.usb.FullUsbProbeResult
 import org.openmultitrack.usb.UsbAudioEnumerator
@@ -79,6 +83,14 @@ data class MixerSessionUiState(
     val selectedSoundcheckDir: String? = null,
     val playbackPositionSec: Float = 0f,
     val playbackDurationSec: Float = 0f,
+    val soundcheckWaveforms: SessionWaveformOverview? = null,
+    val soundcheckWaveformsLoading: Boolean = false,
+    val soundcheckViewStartSec: Float = 0f,
+    val soundcheckViewWindowSec: Float = 180f,
+    val soundcheckLoopStartSec: Float? = null,
+    val soundcheckLoopEndSec: Float? = null,
+    val soundcheckLoopEnabled: Boolean = false,
+    val soundcheckLoopSelecting: Boolean = false,
 )
 
 class MixerSessionController(
@@ -98,6 +110,7 @@ class MixerSessionController(
     private var loopbackPlaybackId: Int? = null
     private var usbDetachJob: Job? = null
     private var waveformJob: Job? = null
+    private var soundcheckWaveformJob: Job? = null
     private var playbackStatusJob: Job? = null
     private var profile: MixerProfile? = null
 
@@ -150,6 +163,9 @@ class MixerSessionController(
         _state.update { it.copy(appMode = mode) }
         if (mode == AppMode.VIRTUAL_SOUNDCHECK) {
             refreshSoundcheckLibrary()
+            _state.update {
+                it.copy(soundcheckViewWindowSec = settings.playbackWaveformWindowSec.coerceIn(30f, 600f))
+            }
         }
     }
 
@@ -177,6 +193,7 @@ class MixerSessionController(
                     playbackDurationSec = sessions.firstOrNull { it.sessionDir == selected }?.durationSec ?: 0f,
                 )
             }
+            _state.value.selectedSoundcheckDir?.let { loadSoundcheckWaveforms(it) }
         }
     }
 
@@ -189,6 +206,75 @@ class MixerSessionController(
                 playbackPositionSec = 0f,
                 playbackDurationSec = item?.durationSec ?: 0f,
             )
+        }
+        loadSoundcheckWaveforms(sessionDir)
+    }
+
+    fun setSoundcheckView(viewStartSec: Float, viewWindowSec: Float) {
+        val duration = _state.value.playbackDurationSec
+        val window = viewWindowSec.coerceIn(30f, 600f)
+        val maxStart = max(0f, duration - window)
+        _state.update {
+            it.copy(
+                soundcheckViewStartSec = viewStartSec.coerceIn(0f, maxStart),
+                soundcheckViewWindowSec = window,
+            )
+        }
+    }
+
+    fun panSoundcheckView(deltaSec: Float) {
+        val s = _state.value
+        setSoundcheckView(s.soundcheckViewStartSec + deltaSec, s.soundcheckViewWindowSec)
+    }
+
+    fun zoomSoundcheckView(scale: Float, focalSec: Float) {
+        val s = _state.value
+        val newWindow = (s.soundcheckViewWindowSec / scale).coerceIn(30f, 600f)
+        val rel = if (s.soundcheckViewWindowSec > 0f) {
+            (focalSec - s.soundcheckViewStartSec) / s.soundcheckViewWindowSec
+        } else {
+            0.5f
+        }
+        val newStart = focalSec - rel * newWindow
+        setSoundcheckView(newStart, newWindow)
+    }
+
+    fun setSoundcheckLoopRegion(startSec: Float, endSec: Float) {
+        val duration = _state.value.playbackDurationSec
+        if (duration <= 0f) return
+        val start = startSec.coerceIn(0f, duration)
+        val end = endSec.coerceIn(0f, duration)
+        if (end <= start + 0.05f) return
+        _state.update {
+            it.copy(
+                soundcheckLoopStartSec = min(start, end),
+                soundcheckLoopEndSec = max(start, end),
+                soundcheckLoopSelecting = false,
+            )
+        }
+    }
+
+    fun setSoundcheckLoopEnabled(enabled: Boolean) {
+        _state.update { it.copy(soundcheckLoopEnabled = enabled) }
+        if (_state.value.isPlaying) {
+            val metadata = _state.value.selectedSoundcheckDir?.let { SessionMetadata.read(File(it)) } ?: return
+            val frame = (_state.value.playbackPositionSec * metadata.sampleRate).toLong()
+            stopSoundcheck()
+            playSoundcheck(startFrame = frame)
+        }
+    }
+
+    fun setSoundcheckLoopSelecting(selecting: Boolean) {
+        _state.update { it.copy(soundcheckLoopSelecting = selecting) }
+    }
+
+    fun toggleSoundcheckLoopButton() {
+        val s = _state.value
+        when {
+            s.soundcheckLoopSelecting -> _state.update { it.copy(soundcheckLoopSelecting = false) }
+            s.soundcheckLoopStartSec != null && s.soundcheckLoopEndSec != null ->
+                setSoundcheckLoopEnabled(!s.soundcheckLoopEnabled)
+            else -> _state.update { it.copy(soundcheckLoopSelecting = true) }
         }
     }
 
@@ -210,6 +296,11 @@ class MixerSessionController(
                             channels = metadata.channels.sortedBy { it.index }.take(playbackChannels),
                         )
                         val route = ensurePlaybackLocked(descriptor, probe, playbackChannels).getOrThrow()
+                        val ui = _state.value
+                        val loopStart = ui.soundcheckLoopStartSec?.takeIf { ui.soundcheckLoopEnabled }
+                            ?.let { (it * metadata.sampleRate).toLong() }
+                        val loopEnd = ui.soundcheckLoopEndSec?.takeIf { ui.soundcheckLoopEnabled }
+                            ?.let { (it * metadata.sampleRate).toLong() }
                         player.playSession(
                             scope = scope,
                             sessionDir = dir,
@@ -217,6 +308,9 @@ class MixerSessionController(
                             route = route,
                             usbDevice = activeUsbDevice,
                             startFrame = startFrame,
+                            loopStartFrame = loopStart,
+                            loopEndFrame = loopEnd,
+                            loopEnabled = ui.soundcheckLoopEnabled,
                         ).getOrThrow()
                     }
                 }
@@ -260,10 +354,14 @@ class MixerSessionController(
         val duration = _state.value.playbackDurationSec
         if (duration <= 0f) return
         val clamped = positionSec.coerceIn(0f, duration)
+        _state.update { it.copy(playbackPositionSec = clamped) }
         val metadata = _state.value.selectedSoundcheckDir?.let { SessionMetadata.read(File(it)) } ?: return
         val frame = (clamped * metadata.sampleRate).toLong()
+        val wasPlaying = _state.value.isPlaying
         stopSoundcheck()
-        playSoundcheck(startFrame = frame)
+        if (wasPlaying) {
+            playSoundcheck(startFrame = frame)
+        }
     }
 
     fun toggleSoundcheckPlayback() {
@@ -562,11 +660,18 @@ class MixerSessionController(
                 val posSec = if (sampleRate > 0) st.positionFrames.toFloat() / sampleRate else 0f
                 val durSec = if (sampleRate > 0) st.durationFrames.toFloat() / sampleRate else 0f
                 _state.update {
+                    var viewStart = it.soundcheckViewStartSec
+                    val viewEnd = viewStart + it.soundcheckViewWindowSec
+                    if (posSec < viewStart || posSec > viewEnd) {
+                        val maxStart = max(0f, durSec - it.soundcheckViewWindowSec)
+                        viewStart = (posSec - it.soundcheckViewWindowSec / 2f).coerceIn(0f, maxStart)
+                    }
                     it.copy(
                         isPlaying = st.state == TransportState.PLAYING,
                         transportState = st.state,
                         playbackPositionSec = posSec,
                         playbackDurationSec = durSec.coerceAtLeast(it.playbackDurationSec),
+                        soundcheckViewStartSec = viewStart,
                     )
                 }
                 if (st.state == TransportState.IDLE) {
@@ -576,6 +681,41 @@ class MixerSessionController(
                 delay(50)
             }
         }
+    }
+
+    private fun loadSoundcheckWaveforms(sessionDir: String) {
+        soundcheckWaveformJob?.cancel()
+        _state.update { it.copy(soundcheckWaveformsLoading = true, soundcheckWaveforms = null) }
+        soundcheckWaveformJob = scope.launch {
+            val dir = File(sessionDir)
+            val metadata = withContext(Dispatchers.IO) { SessionMetadata.read(dir) } ?: run {
+                _state.update { it.copy(soundcheckWaveformsLoading = false) }
+                return@launch
+            }
+            restoreChannelStripsFromMetadata(metadata)
+            val overview = withContext(Dispatchers.IO) {
+                SessionWaveformExtractor.extract(dir, metadata)
+            }
+            val windowSec = settings.playbackWaveformWindowSec.coerceIn(30f, 600f)
+            _state.update {
+                it.copy(
+                    soundcheckWaveforms = overview,
+                    soundcheckWaveformsLoading = false,
+                    playbackDurationSec = overview.durationSec,
+                    soundcheckViewStartSec = 0f,
+                    soundcheckViewWindowSec = windowSec,
+                    soundcheckLoopStartSec = null,
+                    soundcheckLoopEndSec = null,
+                    soundcheckLoopEnabled = false,
+                    soundcheckLoopSelecting = false,
+                )
+            }
+        }
+    }
+
+    fun updateSoundcheckViewConfig() {
+        val window = settings.playbackWaveformWindowSec.coerceIn(30f, 600f)
+        _state.update { it.copy(soundcheckViewWindowSec = window) }
     }
 
     private fun stopPlaybackStatusUpdates() {

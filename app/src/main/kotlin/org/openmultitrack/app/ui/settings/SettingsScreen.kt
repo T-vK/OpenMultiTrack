@@ -44,6 +44,7 @@ data class SettingsUiState(
     val hideSoloIcon: Boolean,
     val showWaveforms: Boolean,
     val recordWaveformWindowSec: Float,
+    val playbackWaveformWindowSec: Float,
     val stripNumberMode: StripNumberMode,
     val stripIconMode: StripIconMode,
 )
@@ -60,6 +61,7 @@ fun SettingsSheet(
     onHideSoloChange: (Boolean) -> Unit,
     onShowWaveformsChange: (Boolean) -> Unit,
     onRecordWaveformWindowChange: (Float) -> Unit,
+    onPlaybackWaveformWindowChange: (Float) -> Unit,
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
 ) {
@@ -74,6 +76,7 @@ fun SettingsSheet(
             onHideSoloChange = onHideSoloChange,
             onShowWaveformsChange = onShowWaveformsChange,
             onRecordWaveformWindowChange = onRecordWaveformWindowChange,
+            onPlaybackWaveformWindowChange = onPlaybackWaveformWindowChange,
             onStripNumberModeChange = onStripNumberModeChange,
             onStripIconModeChange = onStripIconModeChange,
         )
@@ -91,6 +94,7 @@ private fun SettingsContent(
     onHideSoloChange: (Boolean) -> Unit,
     onShowWaveformsChange: (Boolean) -> Unit,
     onRecordWaveformWindowChange: (Float) -> Unit,
+    onPlaybackWaveformWindowChange: (Float) -> Unit,
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
 ) {
@@ -106,6 +110,7 @@ private fun SettingsContent(
             onHideSoloChange = onHideSoloChange,
             onShowWaveformsChange = onShowWaveformsChange,
             onRecordWaveformWindowChange = onRecordWaveformWindowChange,
+            onPlaybackWaveformWindowChange = onPlaybackWaveformWindowChange,
             onStripNumberModeChange = onStripNumberModeChange,
             onStripIconModeChange = onStripIconModeChange,
             onMonitorGainChange = onMonitorGainChange,
@@ -349,6 +354,7 @@ private fun buildSettingsRows(
     onHideSoloChange: (Boolean) -> Unit,
     onShowWaveformsChange: (Boolean) -> Unit,
     onRecordWaveformWindowChange: (Float) -> Unit,
+    onPlaybackWaveformWindowChange: (Float) -> Unit,
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
     onMonitorGainChange: (Float) -> Unit,
@@ -371,6 +377,16 @@ private fun buildSettingsRows(
         valueRange = 5f..120f,
         valueLabel = "${state.recordWaveformWindowSec.toInt()} s",
         onValueChange = onRecordWaveformWindowChange,
+    ),
+    SettingsSliderRow(
+        id = "playback_waveform_window",
+        section = "Display",
+        title = "Soundcheck waveform zoom",
+        description = "Default visible time span on session waveforms in Virtual soundcheck mode.",
+        value = state.playbackWaveformWindowSec,
+        valueRange = 30f..600f,
+        valueLabel = "${state.playbackWaveformWindowSec.toInt()} s",
+        onValueChange = onPlaybackWaveformWindowChange,
     ),
     SettingsToggleRow(
         id = "show_waveforms",

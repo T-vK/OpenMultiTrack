@@ -4,7 +4,6 @@ import android.hardware.usb.UsbDevice
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.session.TransportState
@@ -19,6 +18,10 @@ import java.io.File
 class SessionPlayer {
     private var playbackJob: Job? = null
     private var activeBackend: org.openmultitrack.usb.AudioBackend? = null
+    private var loopStartFrame: Long? = null
+    private var loopEndFrame: Long? = null
+    private var loopEnabled: Boolean = false
+    private var seekReader: ((Long) -> Unit)? = null
 
     @Volatile
     var status: TransportStatus = TransportStatus()
@@ -30,6 +33,9 @@ class SessionPlayer {
         route: PlaybackRoute,
         usbDevice: UsbDevice? = null,
         startFrame: Long = 0,
+        loopStartFrame: Long? = null,
+        loopEndFrame: Long? = null,
+        loopEnabled: Boolean = false,
     ): Result<Unit> {
         val reader = WavReader(file)
         val channels = reader.format.channelCount.coerceAtMost(32)
@@ -42,6 +48,10 @@ class SessionPlayer {
             sampleRate = reader.format.sampleRate,
             duration = reader.format.frameCount,
             label = file.absolutePath,
+            loopStartFrame = loopStartFrame,
+            loopEndFrame = loopEndFrame,
+            loopEnabled = loopEnabled,
+            seek = { frame -> reader.seekFrame(frame) },
         ) {
             reader.use { wav ->
                 if (startFrame > 0) wav.seekFrame(startFrame)
@@ -57,6 +67,9 @@ class SessionPlayer {
         route: PlaybackRoute,
         usbDevice: UsbDevice? = null,
         startFrame: Long = 0,
+        loopStartFrame: Long? = null,
+        loopEndFrame: Long? = null,
+        loopEnabled: Boolean = false,
     ): Result<Unit> {
         val reader = PerChannelWavReader.open(sessionDir, metadata)
         val channels = reader.channelCount.coerceAtMost(32)
@@ -69,6 +82,10 @@ class SessionPlayer {
             sampleRate = reader.sampleRate,
             duration = reader.frameCount,
             label = sessionDir.absolutePath,
+            loopStartFrame = loopStartFrame,
+            loopEndFrame = loopEndFrame,
+            loopEnabled = loopEnabled,
+            seek = { frame -> reader.seekFrame(frame) },
         ) {
             reader.use { wav ->
                 if (startFrame > 0) wav.seekFrame(startFrame)
@@ -86,11 +103,19 @@ class SessionPlayer {
         sampleRate: Int,
         duration: Long,
         label: String,
+        loopStartFrame: Long?,
+        loopEndFrame: Long?,
+        loopEnabled: Boolean,
+        seek: (Long) -> Unit,
         run: (scratch: FloatArray) -> Unit,
     ): Result<Unit> {
         stop()
         activeBackend = route.backend
-        OmtLog.i("Player", "play $label backend=${route.backend} startFrame=$startFrame")
+        this.loopStartFrame = loopStartFrame
+        this.loopEndFrame = loopEndFrame
+        this.loopEnabled = loopEnabled && loopStartFrame != null && loopEndFrame != null
+        seekReader = seek
+        OmtLog.i("Player", "play $label backend=${route.backend} startFrame=$startFrame loop=$loopEnabled")
         OmtLog.i("Player", "session ${channels}ch @ ${sampleRate}Hz duration=$duration frames")
 
         val engineStatus = AudioEngineRouter.startPlayback(route, usbDevice)
@@ -117,6 +142,7 @@ class SessionPlayer {
                 val underruns = AudioEngineRouter.playbackUnderrunFrames(backend)
                 AudioEngineRouter.stopPlayback()
                 activeBackend = null
+                seekReader = null
                 OmtLog.i("Player", "finished position=${status.positionFrames}/$duration underruns=$underruns")
                 status = status.copy(state = TransportState.IDLE, message = "Playback finished")
             }
@@ -139,6 +165,7 @@ class SessionPlayer {
             if (frames <= 0) break
             var submitted = 0
             while (submitted < frames && playbackJob?.isActive == true) {
+                maybeLoopRewind()
                 val framesLeft = frames - submitted
                 val sampleStart = submitted * channels
                 val sampleEnd = sampleStart + framesLeft * channels
@@ -150,7 +177,19 @@ class SessionPlayer {
                 }
                 submitted += written
                 status = status.copy(positionFrames = status.positionFrames + written)
+                maybeLoopRewind()
             }
+        }
+    }
+
+    private fun maybeLoopRewind() {
+        if (!loopEnabled) return
+        val start = loopStartFrame ?: return
+        val end = loopEndFrame ?: return
+        if (end <= start) return
+        if (status.positionFrames >= end) {
+            seekReader?.invoke(start)
+            status = status.copy(positionFrames = start)
         }
     }
 
@@ -165,6 +204,10 @@ class SessionPlayer {
         }
         AudioEngineRouter.stopPlayback()
         activeBackend = null
+        seekReader = null
+        loopStartFrame = null
+        loopEndFrame = null
+        loopEnabled = false
         status = TransportStatus(state = TransportState.IDLE)
     }
 }

@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
@@ -118,11 +119,15 @@ fun DawMainScreen(
     onCloseLog: () -> Unit,
     onMonitorGainChange: (Float) -> Unit,
     onLoadScribbleStrip: (String) -> Unit,
-    onRefreshSoundcheckLibrary: (String) -> Unit,
+    playbackWaveformWindowSec: Float,
     onSelectSoundcheckSession: (String, String) -> Unit,
     onToggleSoundcheckPlayback: (String) -> Unit,
     onStopSoundcheck: (String) -> Unit,
     onSeekSoundcheck: (String, Float) -> Unit,
+    onPanSoundcheckView: (String, Float) -> Unit,
+    onZoomSoundcheckView: (String, Float, Float) -> Unit,
+    onSetSoundcheckLoopRegion: (String, Float, Float) -> Unit,
+    onToggleSoundcheckLoop: (String) -> Unit,
     onConfirmFlow8PairingImport: () -> Unit,
     onDismissFlow8PairingDialog: () -> Unit,
     onHideArmChange: (Boolean) -> Unit,
@@ -132,6 +137,7 @@ fun DawMainScreen(
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
     onRecordWaveformWindowChange: (Float) -> Unit,
+    onPlaybackWaveformWindowChange: (Float) -> Unit,
     onDismissStatusToast: () -> Unit,
     onFinalizeIncompleteRecording: (String) -> Unit,
 ) {
@@ -186,6 +192,7 @@ fun DawMainScreen(
                         onStopRecord = { onStopRecord(activeId) },
                         onToggleSoundcheckPlayback = { onToggleSoundcheckPlayback(activeId) },
                         onStopSoundcheck = { onStopSoundcheck(activeId) },
+                        onToggleSoundcheckLoop = { onToggleSoundcheckLoop(activeId) },
                     )
                 }
             }
@@ -211,14 +218,21 @@ fun DawMainScreen(
                     when (session?.appMode) {
                         AppMode.VIRTUAL_SOUNDCHECK -> session?.let { s ->
                             SoundcheckPanel(
-                                sessions = s.soundcheckSessions,
-                                selectedDir = s.selectedSoundcheckDir,
-                                isPlaying = s.isPlaying,
-                                positionSec = s.playbackPositionSec,
-                                durationSec = s.playbackDurationSec,
-                                onRefresh = { onRefreshSoundcheckLibrary(activeId!!) },
+                                session = s,
+                                normalized = waveformNormalized,
+                                showWaveforms = state.showWaveforms,
+                                numberMode = state.stripNumberMode,
+                                iconMode = state.stripIconMode,
+                                hideArm = state.hideArmButton,
+                                hideMonitor = state.hideMonitorButton,
+                                hideSolo = state.hideSoloButton,
                                 onSelectSession = { onSelectSoundcheckSession(activeId!!, it) },
                                 onSeek = { onSeekSoundcheck(activeId!!, it) },
+                                onPanView = { onPanSoundcheckView(activeId!!, it) },
+                                onZoomView = { scale, focal -> onZoomSoundcheckView(activeId!!, scale, focal) },
+                                onSetLoopRegion = { start, end ->
+                                    onSetSoundcheckLoopRegion(activeId!!, start, end)
+                                },
                             )
                         }
                         else -> session?.let { s ->
@@ -296,6 +310,7 @@ fun DawMainScreen(
                 hideSoloIcon = state.hideSoloButton,
                 showWaveforms = state.showWaveforms,
                 recordWaveformWindowSec = recordWaveformWindowSec,
+                playbackWaveformWindowSec = playbackWaveformWindowSec,
                 stripNumberMode = state.stripNumberMode,
                 stripIconMode = state.stripIconMode,
             ),
@@ -307,6 +322,7 @@ fun DawMainScreen(
             onHideSoloChange = onHideSoloChange,
             onShowWaveformsChange = onShowWaveformsChange,
             onRecordWaveformWindowChange = onRecordWaveformWindowChange,
+            onPlaybackWaveformWindowChange = onPlaybackWaveformWindowChange,
             onStripNumberModeChange = onStripNumberModeChange,
             onStripIconModeChange = onStripIconModeChange,
         )
@@ -348,6 +364,7 @@ private fun TransportToolbar(
     onStopRecord: () -> Unit,
     onToggleSoundcheckPlayback: () -> Unit,
     onStopSoundcheck: () -> Unit,
+    onToggleSoundcheckLoop: () -> Unit,
 ) {
     var mixerMenuOpen by remember { mutableStateOf(false) }
     var removeMixerConfirm by remember { mutableStateOf<MixerProfile?>(null) }
@@ -454,6 +471,11 @@ private fun TransportToolbar(
                 )
 
                 if (session.appMode == AppMode.VIRTUAL_SOUNDCHECK) {
+                    SoundcheckLoopControl(
+                        session = session,
+                        showLabels = showLabels,
+                        onToggleLoop = onToggleSoundcheckLoop,
+                    )
                     SoundcheckPlayControl(
                         session = session,
                         showLabels = showLabels,
@@ -727,6 +749,36 @@ private fun MonitorControl(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SoundcheckLoopControl(
+    session: MixerSessionUiState,
+    showLabels: Boolean,
+    onToggleLoop: () -> Unit,
+) {
+    val hasRegion = session.soundcheckLoopStartSec != null && session.soundcheckLoopEndSec != null
+    val active = session.soundcheckLoopSelecting || (hasRegion && session.soundcheckLoopEnabled)
+    ToolbarActionButton(
+        onClick = onToggleLoop,
+        active = active,
+        activeColor = if (session.soundcheckLoopEnabled) SoloAmber else MonitorBlue,
+        enabled = session.selectedSoundcheckDir != null,
+    ) {
+        Icon(Icons.Default.Repeat, contentDescription = "Loop", modifier = Modifier.size(18.dp))
+        if (showLabels) {
+            Spacer(Modifier.width(6.dp))
+            Text(
+                when {
+                    session.soundcheckLoopSelecting -> "Set loop"
+                    hasRegion && session.soundcheckLoopEnabled -> "Loop on"
+                    hasRegion -> "Loop off"
+                    else -> "Loop"
+                },
+                style = MaterialTheme.typography.labelLarge,
+            )
         }
     }
 }
@@ -1043,7 +1095,7 @@ private fun WaveformView(
         Box(modifier = modifier)
         return
     }
-    val displayPeaks = scalePeaksForDisplay(data, normalized)
+    val displayPeaks = org.openmultitrack.app.ui.daw.scalePeaksForDisplay(data, normalized)
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
@@ -1064,18 +1116,6 @@ private fun WaveformView(
             )
         }
     }
-}
-
-/** USB peaks are often very small floats; scale for display so live waveforms stay visible. */
-private fun scalePeaksForDisplay(peaks: FloatArray, normalized: Boolean): FloatArray {
-    if (peaks.isEmpty()) return peaks
-    val maxPeak = peaks.max()
-    if (maxPeak <= 1e-6f) return peaks
-    if (normalized) {
-        return FloatArray(peaks.size) { i -> (peaks[i] / maxPeak).coerceIn(0f, 1f) }
-    }
-    val gain = if (maxPeak < 0.15f) 1f / maxPeak else 1f
-    return FloatArray(peaks.size) { i -> (peaks[i] * gain).coerceIn(0f, 1f) }
 }
 
 @Composable

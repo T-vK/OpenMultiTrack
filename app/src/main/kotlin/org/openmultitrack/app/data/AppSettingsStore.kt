@@ -20,7 +20,7 @@ class AppSettingsStore(context: Context) {
         set(value) = prefs.edit().putFloat(KEY_RECORD_WAVEFORM_SEC, value).apply()
 
     var playbackWaveformWindowSec: Float
-        get() = prefs.getFloat(KEY_PLAYBACK_WAVEFORM_SEC, 300f)
+        get() = prefs.getFloat(KEY_PLAYBACK_WAVEFORM_SEC, 180f)
         set(value) = prefs.edit().putFloat(KEY_PLAYBACK_WAVEFORM_SEC, value).apply()
 
     var usbDetachDebounceMs: Long
