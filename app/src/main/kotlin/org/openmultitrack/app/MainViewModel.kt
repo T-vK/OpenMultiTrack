@@ -77,6 +77,7 @@ data class DawUiState(
     val hideMonitorButton: Boolean = false,
     val hideSoloButton: Boolean = false,
     val showWaveforms: Boolean = true,
+    val showVuMeters: Boolean = true,
     val stripNumberMode: StripNumberMode = StripNumberMode.BOTH,
     val stripIconMode: StripIconMode = StripIconMode.SHOW,
     /** mixerId → sessionDir for recordings interrupted by an unexpected app exit. */
@@ -98,6 +99,7 @@ class MainViewModel(
             hideMonitorButton = settings.hideMonitorButton,
             hideSoloButton = settings.hideSoloButton,
             showWaveforms = settings.showWaveforms,
+            showVuMeters = settings.showVuMeters,
             stripNumberMode = settings.stripNumberMode,
             stripIconMode = settings.stripIconMode,
         ),
@@ -559,6 +561,14 @@ class MainViewModel(
     fun setShowWaveforms(show: Boolean) {
         settings.showWaveforms = show
         _uiState.update { it.copy(showWaveforms = show) }
+    }
+
+    fun setShowVuMeters(show: Boolean) {
+        settings.showVuMeters = show
+        _uiState.update { it.copy(showVuMeters = show) }
+        sessionClient.withManager { mgr ->
+            mgr.mixerIds().forEach { mgr.getOrCreate(it).syncVuMeterCapture() }
+        }
     }
 
     fun setRecordWaveformWindowSec(sec: Float) {

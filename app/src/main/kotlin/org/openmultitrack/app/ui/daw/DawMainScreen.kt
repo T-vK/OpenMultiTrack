@@ -138,6 +138,7 @@ fun DawMainScreen(
     onHideMonitorChange: (Boolean) -> Unit,
     onHideSoloChange: (Boolean) -> Unit,
     onShowWaveformsChange: (Boolean) -> Unit,
+    onShowVuMetersChange: (Boolean) -> Unit,
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
     onRecordWaveformWindowChange: (Float) -> Unit,
@@ -252,6 +253,8 @@ fun DawMainScreen(
                                 captureMeterLevels = s.captureMeterLevels,
                                 isMonitoring = s.isMonitoring,
                                 isRecording = s.isRecording,
+                                isVuMetering = s.isVuMetering,
+                                showVuMeters = state.showVuMeters,
                                 showWaveforms = state.showWaveforms,
                                 hideArm = state.hideArmButton,
                                 hideMonitor = state.hideMonitorButton,
@@ -321,6 +324,7 @@ fun DawMainScreen(
                 hideMonitorIcon = state.hideMonitorButton,
                 hideSoloIcon = state.hideSoloButton,
                 showWaveforms = state.showWaveforms,
+                showVuMeters = state.showVuMeters,
                 recordWaveformWindowSec = recordWaveformWindowSec,
                 playbackWaveformWindowSec = playbackWaveformWindowSec,
                 stripNumberMode = state.stripNumberMode,
@@ -333,6 +337,7 @@ fun DawMainScreen(
             onHideMonitorChange = onHideMonitorChange,
             onHideSoloChange = onHideSoloChange,
             onShowWaveformsChange = onShowWaveformsChange,
+            onShowVuMetersChange = onShowVuMetersChange,
             onRecordWaveformWindowChange = onRecordWaveformWindowChange,
             onPlaybackWaveformWindowChange = onPlaybackWaveformWindowChange,
             onStripNumberModeChange = onStripNumberModeChange,
@@ -974,6 +979,8 @@ private fun ChannelStripList(
     captureMeterLevels: Map<Int, Float>,
     isMonitoring: Boolean,
     isRecording: Boolean,
+    isVuMetering: Boolean,
+    showVuMeters: Boolean,
     showWaveforms: Boolean,
     hideArm: Boolean,
     hideMonitor: Boolean,
@@ -1048,7 +1055,7 @@ private fun ChannelStripList(
                     labelFontSize = labelFontSize,
                     labelColumnWidth = labelColumnWidth,
                     waveform = if (showWaveforms && isRecording) waveformPeaks[strip.index] else null,
-                    captureMeterLevel = if (isMonitoring || isRecording) {
+                    captureMeterLevel = if (showVuMeters && (isMonitoring || isRecording || isVuMetering)) {
                         captureMeterLevels[strip.index] ?: 0f
                     } else {
                         null

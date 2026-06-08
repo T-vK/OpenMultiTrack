@@ -51,6 +51,10 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_SHOW_WAVEFORMS, true)
         set(value) = prefs.edit().putBoolean(KEY_SHOW_WAVEFORMS, value).apply()
 
+    var showVuMeters: Boolean
+        get() = prefs.getBoolean(KEY_SHOW_VU_METERS, true)
+        set(value) = prefs.edit().putBoolean(KEY_SHOW_VU_METERS, value).apply()
+
     var stripNumberMode: StripNumberMode
         get() = StripNumberMode.entries.getOrElse(prefs.getInt(KEY_STRIP_NUMBER_MODE, 0)) { StripNumberMode.BOTH }
         set(value) = prefs.edit().putInt(KEY_STRIP_NUMBER_MODE, value.ordinal).apply()
@@ -123,6 +127,7 @@ class AppSettingsStore(context: Context) {
         private const val KEY_HIDE_MONITOR = "hide_monitor_button"
         private const val KEY_HIDE_SOLO = "hide_solo_button"
         private const val KEY_SHOW_WAVEFORMS = "show_waveforms"
+        private const val KEY_SHOW_VU_METERS = "show_vu_meters"
         private const val KEY_STRIP_NUMBER_MODE = "strip_number_mode"
         private const val KEY_STRIP_ICON_MODE = "strip_icon_mode"
         private const val KEY_LAST_ACTIVE_MIXER = "last_active_mixer_id"

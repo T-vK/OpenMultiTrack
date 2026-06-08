@@ -24,6 +24,7 @@ import org.openmultitrack.usb.CaptureRoute
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import androidx.annotation.VisibleForTesting
 
 /**
  * Single USB capture stream shared by recording, live monitor, and optional root virtual mic.
@@ -82,7 +83,9 @@ class CaptureSessionEngine(
     private val waveformRings = Array<LiveWaveformRing?>(64) { null }
     private val pendingWaveformPeaks = FloatArray(64)
     private val meterHold = FloatArray(64)
+    private val lastRawPeaks = FloatArray(64)
     private val meterLock = Any()
+    private val vuMeteringEnabled = AtomicBoolean(false)
     private var waveformWindowSec = DEFAULT_WAVEFORM_WINDOW_SEC
     private var waveformPeaksPerSecond = DEFAULT_WAVEFORM_PEAKS_PER_SEC
     private var lastWaveformEmitNs = 0L
@@ -101,6 +104,10 @@ class CaptureSessionEngine(
 
     fun recordElapsedSec(): Float =
         if (sampleRate > 0) framesWritten.toFloat() / sampleRate else 0f
+
+    fun updateVuMetering(enabled: Boolean) {
+        vuMeteringEnabled.set(enabled)
+    }
 
     fun updateMonitor(config: MonitorMixConfig) {
         val prev = monitorConfig.getAndSet(config)
@@ -315,7 +322,13 @@ class CaptureSessionEngine(
         for (i in waveformRings.indices) waveformRings[i] = null
         pendingWaveformPeaks.fill(0f)
         meterHold.fill(0f)
+        lastRawPeaks.fill(0f)
         lastWaveformEmitNs = 0L
+    }
+
+    @VisibleForTesting
+    internal fun debugRawMeterPeaks(): FloatArray = synchronized(meterLock) {
+        lastRawPeaks.copyOf(channelCount)
     }
 
     private fun allocateWaveformRings() {
@@ -331,7 +344,10 @@ class CaptureSessionEngine(
     private fun needsCapture(): Boolean {
         val monitor = monitorConfig.get()
         val virtualMic = virtualMicConfig.get()
-        return isRecording || monitor.enabled || (virtualMic?.enabled == true)
+        return isRecording ||
+            monitor.enabled ||
+            (virtualMic?.enabled == true) ||
+            vuMeteringEnabled.get()
     }
 
     private suspend fun stopCaptureInternalLocked() {
@@ -541,7 +557,7 @@ class CaptureSessionEngine(
                 }
                 pendingWaveformPeaks[ch] = maxOf(pendingWaveformPeaks[ch], peak)
             }
-            absorbInterleavedPeaks(meterHold, scratch, frames, channels)
+            absorbInterleavedPeaks(meterHold, lastRawPeaks, scratch, frames, channels)
         }
     }
 

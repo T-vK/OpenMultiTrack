@@ -70,6 +70,7 @@ data class MixerSessionUiState(
     val appMode: AppMode = AppMode.MULTITRACK_RECORD,
     val isRecording: Boolean = false,
     val isMonitoring: Boolean = false,
+    val isVuMetering: Boolean = false,
     val isUsbDegraded: Boolean = false,
     val isVirtualMicActive: Boolean = false,
     val isPlaying: Boolean = false,
@@ -156,6 +157,7 @@ class MixerSessionController(
                 statusMessage = "Ready — $chCount channels",
             )
         }
+        syncVuMeterCapture()
     }
 
     fun setProbing(probing: Boolean) {
@@ -171,10 +173,14 @@ class MixerSessionController(
         }
         _state.update { it.copy(appMode = mode) }
         if (mode == AppMode.VIRTUAL_SOUNDCHECK) {
+            captureEngine.updateVuMetering(false)
+            _state.update { it.copy(isVuMetering = false) }
             refreshSoundcheckLibrary()
             _state.update {
                 it.copy(soundcheckViewWindowSec = settings.playbackWaveformWindowSec.coerceIn(30f, 600f))
             }
+        } else {
+            syncVuMeterCapture()
         }
     }
 
@@ -517,10 +523,7 @@ class MixerSessionController(
     fun stopMonitoring() {
         captureEngine.updateMonitor(MonitorMixConfig(enabled = false))
         _state.update { it.copy(isMonitoring = false, statusMessage = "Monitor off") }
-        stopWaveformUpdatesIfIdle()
-        scope.launch {
-            captureMutex.withLock { releaseCaptureIfIdleLocked() }
-        }
+        syncVuMeterCapture()
     }
 
     fun startRecording() {
@@ -636,9 +639,7 @@ class MixerSessionController(
     fun stopRecording() {
         scope.launch {
             val session = captureMutex.withLock {
-                val ended = withContext(Dispatchers.IO) { captureEngine.stopRecording() }
-                releaseCaptureIfIdleLocked()
-                ended
+                withContext(Dispatchers.IO) { captureEngine.stopRecording() }
             }
             settings.clearActiveRecording()
             _state.update {
@@ -649,12 +650,43 @@ class MixerSessionController(
                     statusMessage = session?.let { s -> "Saved → ${s.filePath}" } ?: "Stopped",
                 )
             }
-            stopWaveformUpdatesIfIdle()
+            syncVuMeterCapture()
             if (_state.value.appMode == AppMode.VIRTUAL_SOUNDCHECK) {
                 refreshSoundcheckLibrary()
             }
         }
     }
+
+    fun syncVuMeterCapture() {
+        if (_state.value.appMode != AppMode.MULTITRACK_RECORD) {
+            captureEngine.updateVuMetering(false)
+            _state.update { it.copy(isVuMetering = false) }
+            return
+        }
+        scope.launch {
+            captureMutex.withLock {
+                val want = vuCaptureDesired()
+                captureEngine.updateVuMetering(want)
+                if (want) {
+                    val descriptor = activeDescriptor ?: return@withLock
+                    val probe = activeProbe ?: return@withLock
+                    withContext(Dispatchers.IO) {
+                        if (!captureEngine.isCaptureActive) {
+                            ensureCapture(descriptor, probe).getOrThrow()
+                        }
+                    }
+                    _state.update { it.copy(isVuMetering = true) }
+                    startCaptureUiUpdates()
+                } else {
+                    _state.update { it.copy(isVuMetering = false) }
+                    stopWaveformUpdatesIfIdle()
+                    releaseCaptureIfIdleLocked()
+                }
+            }
+        }
+    }
+
+    internal fun debugRawMeterPeaksForTest(): FloatArray = captureEngine.debugRawMeterPeaks()
 
     fun onUsbDetached(deviceName: String?) {
         val desc = activeDescriptor ?: return
@@ -923,14 +955,14 @@ class MixerSessionController(
                     val nowNs = System.nanoTime()
                     if (nowNs - lastVuLogNs >= 2_000_000_000L) {
                         lastVuLogNs = nowNs
-                        val ch1 = levels[0]
-                        if (ch1 != null || levels.isNotEmpty()) {
+                        val ch1 = levels[0] ?: 0f
+                        val ch2 = levels[1] ?: 0f
+                        if (levels.isNotEmpty()) {
                             OmtLog.i(
                                 "VuMeter",
-                                "ch1=${"%.3f".format(ch1 ?: 0f)} " +
-                                    "channels=${levels.size} " +
-                                    "monitoring=${_state.value.isMonitoring} " +
-                                    "recording=${_state.value.isRecording}",
+                                "ch1=${"%.3f".format(ch1)} ch2=${"%.3f".format(ch2)} " +
+                                    "vuOnly=${_state.value.isVuMetering} " +
+                                    "monitoring=${_state.value.isMonitoring}",
                             )
                         }
                     }
@@ -990,13 +1022,22 @@ class MixerSessionController(
     }
 
     private fun stopWaveformUpdatesIfIdle() {
-        if (!_state.value.isMonitoring && !_state.value.isRecording) {
+        if (!_state.value.isMonitoring && !_state.value.isRecording && !vuCaptureDesired()) {
             waveformJob?.cancel()
             waveformJob = null
             captureEngine.clearWaveforms()
             _state.update { it.copy(waveformPeaks = emptyMap(), captureMeterLevels = emptyMap()) }
         }
     }
+
+    private fun vuCaptureDesired(): Boolean =
+        settings.showVuMeters &&
+            _state.value.appMode == AppMode.MULTITRACK_RECORD &&
+            activeDescriptor != null &&
+            activeProbe != null &&
+            !_state.value.isMonitoring &&
+            !_state.value.isRecording &&
+            !_state.value.isPlaying
 
     private fun applyMonitorRouting(enabled: Boolean = _state.value.isMonitoring) {
         val s = _state.value
@@ -1072,7 +1113,12 @@ class MixerSessionController(
     }
 
     private suspend fun releaseCaptureIfIdleLocked() {
-        if (!captureEngine.isRecording && !_state.value.isMonitoring && !_state.value.isPlaying) {
+        if (!captureEngine.isRecording &&
+            !_state.value.isMonitoring &&
+            !_state.value.isPlaying &&
+            !vuCaptureDesired()
+        ) {
+            captureEngine.updateVuMetering(false)
             withContext(Dispatchers.IO) { captureEngine.stopCapture() }
             usbStream?.close()
             usbStream = null
