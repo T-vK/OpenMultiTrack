@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Multitrack lanes -->
+    <path
+        android:fillColor="#4FC3F7"
+        android:pathData="M22,68 L34,44 L46,58 L58,36 L70,52 L82,32 L86,68 Z"
+        android:strokeWidth="0" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#81D4FA"
+        android:strokeWidth="2"
+        android:pathData="M20,72 L88,72" />
+    <!-- Record dot -->
+    <path
+        android:fillColor="#EF5350"
+        android:pathData="M54,24 m-10,0 a10,10 0 1,1 20,0 a10,10 0 1,1 -20,0" />
+</vector>

@@ -100,9 +100,9 @@ class AudioSessionService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.notification_title))
             .setContentText(status)
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(openIntent)
-            .addAction(R.drawable.ic_launcher, getString(R.string.notification_stop), stopIntent)
+            .addAction(R.drawable.ic_notification, getString(R.string.notification_stop), stopIntent)
             .setOngoing(true)
             .build()
     }
