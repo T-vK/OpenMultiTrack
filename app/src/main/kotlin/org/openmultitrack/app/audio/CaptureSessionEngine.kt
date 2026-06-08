@@ -7,28 +7,28 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.openmultitrack.audio.NativeAudioEngine
 import org.openmultitrack.audio.NativeAudioMonitor
 import org.openmultitrack.audio.OmtLog
+import org.openmultitrack.domain.channel.ChannelStripState
 import org.openmultitrack.domain.session.RecordingSession
+import org.openmultitrack.sessionio.session.SessionDirectory
+import org.openmultitrack.sessionio.session.SessionMetadata
+import org.openmultitrack.sessionio.wav.PerChannelWavWriter
 import org.openmultitrack.sessionio.wav.WavWriter
 import org.openmultitrack.usb.AudioBackend
 import org.openmultitrack.usb.AudioEngineRouter
 import org.openmultitrack.usb.CaptureRoute
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
-import kotlin.math.max
 
 /**
  * Single USB capture stream shared by recording, live monitor, and optional root virtual mic.
  */
 class CaptureSessionEngine {
-    data class MonitorConfig(
-        val enabled: Boolean,
-        val selectedChannels: Set<Int>,
-        val outputDeviceId: Int,
-    )
-
     data class VirtualMicConfig(
         val enabled: Boolean,
         val selectedChannels: Set<Int>,
@@ -36,11 +36,22 @@ class CaptureSessionEngine {
         val loopbackDeviceId: Int,
     )
 
+    data class RecordingConfig(
+        val mixerId: String,
+        val mixerFolderName: String,
+        val storageRoot: File,
+        val channelStrips: List<ChannelStripState>,
+        val customTitle: String? = null,
+    )
+
+    private val lifecycleMutex = Mutex()
     private var fanoutJob: Job? = null
     private var activeRoute: CaptureRoute? = null
     private var activeBackend: AudioBackend? = null
-    private var wavWriter: WavWriter? = null
-    private var outputFile: File? = null
+    private var perChannelWriter: PerChannelWavWriter? = null
+    private var legacyWavWriter: WavWriter? = null
+    private var sessionDir: File? = null
+    private var recordingConfig: RecordingConfig? = null
     private var channelCount: Int = 2
     private var sampleRate: Int = 48_000
 
@@ -50,22 +61,36 @@ class CaptureSessionEngine {
     @Volatile
     private var droppedFrames: Long = 0
 
-    private val monitorConfig = AtomicReference(MonitorConfig(false, emptySet(), -1))
+    @Volatile
+    private var usbDegraded: Boolean = false
+
+    private val monitorConfig = AtomicReference(MonitorMixConfig())
     private val virtualMicConfig = AtomicReference<VirtualMicConfig?>(null)
-    private var monitorOutputRunning = false
+    private val monitorOutputDeviceId = AtomicReference(-1)
+    private val monitorOutputRunning = AtomicBoolean(false)
     private var virtualMicOutputRunning = false
 
     val isCaptureActive: Boolean
         get() = fanoutJob?.isActive == true
 
     val isRecording: Boolean
-        get() = wavWriter != null
+        get() = perChannelWriter != null || legacyWavWriter != null
 
-    fun updateMonitor(config: MonitorConfig) {
-        monitorConfig.set(config)
-        if (!config.enabled && monitorOutputRunning) {
-            NativeAudioMonitor.stop()
-            monitorOutputRunning = false
+    val isUsbDegraded: Boolean
+        get() = usbDegraded
+
+    fun updateMonitor(config: MonitorMixConfig) {
+        val prev = monitorConfig.getAndSet(config)
+        if (!config.enabled) {
+            stopMonitorOutput()
+        } else if (
+            !prev.enabled ||
+            prev.outputDeviceId != config.outputDeviceId ||
+            prev.channelMonitoring != config.channelMonitoring ||
+            prev.soloChannel != config.soloChannel ||
+            prev.gainLinear != config.gainLinear
+        ) {
+            stopMonitorOutput()
         }
     }
 
@@ -79,22 +104,23 @@ class CaptureSessionEngine {
         }
     }
 
-    fun startCapture(
+    fun setUsbDegraded(degraded: Boolean) {
+        usbDegraded = degraded
+    }
+
+    suspend fun startCapture(
         scope: CoroutineScope,
         route: CaptureRoute,
         usbDevice: UsbDevice?,
-    ): Result<Unit> {
-        if (isCaptureActive && activeRoute?.backend == route.backend) {
+    ): Result<Unit> = lifecycleMutex.withLock {
+        if (isCaptureActive && activeRoute?.backend == route.backend && !usbDegraded) {
             return Result.success(Unit)
         }
-        stopCaptureSync()
+        stopCaptureInternalLocked()
         activeBackend = route.backend
         activeRoute = route
 
-        OmtLog.i(
-            "CaptureSession",
-            "startCapture backend=${route.backend} channels=${route.channelCount}",
-        )
+        OmtLog.i("CaptureSession", "startCapture backend=${route.backend} ch=${route.channelCount}")
         val status = AudioEngineRouter.startRecording(route, usbDevice)
         if (!status.active) {
             activeBackend = null
@@ -104,47 +130,79 @@ class CaptureSessionEngine {
 
         channelCount = status.channelCount
         sampleRate = status.sampleRate
+        usbDegraded = false
         startFanoutLoop(scope, route.backend)
-        return Result.success(Unit)
+        Result.success(Unit)
     }
 
-    fun startRecording(scope: CoroutineScope, outputDir: File): Result<RecordingSession> {
-        val route = activeRoute ?: return Result.failure(IllegalStateException("Capture not running"))
-        if (wavWriter != null) {
-            return Result.success(currentRecordingSession())
-        }
-
-        val file = File(
-            outputDir,
-            "session_${channelCount}ch_${sampleRate}hz_${System.currentTimeMillis()}.wav",
-        )
-        outputFile = file
-        framesWritten = 0
-        wavWriter = WavWriter(file, channelCount, sampleRate)
-
+    fun startRecording(config: RecordingConfig): Result<RecordingSession> {
         if (!isCaptureActive) {
             return Result.failure(IllegalStateException("Capture not running"))
         }
+        if (isRecording) {
+            return Result.success(currentRecordingSession())
+        }
 
+        val dir = SessionDirectory.createSessionDir(config.storageRoot, config.mixerFolderName)
+        sessionDir = dir
+        recordingConfig = config
+        framesWritten = 0
+
+        val writer = PerChannelWavWriter(dir, config.channelStrips, sampleRate)
+        perChannelWriter = writer
+
+        SessionMetadata(
+            mixerId = config.mixerId,
+            mixerFolderName = config.mixerFolderName,
+            customTitle = config.customTitle,
+            sampleRate = sampleRate,
+            format = org.openmultitrack.domain.session.SessionFormat.PER_CHANNEL_WAV,
+            channels = config.channelStrips.filter { it.armed }.map { strip ->
+                org.openmultitrack.sessionio.session.ChannelMetadata(
+                    index = strip.index,
+                    fileName = org.openmultitrack.sessionio.session.ChannelFileNaming.fileName(
+                        strip.index,
+                        strip.label,
+                    ),
+                    displayName = org.openmultitrack.sessionio.session.ChannelFileNaming.displayName(
+                        strip.index,
+                        strip.label,
+                    ),
+                    colorArgb = strip.colorArgb,
+                )
+            },
+        ).writeTo(dir)
+
+        val armedCount = config.channelStrips.count { it.armed }
         return Result.success(
             RecordingSession(
-                filePath = file.absolutePath,
-                channelCount = channelCount,
+                filePath = dir.absolutePath,
+                channelCount = armedCount,
                 sampleRate = sampleRate,
                 framesRecorded = 0,
             ),
         )
     }
 
-    suspend fun stopRecording(): RecordingSession? {
-        wavWriter?.close()
-        wavWriter = null
-        val file = outputFile
-        outputFile = null
-        if (!needsCapture()) {
-            stopCaptureInternal()
+    suspend fun stopRecording(): RecordingSession? = lifecycleMutex.withLock {
+        val dir = sessionDir
+        val config = recordingConfig
+        perChannelWriter?.close()
+        perChannelWriter = null
+        legacyWavWriter?.close()
+        legacyWavWriter = null
+        recordingConfig = null
+        sessionDir = null
+
+        if (dir != null && config != null) {
+            SessionMetadata.read(dir)?.markComplete(dir)
         }
-        return file?.let {
+
+        if (!needsCapture()) {
+            stopCaptureInternalLocked()
+        }
+
+        dir?.let {
             RecordingSession(
                 filePath = it.absolutePath,
                 channelCount = channelCount,
@@ -154,18 +212,14 @@ class CaptureSessionEngine {
         }
     }
 
-    suspend fun stopCapture() {
-        wavWriter?.close()
-        wavWriter = null
-        outputFile = null
-        stopCaptureInternal()
-    }
-
-    private fun stopCaptureSync() {
-        wavWriter?.close()
-        wavWriter = null
-        outputFile = null
-        kotlinx.coroutines.runBlocking { stopCaptureInternal() }
+    suspend fun stopCapture() = lifecycleMutex.withLock {
+        perChannelWriter?.close()
+        perChannelWriter = null
+        legacyWavWriter?.close()
+        legacyWavWriter = null
+        sessionDir = null
+        recordingConfig = null
+        stopCaptureInternalLocked()
     }
 
     fun droppedFrameCount(): Long = droppedFrames
@@ -173,15 +227,14 @@ class CaptureSessionEngine {
     private fun needsCapture(): Boolean {
         val monitor = monitorConfig.get()
         val virtualMic = virtualMicConfig.get()
-        return wavWriter != null || monitor.enabled || (virtualMic?.enabled == true)
+        return isRecording || monitor.enabled || (virtualMic?.enabled == true)
     }
 
-    private suspend fun stopCaptureInternal() {
+    private suspend fun stopCaptureInternalLocked() {
         fanoutJob?.cancelAndJoin()
         fanoutJob = null
-        NativeAudioMonitor.stop()
+        stopMonitorOutput()
         NativeAudioEngine.stopPlayback()
-        monitorOutputRunning = false
         virtualMicOutputRunning = false
         AudioEngineRouter.stopRecording()
         activeBackend = null
@@ -189,13 +242,20 @@ class CaptureSessionEngine {
     }
 
     private fun currentRecordingSession(): RecordingSession {
-        val file = outputFile ?: error("No recording file")
+        val dir = sessionDir ?: error("No session dir")
         return RecordingSession(
-            filePath = file.absolutePath,
+            filePath = dir.absolutePath,
             channelCount = channelCount,
             sampleRate = sampleRate,
             framesRecorded = framesWritten,
         )
+    }
+
+    private fun stopMonitorOutput() {
+        if (monitorOutputRunning.compareAndSet(true, false)) {
+            NativeAudioMonitor.stop()
+        }
+        monitorOutputDeviceId.set(-1)
     }
 
     private fun startFanoutLoop(scope: CoroutineScope, backend: AudioBackend) {
@@ -203,34 +263,45 @@ class CaptureSessionEngine {
         val scratch = FloatArray(framesPerChunk * channelCount)
         val monitorScratch = FloatArray(framesPerChunk * 2)
         val virtualMicScratch = FloatArray(framesPerChunk * 2)
+        var consecutiveEmptyReads = 0
 
         fanoutJob = scope.launch(Dispatchers.IO) {
             try {
                 while (isActive) {
-                    val frames = AudioEngineRouter.readRecordedFrames(scratch, framesPerChunk, backend)
+                    val frames = if (usbDegraded) {
+                        0
+                    } else {
+                        AudioEngineRouter.readRecordedFrames(scratch, framesPerChunk, backend)
+                    }
+
                     if (frames <= 0) {
+                        consecutiveEmptyReads++
+                        if (isRecording && (usbDegraded || consecutiveEmptyReads > 3)) {
+                            val silenceFrames = minOf(256, framesPerChunk)
+                            perChannelWriter?.writeSilence(silenceFrames)
+                            framesWritten += silenceFrames
+                        }
                         Thread.sleep(2)
                         continue
                     }
+                    consecutiveEmptyReads = 0
                     droppedFrames = AudioEngineRouter.recordingDroppedFrames(backend)
 
-                    wavWriter?.writeInterleavedFloat(scratch, frames)?.also {
+                    perChannelWriter?.writeInterleavedMultiChannel(scratch, frames, channelCount)?.also {
                         framesWritten += frames
                     }
 
                     val monitor = monitorConfig.get()
-                    if (monitor.enabled && monitor.selectedChannels.isNotEmpty()) {
-                        ensureMonitorOutput(monitor)
-                        val outCh = ChannelMixdown.outputChannelCount(monitor.selectedChannels, stereo = true)
-                        val mixed = ChannelMixdown.mixToOutput(
+                    if (monitor.enabled && MonitorMixer.effectiveMonitorChannels(monitor).isNotEmpty()) {
+                        ensureMonitorOutput(monitor.outputDeviceId)
+                        val mixed = MonitorMixer.mixToStereo(
                             scratch,
                             frames,
                             channelCount,
-                            monitor.selectedChannels,
-                            stereo = outCh == 2,
-                            dest = monitorScratch,
+                            monitor,
+                            monitorScratch,
                         )
-                        if (mixed > 0) {
+                        if (mixed > 0 && monitorOutputRunning.get()) {
                             NativeAudioMonitor.writeFrames(monitorScratch, mixed)
                         }
                     }
@@ -256,30 +327,33 @@ class CaptureSessionEngine {
                     }
                 }
             } finally {
-                OmtLog.i("CaptureSession", "fanout loop ended framesWritten=$framesWritten")
+                OmtLog.i("CaptureSession", "fanout ended frames=$framesWritten")
             }
         }
     }
 
-    private fun ensureMonitorOutput(config: MonitorConfig) {
-        if (monitorOutputRunning) return
-        val outCh = max(1, ChannelMixdown.outputChannelCount(config.selectedChannels, stereo = true))
-        val status = NativeAudioMonitor.start(config.outputDeviceId, outCh, sampleRate)
+    private fun ensureMonitorOutput(deviceId: Int) {
+        if (deviceId < 0) return
+        val prevId = monitorOutputDeviceId.get()
+        if (monitorOutputRunning.get() && prevId == deviceId) return
+        stopMonitorOutput()
+        val status = NativeAudioMonitor.start(deviceId, 2, sampleRate)
         if (status.active) {
-            monitorOutputRunning = true
+            monitorOutputDeviceId.set(deviceId)
+            monitorOutputRunning.set(true)
         } else {
-            OmtLog.e("CaptureSession", "monitor output failed: ${status.errorMessage}")
+            OmtLog.e("CaptureSession", "monitor failed: ${status.errorMessage}")
         }
     }
 
     private fun ensureVirtualMicOutput(config: VirtualMicConfig) {
         if (virtualMicOutputRunning) return
-        val outCh = max(1, ChannelMixdown.outputChannelCount(config.selectedChannels, config.stereo))
+        val outCh = maxOf(1, ChannelMixdown.outputChannelCount(config.selectedChannels, config.stereo))
         val status = NativeAudioEngine.startPlayback(config.loopbackDeviceId, outCh, sampleRate)
         if (status.active) {
             virtualMicOutputRunning = true
         } else {
-            OmtLog.e("CaptureSession", "virtual mic output failed: ${status.errorMessage}")
+            OmtLog.e("CaptureSession", "virtual mic failed: ${status.errorMessage}")
         }
     }
 }

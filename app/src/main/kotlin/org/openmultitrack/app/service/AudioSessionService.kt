@@ -16,21 +16,24 @@ import kotlinx.coroutines.flow.StateFlow
 import org.openmultitrack.app.MainActivity
 import org.openmultitrack.app.R
 import org.openmultitrack.audio.OmtLog
+import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.usb.UsbAudioEnumerator
 
 class AudioSessionService : Service() {
     private val binder = LocalBinder()
-    private lateinit var controller: AudioSessionController
+    private lateinit var mixerManager: MultiMixerSessionManager
 
     inner class LocalBinder : Binder() {
         fun getService(): AudioSessionService = this@AudioSessionService
 
-        fun getController(): AudioSessionController = controller
+        fun getMixerManager(): MultiMixerSessionManager = mixerManager
     }
 
     override fun onCreate() {
         super.onCreate()
-        controller = AudioSessionController(applicationContext, UsbAudioEnumerator(applicationContext))
+        val enumerator = UsbAudioEnumerator(applicationContext)
+        val settings = AppSettingsStore(applicationContext)
+        mixerManager = MultiMixerSessionManager(applicationContext, enumerator, settings)
         createNotificationChannel()
         OmtLog.i("Service", "AudioSessionService created")
     }
@@ -40,7 +43,7 @@ class AudioSessionService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP_ALL -> {
-                controller.shutdown()
+                mixerManager.shutdownAll()
                 stopForegroundAndSelf()
             }
             else -> {
@@ -134,20 +137,20 @@ class AudioSessionService : Service() {
     }
 }
 
-/** Binds to [AudioSessionService] and exposes [AudioSessionController]. */
+/** Binds to [AudioSessionService] and exposes [MultiMixerSessionManager]. */
 class AudioSessionClient(private val context: Context) {
     private var service: AudioSessionService? = null
-    private var controller: AudioSessionController? = null
-    private var pendingReady: ((AudioSessionController) -> Unit)? = null
+    private var mixerManager: MultiMixerSessionManager? = null
+    private var pendingReady: ((MultiMixerSessionManager) -> Unit)? = null
     private var pendingForegroundStatus: String? = null
 
     private val connection = object : android.content.ServiceConnection {
         override fun onServiceConnected(name: android.content.ComponentName?, binder: IBinder?) {
             val local = binder as AudioSessionService.LocalBinder
             service = local.getService()
-            controller = local.getController()
+            mixerManager = local.getMixerManager()
             OmtLog.d("ServiceClient", "bound to AudioSessionService")
-            pendingReady?.invoke(local.getController())
+            pendingReady?.invoke(local.getMixerManager())
             pendingReady = null
             pendingForegroundStatus?.let { status ->
                 local.getService().promoteToForeground(status)
@@ -157,12 +160,9 @@ class AudioSessionClient(private val context: Context) {
 
         override fun onServiceDisconnected(name: android.content.ComponentName?) {
             service = null
-            controller = null
+            mixerManager = null
         }
     }
-
-    val state: StateFlow<AudioSessionUiState>?
-        get() = controller?.state
 
     fun bind() {
         val intent = Intent(context, AudioSessionService::class.java)
@@ -172,31 +172,24 @@ class AudioSessionClient(private val context: Context) {
     fun unbind() {
         runCatching { context.unbindService(connection) }
         service = null
-        controller = null
+        mixerManager = null
         pendingReady = null
     }
 
-    fun whenReady(block: (AudioSessionController) -> Unit) {
-        val c = controller
-        if (c != null) {
-            block(c)
-        } else {
-            pendingReady = block
-        }
+    fun whenReady(block: (MultiMixerSessionManager) -> Unit) {
+        val m = mixerManager
+        if (m != null) block(m) else pendingReady = block
     }
 
-    fun withController(block: (AudioSessionController) -> Unit) {
-        controller?.let(block)
+    fun withManager(block: (MultiMixerSessionManager) -> Unit) {
+        mixerManager?.let(block)
     }
 
     fun promoteForeground(status: String) {
         AudioSessionService.start(context, status)
-        val activeService = service
-        if (activeService != null) {
-            activeService.promoteToForeground(status)
-            activeService.updateNotification(status)
-        } else {
-            pendingForegroundStatus = status
-        }
+        service?.let {
+            it.promoteToForeground(status)
+            it.updateNotification(status)
+        } ?: run { pendingForegroundStatus = status }
     }
 }

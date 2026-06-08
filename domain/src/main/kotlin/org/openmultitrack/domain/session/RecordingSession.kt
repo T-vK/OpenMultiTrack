@@ -10,6 +10,8 @@ data class RecordingSession(
 enum class TransportState {
     IDLE,
     RECORDING,
+    /** USB capture unavailable; writing silence until reconnect. */
+    RECORDING_DEGRADED,
     PLAYING,
     PAUSED,
 }

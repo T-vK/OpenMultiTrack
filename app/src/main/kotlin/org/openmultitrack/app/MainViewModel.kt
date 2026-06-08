@@ -1,7 +1,6 @@
 package org.openmultitrack.app
 
 import android.content.Context
-import android.media.AudioDeviceInfo
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -12,233 +11,183 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.openmultitrack.app.data.AppSettingsStore
+import org.openmultitrack.app.data.MixerDeviceStore
 import org.openmultitrack.app.service.AudioSessionClient
-import org.openmultitrack.app.service.AudioSessionUiState
+import org.openmultitrack.app.service.MixerSessionUiState
+import org.openmultitrack.app.util.AppLogBuffer
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
-import org.openmultitrack.domain.session.TransportState
-import org.openmultitrack.usb.FullUsbProbeResult
+import org.openmultitrack.domain.channel.ChannelStripState
+import org.openmultitrack.domain.mixer.MixerProfile
+import org.openmultitrack.domain.session.AppMode
+import org.openmultitrack.usb.AudioOutputDeviceLabel
+import org.openmultitrack.usb.LabeledAudioDevice
 import org.openmultitrack.usb.UsbAudioEnumerator
 import org.openmultitrack.usb.UsbAudioProbeService
 
-data class DeviceRow(
-    val descriptor: UsbAudioDeviceDescriptor,
-    val hasPermission: Boolean,
-    val probe: FullUsbProbeResult? = null,
-    val probing: Boolean = false,
-    val isRecording: Boolean = false,
-    val recordChannelCount: Int? = null,
-)
-
-data class MainUiState(
-    val devices: List<DeviceRow> = emptyList(),
-    val statusMessage: String? = null,
-    val isRefreshing: Boolean = false,
-    val lastRecordingPath: String? = null,
-    val transportState: TransportState = TransportState.IDLE,
-    val playbackPositionFrames: Long = 0,
-    val isMonitoring: Boolean = false,
-    val isVirtualMicActive: Boolean = false,
-    val monitorChannels: Set<Int> = emptySet(),
-    val monitorOutputDeviceId: Int = -1,
-    val virtualMicChannels: Set<Int> = emptySet(),
-    val virtualMicStereo: Boolean = false,
-    val rootAvailable: Boolean = false,
-    val virtualMicStatus: String? = null,
-    val outputDevices: List<AudioDeviceInfo> = emptyList(),
-    val captureChannelCount: Int = 0,
+data class DawUiState(
+    val mixers: List<MixerProfile> = emptyList(),
+    val activeMixerId: String? = null,
+    val sessionByMixer: Map<String, MixerSessionUiState> = emptyMap(),
+    val outputDevices: List<LabeledAudioDevice> = emptyList(),
+    val availableUsbDevices: List<UsbAudioDeviceDescriptor> = emptyList(),
+    val showAddMixerDialog: Boolean = false,
+    val showSettings: Boolean = false,
+    val showLogViewer: Boolean = false,
+    val globalStatus: String? = null,
 )
 
 class MainViewModel(
     private val appContext: Context,
     private val enumerator: UsbAudioEnumerator,
     private val probeService: UsbAudioProbeService,
+    private val mixerStore: MixerDeviceStore,
+    private val settings: AppSettingsStore,
     private val sessionClient: AudioSessionClient,
 ) : ViewModel() {
-    private val _uiState = MutableStateFlow(MainUiState())
-    val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
+    private val _uiState = MutableStateFlow(DawUiState())
+    val uiState: StateFlow<DawUiState> = _uiState.asStateFlow()
+
+    private val observedMixerIds = mutableSetOf<String>()
 
     init {
         sessionClient.bind()
-        sessionClient.whenReady { controller ->
+        loadMixers()
+        refreshUsbAndOutputs()
+        sessionClient.whenReady { manager ->
             viewModelScope.launch {
-                controller.state.collect { session ->
-                    mergeSessionState(session)
+                manager.activeMixerId.collect { id ->
+                    _uiState.update { it.copy(activeMixerId = id) }
                 }
             }
-            controller.refreshRootStatus()
+            _uiState.value.mixers.forEach { observeMixerSession(it.id, manager) }
         }
-        refreshOutputDevices()
     }
 
-    fun refreshDevices() {
+    fun refreshUsbAndOutputs() {
         viewModelScope.launch {
-            OmtLog.d("ViewModel", "refreshDevices")
-            _uiState.update { it.copy(isRefreshing = true) }
-            val activeDevice = sessionClient.state?.value?.activeDeviceName
-            val rows = withContext(Dispatchers.IO) {
-                enumerator.listUsbDevices().map { usb ->
-                    val existing = _uiState.value.devices.firstOrNull { it.descriptor.deviceName == usb.deviceName }
-                    DeviceRow(
-                        descriptor = usb,
-                        hasPermission = enumerator.hasUsbPermission(usb.deviceName),
-                        isRecording = usb.deviceName == activeDevice &&
-                            sessionClient.state?.value?.isRecording == true,
-                        probe = existing?.probe,
-                        recordChannelCount = existing?.probe?.input?.channelCount?.takeIf { it > 0 }
-                            ?: existing?.probe?.uac2Caps?.maxCaptureChannels?.takeIf { it > 0 },
-                    )
-                }
+            val usb = withContext(Dispatchers.IO) { enumerator.listUsbDevices() }
+            val outputs = withContext(Dispatchers.IO) {
+                AudioOutputDeviceLabel.labelAll(enumerator.listAudioOutputDevices())
             }
-            _uiState.update {
-                it.copy(devices = rows, isRefreshing = false)
+            _uiState.update { it.copy(availableUsbDevices = usb, outputDevices = outputs) }
+            syncMixerUsbNames(usb)
+            sessionClient.withManager { mgr ->
+                _uiState.value.mixers.forEach { autoProbeMixer(it, mgr) }
             }
         }
     }
 
-    fun refreshOutputDevices() {
-        viewModelScope.launch {
-            val outputs = withContext(Dispatchers.IO) { enumerator.listAudioOutputDevices() }
-            val defaultId = outputs.firstOrNull {
-                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
-                    it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
-                    it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET
-            }?.id ?: outputs.firstOrNull()?.id ?: -1
-            _uiState.update {
-                it.copy(
-                    outputDevices = outputs,
-                    monitorOutputDeviceId = if (it.monitorOutputDeviceId < 0) defaultId else it.monitorOutputDeviceId,
-                )
+    fun showAddMixerDialog(show: Boolean) {
+        _uiState.update { it.copy(showAddMixerDialog = show) }
+        if (show) refreshUsbAndOutputs()
+    }
+
+    fun addMixer(descriptor: UsbAudioDeviceDescriptor) {
+        if (!mixerStore.isBehringerAudioInterface(descriptor)) {
+            _uiState.update { it.copy(globalStatus = "Not a supported audio interface.") }
+            return
+        }
+        val profile = mixerStore.addMixer(descriptor)
+        loadMixers()
+        sessionClient.withManager { mgr ->
+            mgr.registerMixer(profile)
+            mgr.setActiveMixer(profile.id)
+            autoProbeMixer(profile, mgr)
+        }
+        _uiState.update { it.copy(showAddMixerDialog = false, activeMixerId = profile.id) }
+    }
+
+    fun removeMixer(id: String) {
+        mixerStore.removeMixer(id)
+        loadMixers()
+    }
+
+    fun setActiveMixer(id: String) {
+        sessionClient.withManager { it.setActiveMixer(id) }
+        _uiState.update { it.copy(activeMixerId = id) }
+    }
+
+    fun setAppMode(mixerId: String, mode: AppMode) {
+        sessionClient.withManager { it.getOrCreate(mixerId).setAppMode(mode) }
+    }
+
+    fun toggleArm(mixerId: String, index: Int) {
+        sessionClient.withManager { mgr ->
+            mgr.getOrCreate(mixerId).updateChannelStrip(index) { it.copy(armed = !it.armed) }
+        }
+    }
+
+    fun toggleMonitor(mixerId: String, index: Int) {
+        sessionClient.withManager { mgr ->
+            mgr.getOrCreate(mixerId).updateChannelStrip(index) { it.copy(monitoring = !it.monitoring) }
+        }
+    }
+
+    fun toggleSolo(mixerId: String, index: Int) {
+        sessionClient.withManager { mgr ->
+            val ctrl = mgr.getOrCreate(mixerId)
+            val wasSolo = ctrl.state.value.channelStrips.firstOrNull { it.index == index }?.solo == true
+            ctrl.state.value.channelStrips.forEach { strip ->
+                ctrl.updateChannelStrip(strip.index) {
+                    it.copy(solo = if (strip.index == index) !wasSolo else false)
+                }
             }
         }
+    }
+
+    fun setMonitorOutput(mixerId: String, deviceId: Int) {
+        sessionClient.withManager { it.getOrCreate(mixerId).setMonitorOutputDevice(deviceId) }
+    }
+
+    fun startMonitor(mixerId: String) {
+        sessionClient.promoteForeground("Monitor")
+        sessionClient.withManager { it.getOrCreate(mixerId).startMonitoring() }
+    }
+
+    fun stopMonitor(mixerId: String) {
+        sessionClient.withManager { it.getOrCreate(mixerId).stopMonitoring() }
+    }
+
+    fun startRecord(mixerId: String) {
+        sessionClient.promoteForeground("Recording")
+        sessionClient.withManager { it.getOrCreate(mixerId).startRecording() }
+    }
+
+    fun stopRecord(mixerId: String) {
+        sessionClient.withManager { it.getOrCreate(mixerId).stopRecording() }
     }
 
     fun onUsbPermissionGranted(deviceName: String) {
-        OmtLog.i("ViewModel", "onUsbPermissionGranted deviceName=$deviceName")
-        refreshDevices()
-        val row = _uiState.value.devices.firstOrNull { it.descriptor.deviceName == deviceName }
-        if (row != null) probeDevice(row.descriptor)
+        refreshUsbAndOutputs()
     }
 
     fun onUsbDetached(deviceName: String?) {
-        sessionClient.withController { it.onUsbDetached(deviceName) }
-        refreshDevices()
+        sessionClient.withManager { it.onUsbDetached(deviceName) }
+        refreshUsbAndOutputs()
     }
 
-    fun probeDevice(descriptor: UsbAudioDeviceDescriptor) {
-        OmtLog.i("ViewModel", "probeDevice ${descriptor.productName}")
-        viewModelScope.launch {
-            _uiState.update { state ->
-                state.copy(
-                    devices = state.devices.map { row ->
-                        if (row.descriptor.deviceName == descriptor.deviceName) row.copy(probing = true) else row
-                    },
-                )
-            }
-            val result = withContext(Dispatchers.IO) { probeService.probe(descriptor) }
-            val inputChannels = result.input?.takeIf { it.isSuccess }?.channelCount
-                ?: result.uac2Caps?.maxCaptureChannels?.takeIf { it > 0 }
-            _uiState.update { state ->
-                val allMonitorChannels = if (inputChannels != null && state.monitorChannels.isEmpty()) {
-                    (0 until inputChannels).toSet()
-                } else {
-                    state.monitorChannels
-                }
-                state.copy(
-                    devices = state.devices.map { row ->
-                        if (row.descriptor.deviceName == descriptor.deviceName) {
-                            row.copy(probing = false, probe = result, recordChannelCount = inputChannels)
-                        } else {
-                            row
-                        }
-                    },
-                    statusMessage = buildProbeMessage(result, inputChannels),
-                    captureChannelCount = inputChannels ?: state.captureChannelCount,
-                    monitorChannels = allMonitorChannels,
-                )
+    fun onUsbAttached(device: UsbAudioDeviceDescriptor) {
+        sessionClient.withManager { it.onUsbAttached(device) }
+        refreshUsbAndOutputs()
+    }
+
+    fun showSettings(show: Boolean) {
+        _uiState.update { it.copy(showSettings = show) }
+    }
+
+    fun showLogViewer(show: Boolean) {
+        _uiState.update { it.copy(showLogViewer = show) }
+    }
+
+    fun setMonitorGain(gain: Float) {
+        settings.monitorGainLinear = gain
+        sessionClient.withManager { mgr ->
+            _uiState.value.mixers.forEach { m ->
+                mgr.getOrCreate(m.id).setMonitorGain(gain)
             }
         }
-    }
-
-    fun startRecording(descriptor: UsbAudioDeviceDescriptor) {
-        val probe = probeFor(descriptor) ?: return
-        sessionClient.promoteForeground("Recording")
-        sessionClient.withController { it.startRecording(descriptor, probe) }
-    }
-
-    fun stopRecording() {
-        sessionClient.withController { it.stopRecording() }
-    }
-
-    fun startMonitoring(descriptor: UsbAudioDeviceDescriptor) {
-        val probe = probeFor(descriptor) ?: return
-        val channels = _uiState.value.monitorChannels.ifEmpty {
-            val count = probe.uac2Caps?.maxCaptureChannels?.takeIf { it > 0 }
-                ?: probe.input?.takeIf { it.isSuccess }?.channelCount
-                ?: 0
-            (0 until count).toSet()
-        }
-        val outputId = _uiState.value.monitorOutputDeviceId
-        sessionClient.promoteForeground("Live monitor")
-        sessionClient.withController {
-            it.startMonitoring(descriptor, probe, channels, outputId)
-        }
-    }
-
-    fun stopMonitoring() {
-        sessionClient.withController { it.stopMonitoring() }
-    }
-
-    fun toggleMonitorChannel(channel: Int) {
-        val updated = _uiState.value.monitorChannels.toMutableSet().apply {
-            if (contains(channel)) remove(channel) else add(channel)
-        }
-        _uiState.update { it.copy(monitorChannels = updated) }
-        sessionClient.withController { it.setMonitorChannels(updated) }
-    }
-
-    fun setMonitorOutputDevice(deviceId: Int) {
-        _uiState.update { it.copy(monitorOutputDeviceId = deviceId) }
-        sessionClient.withController { it.setMonitorOutputDevice(deviceId) }
-    }
-
-    fun enableVirtualMic(descriptor: UsbAudioDeviceDescriptor) {
-        val probe = probeFor(descriptor) ?: return
-        val channels = _uiState.value.virtualMicChannels
-        if (channels.isEmpty()) {
-            _uiState.update { it.copy(statusMessage = "Select 1–2 channels for virtual mic.") }
-            return
-        }
-        sessionClient.promoteForeground("Virtual microphone")
-        sessionClient.withController {
-            it.enableVirtualMic(descriptor, probe, channels, _uiState.value.virtualMicStereo)
-        }
-    }
-
-    fun disableVirtualMic() {
-        sessionClient.withController { it.disableVirtualMic() }
-    }
-
-    fun toggleVirtualMicChannel(channel: Int, maxChannels: Int = 2) {
-        val updated = _uiState.value.virtualMicChannels.toMutableSet()
-        if (updated.contains(channel)) {
-            updated.remove(channel)
-        } else if (updated.size < maxChannels) {
-            updated.add(channel)
-        }
-        val stereo = updated.size >= 2
-        _uiState.update { it.copy(virtualMicChannels = updated, virtualMicStereo = stereo) }
-        sessionClient.withController { it.setVirtualMicChannels(updated, stereo) }
-    }
-
-    fun playLastRecording(descriptor: UsbAudioDeviceDescriptor) {
-        val probe = probeFor(descriptor) ?: return
-        sessionClient.promoteForeground("Playback")
-        sessionClient.withController { it.playLastRecording(descriptor, probe) }
-    }
-
-    fun stopPlayback() {
-        sessionClient.withController { it.stopPlayback() }
     }
 
     override fun onCleared() {
@@ -246,56 +195,60 @@ class MainViewModel(
         super.onCleared()
     }
 
-    private fun probeFor(descriptor: UsbAudioDeviceDescriptor): FullUsbProbeResult? {
-        val probe = _uiState.value.devices
-            .firstOrNull { it.descriptor.deviceName == descriptor.deviceName }
-            ?.probe
-        if (probe == null) {
-            _uiState.update { it.copy(statusMessage = "Probe device first.") }
-        }
-        return probe
-    }
-
-    private fun mergeSessionState(session: AudioSessionUiState) {
-        _uiState.update { ui ->
-            ui.copy(
-                statusMessage = session.statusMessage ?: ui.statusMessage,
-                lastRecordingPath = session.lastRecordingPath ?: ui.lastRecordingPath,
-                transportState = session.transportState,
-                isMonitoring = session.isMonitoring,
-                isVirtualMicActive = session.isVirtualMicActive,
-                monitorChannels = session.monitorChannels.ifEmpty { ui.monitorChannels },
-                monitorOutputDeviceId = if (session.monitorOutputDeviceId >= 0) {
-                    session.monitorOutputDeviceId
-                } else {
-                    ui.monitorOutputDeviceId
-                },
-                virtualMicChannels = session.virtualMicChannels.ifEmpty { ui.virtualMicChannels },
-                virtualMicStereo = session.virtualMicStereo,
-                rootAvailable = session.rootAvailable,
-                virtualMicStatus = session.virtualMicStatus,
-                captureChannelCount = session.captureChannelCount.takeIf { it > 0 } ?: ui.captureChannelCount,
-                devices = ui.devices.map { row ->
-                    row.copy(isRecording = row.descriptor.deviceName == session.activeDeviceName && session.isRecording)
-                },
-            )
-        }
-    }
-
-    private fun buildProbeMessage(result: FullUsbProbeResult, inputChannels: Int?): String {
-        val uac2In = result.uac2Caps?.maxCaptureChannels ?: 0
-        if (inputChannels != null && inputChannels > 0) {
-            val oboeIn = result.input?.takeIf { it.isSuccess }?.channelCount ?: 0
-            if (uac2In > oboeIn && oboeIn > 0) {
-                return "Oboe: $oboeIn ch. USB descriptor: $uac2In ch capture (UAC2 host available)."
+    private fun loadMixers() {
+        val mixers = mixerStore.listMixers()
+        _uiState.update { it.copy(mixers = mixers, activeMixerId = it.activeMixerId ?: mixers.firstOrNull()?.id) }
+        sessionClient.withManager { mgr ->
+            mixers.forEach {
+                mgr.registerMixer(it)
+                observeMixerSession(it.id, mgr)
             }
-            return "Ready to record $inputChannels input channel(s)."
         }
-        if (uac2In > 0) {
-            val uac2Out = result.uac2Caps?.maxPlaybackChannels ?: 0
-            return "USB descriptor: $uac2In ch in / $uac2Out ch out. ${result.note ?: ""}".trim()
+    }
+
+    private fun observeMixerSession(mixerId: String, manager: org.openmultitrack.app.service.MultiMixerSessionManager) {
+        if (!observedMixerIds.add(mixerId)) return
+        viewModelScope.launch {
+            manager.getOrCreate(mixerId).state.collect { session ->
+                _uiState.update { ui ->
+                    ui.copy(sessionByMixer = ui.sessionByMixer + (mixerId to session))
+                }
+            }
         }
-        return result.note ?: "Probe complete."
+    }
+
+    private fun syncMixerUsbNames(usb: List<UsbAudioDeviceDescriptor>) {
+        val updated = _uiState.value.mixers.map { profile ->
+            val match = usb.firstOrNull { d ->
+                d.vendorId == profile.vendorId && d.productId == profile.productId &&
+                    (profile.serialNumber == null || d.serialNumber == profile.serialNumber)
+            }
+            if (match != null && match.deviceName != profile.usbDeviceName) {
+                val saved = profile.copy(usbDeviceName = match.deviceName, productName = match.productName)
+                mixerStore.saveMixer(saved)
+                saved
+            } else {
+                profile
+            }
+        }
+        if (updated != _uiState.value.mixers) {
+            _uiState.update { it.copy(mixers = updated) }
+        }
+    }
+
+    private fun autoProbeMixer(profile: MixerProfile, manager: org.openmultitrack.app.service.MultiMixerSessionManager) {
+        val deviceName = profile.usbDeviceName ?: return
+        if (!enumerator.hasUsbPermission(deviceName)) return
+        val usb = _uiState.value.availableUsbDevices.firstOrNull { it.deviceName == deviceName }
+            ?: enumerator.listUsbDevices().firstOrNull { it.deviceName == deviceName }
+            ?: return
+        viewModelScope.launch {
+            manager.getOrCreate(profile.id).setProbing(true)
+            AppLogBuffer.append("I", "Probe", "Auto-probing ${profile.displayName}")
+            val result = withContext(Dispatchers.IO) { probeService.probe(usb) }
+            manager.onProbeComplete(profile.id, usb, result)
+            OmtLog.i("ViewModel", "auto-probed ${profile.displayName}")
+        }
     }
 
     companion object {
@@ -305,9 +258,14 @@ class MainViewModel(
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
                     val appContext = context.applicationContext
                     val enumerator = UsbAudioEnumerator(appContext)
-                    val probeService = UsbAudioProbeService(enumerator)
-                    val sessionClient = AudioSessionClient(appContext)
-                    return MainViewModel(appContext, enumerator, probeService, sessionClient) as T
+                    return MainViewModel(
+                        appContext,
+                        enumerator,
+                        UsbAudioProbeService(enumerator),
+                        MixerDeviceStore(appContext),
+                        AppSettingsStore(appContext),
+                        AudioSessionClient(appContext),
+                    ) as T
                 }
             }
     }

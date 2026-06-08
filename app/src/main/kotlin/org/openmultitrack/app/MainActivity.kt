@@ -20,14 +20,18 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import org.openmultitrack.app.ui.MainScreen
+import org.openmultitrack.app.data.AppSettingsStore
+import org.openmultitrack.app.ui.daw.DawMainScreen
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
+import org.openmultitrack.usb.BehringerUsbIdentifiers
+import org.openmultitrack.usb.UsbAudioEnumerator
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels {
         MainViewModel.factory(applicationContext)
     }
+    private val settings by lazy { AppSettingsStore(applicationContext) }
 
     private val usbPermissionAction = "${BuildConfig.APPLICATION_ID}.USB_PERMISSION"
 
@@ -42,7 +46,6 @@ class MainActivity : ComponentActivity() {
             when (intent?.action) {
                 usbPermissionAction -> {
                     val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
-                    OmtLog.i("Usb", "permission result granted=$granted")
                     val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
                     } else {
@@ -50,30 +53,17 @@ class MainActivity : ComponentActivity() {
                         intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
                     }
                     if (granted && device != null) {
-                        OmtLog.i("Usb", "permission granted for ${device.deviceName} (${device.productName})")
                         viewModel.onUsbPermissionGranted(device.deviceName)
-                    } else if (!granted) {
-                        OmtLog.w("Usb", "permission denied for ${device?.deviceName}")
                     }
                 }
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
-                    val attached = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
-                    }
-                    OmtLog.i("Usb", "device attached: ${attached?.deviceName}")
-                    viewModel.refreshDevices()
+                    val attached = parseUsbDevice(intent) ?: return
+                    val desc = toDescriptor(attached)
+                    viewModel.onUsbAttached(desc)
+                    requestUsbPermission(attached)
                 }
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
-                    val detached = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
-                    }
-                    OmtLog.i("Usb", "device detached: ${detached?.deviceName}")
+                    val detached = parseUsbDevice(intent)
                     viewModel.onUsbDetached(detached?.deviceName)
                 }
             }
@@ -82,7 +72,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        OmtLog.d("Activity", "onCreate")
         requestNotificationPermissionIfNeeded()
         registerUsbReceiver()
 
@@ -90,28 +79,35 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface {
                     val state = viewModel.uiState.collectAsStateWithLifecycle()
-                    MainScreen(
+                    DawMainScreen(
                         state = state.value,
-                        onRefresh = viewModel::refreshDevices,
-                        onRequestPermission = ::requestUsbPermission,
-                        onProbe = viewModel::probeDevice,
-                        onStartRecord = viewModel::startRecording,
-                        onStopRecord = viewModel::stopRecording,
-                        onPlay = viewModel::playLastRecording,
-                        onStopPlayback = viewModel::stopPlayback,
-                        onStartMonitor = viewModel::startMonitoring,
-                        onStopMonitor = viewModel::stopMonitoring,
-                        onToggleMonitorChannel = viewModel::toggleMonitorChannel,
-                        onSelectMonitorOutput = viewModel::setMonitorOutputDevice,
-                        onEnableVirtualMic = viewModel::enableVirtualMic,
-                        onDisableVirtualMic = viewModel::disableVirtualMic,
-                        onToggleVirtualMicChannel = viewModel::toggleVirtualMicChannel,
+                        monitorGain = settings.monitorGainLinear,
+                        waveformNormalized = settings.waveformNormalized,
+                        onAddMixer = { viewModel.showAddMixerDialog(true) },
+                        onSelectMixer = viewModel::setActiveMixer,
+                        onAddMixerDevice = viewModel::addMixer,
+                        onDismissAddMixer = { viewModel.showAddMixerDialog(false) },
+                        onToggleArm = viewModel::toggleArm,
+                        onToggleMonitor = viewModel::toggleMonitor,
+                        onToggleSolo = viewModel::toggleSolo,
+                        onSetMonitorOutput = viewModel::setMonitorOutput,
+                        onStartMonitor = viewModel::startMonitor,
+                        onStopMonitor = viewModel::stopMonitor,
+                        onStartRecord = viewModel::startRecord,
+                        onStopRecord = viewModel::stopRecord,
+                        onSetAppMode = viewModel::setAppMode,
+                        onOpenSettings = { viewModel.showSettings(true) },
+                        onCloseSettings = { viewModel.showSettings(false) },
+                        onOpenLog = { viewModel.showLogViewer(true) },
+                        onCloseLog = { viewModel.showLogViewer(false) },
+                        onMonitorGainChange = viewModel::setMonitorGain,
+                        onRefreshUsb = viewModel::refreshUsbAndOutputs,
                     )
                 }
             }
         }
 
-        viewModel.refreshDevices()
+        viewModel.refreshUsbAndOutputs()
         handleUsbIntent(intent)
     }
 
@@ -123,6 +119,33 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         unregisterReceiver(usbReceiver)
         super.onDestroy()
+    }
+
+    private fun parseUsbDevice(intent: Intent): UsbDevice? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+        }
+
+    private fun toDescriptor(device: UsbDevice): UsbAudioDeviceDescriptor {
+        val enumerator = UsbAudioEnumerator(applicationContext)
+        return enumerator.listUsbDevices().firstOrNull { it.deviceName == device.deviceName }
+            ?: UsbAudioDeviceDescriptor(
+                deviceName = device.deviceName,
+                vendorId = device.vendorId,
+                productId = device.productId,
+                manufacturerName = device.manufacturerName,
+                productName = device.productName,
+                serialNumber = null,
+                isLikelyBehringerMixer = BehringerUsbIdentifiers.isLikelyBehringerMixer(
+                    device.vendorId,
+                    device.productName,
+                ),
+                guessedModel = BehringerUsbIdentifiers.guessModel(device.productName),
+                androidAudioDeviceId = null,
+            )
     }
 
     private fun requestNotificationPermissionIfNeeded() {
@@ -149,39 +172,19 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleUsbIntent(intent: Intent?) {
-        OmtLog.d("Usb", "handleUsbIntent action=${intent?.action}")
-        val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            intent?.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-        } else {
-            @Suppress("DEPRECATION")
-            intent?.getParcelableExtra(UsbManager.EXTRA_DEVICE)
-        } ?: return
-        requestUsbPermission(device)
-    }
-
-    private fun requestUsbPermission(descriptor: UsbAudioDeviceDescriptor) {
-        val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        val device = usbManager.deviceList[descriptor.deviceName] ?: return
+        val device = parseUsbDevice(intent ?: return) ?: return
         requestUsbPermission(device)
     }
 
     private fun requestUsbPermission(device: UsbDevice) {
         val usbManager = getSystemService(USB_SERVICE) as UsbManager
         if (usbManager.hasPermission(device)) {
-            OmtLog.d("Usb", "already have permission for ${device.deviceName}")
             viewModel.onUsbPermissionGranted(device.deviceName)
             return
         }
-        OmtLog.i("Usb", "requesting permission for ${device.deviceName} (${device.productName})")
         val permissionIntent = Intent(usbPermissionAction).setPackage(packageName)
-        val flags = PendingIntent.FLAG_UPDATE_CURRENT or when {
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
-                PendingIntent.FLAG_IMMUTABLE
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
-                PendingIntent.FLAG_MUTABLE
-            else -> 0
-        }
-        val intent = PendingIntent.getBroadcast(this, device.deviceId, permissionIntent, flags)
-        usbManager.requestPermission(device, intent)
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val pi = PendingIntent.getBroadcast(this, device.deviceId, permissionIntent, flags)
+        usbManager.requestPermission(device, pi)
     }
 }
