@@ -433,6 +433,14 @@ class MainViewModel(
         _uiState.update { it.copy(showWaveforms = show) }
     }
 
+    fun setRecordWaveformWindowSec(sec: Float) {
+        val rounded = sec.coerceIn(5f, 120f).let { kotlin.math.round(it) }
+        settings.recordWaveformWindowSec = rounded
+        sessionClient.withManager { mgr ->
+            mgr.mixerIds().forEach { mgr.getOrCreate(it).updateWaveformConfig() }
+        }
+    }
+
     fun setStripNumberMode(mode: StripNumberMode) {
         settings.stripNumberMode = mode
         _uiState.update { it.copy(stripNumberMode = mode) }

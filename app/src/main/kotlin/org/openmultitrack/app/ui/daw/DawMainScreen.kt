@@ -92,6 +92,7 @@ private val ScrollStripHeight = 72.dp
 fun DawMainScreen(
     state: DawUiState,
     monitorGain: Float,
+    recordWaveformWindowSec: Float,
     waveformNormalized: Boolean,
     onAddMixer: () -> Unit,
     onSelectMixer: (String) -> Unit,
@@ -122,6 +123,7 @@ fun DawMainScreen(
     onShowWaveformsChange: (Boolean) -> Unit,
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
+    onRecordWaveformWindowChange: (Float) -> Unit,
     onDismissStatusToast: () -> Unit,
 ) {
     val activeId = state.activeMixerId
@@ -261,6 +263,7 @@ fun DawMainScreen(
                 hideMonitorIcon = state.hideMonitorButton,
                 hideSoloIcon = state.hideSoloButton,
                 showWaveforms = state.showWaveforms,
+                recordWaveformWindowSec = recordWaveformWindowSec,
                 stripNumberMode = state.stripNumberMode,
                 stripIconMode = state.stripIconMode,
             ),
@@ -271,6 +274,7 @@ fun DawMainScreen(
             onHideMonitorChange = onHideMonitorChange,
             onHideSoloChange = onHideSoloChange,
             onShowWaveformsChange = onShowWaveformsChange,
+            onRecordWaveformWindowChange = onRecordWaveformWindowChange,
             onStripNumberModeChange = onStripNumberModeChange,
             onStripIconModeChange = onStripIconModeChange,
         )
@@ -712,8 +716,7 @@ private fun ChannelStripRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(stripHeight)
-            .clip(RoundedCornerShape(4.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp))
             .padding(horizontal = innerPad),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(innerPad / 2),

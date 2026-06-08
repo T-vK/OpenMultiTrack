@@ -43,6 +43,7 @@ data class SettingsUiState(
     val hideMonitorIcon: Boolean,
     val hideSoloIcon: Boolean,
     val showWaveforms: Boolean,
+    val recordWaveformWindowSec: Float,
     val stripNumberMode: StripNumberMode,
     val stripIconMode: StripIconMode,
 )
@@ -58,6 +59,7 @@ fun SettingsSheet(
     onHideMonitorChange: (Boolean) -> Unit,
     onHideSoloChange: (Boolean) -> Unit,
     onShowWaveformsChange: (Boolean) -> Unit,
+    onRecordWaveformWindowChange: (Float) -> Unit,
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
 ) {
@@ -71,6 +73,7 @@ fun SettingsSheet(
             onHideMonitorChange = onHideMonitorChange,
             onHideSoloChange = onHideSoloChange,
             onShowWaveformsChange = onShowWaveformsChange,
+            onRecordWaveformWindowChange = onRecordWaveformWindowChange,
             onStripNumberModeChange = onStripNumberModeChange,
             onStripIconModeChange = onStripIconModeChange,
         )
@@ -87,6 +90,7 @@ private fun SettingsContent(
     onHideMonitorChange: (Boolean) -> Unit,
     onHideSoloChange: (Boolean) -> Unit,
     onShowWaveformsChange: (Boolean) -> Unit,
+    onRecordWaveformWindowChange: (Float) -> Unit,
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
 ) {
@@ -101,6 +105,7 @@ private fun SettingsContent(
             onHideMonitorChange = onHideMonitorChange,
             onHideSoloChange = onHideSoloChange,
             onShowWaveformsChange = onShowWaveformsChange,
+            onRecordWaveformWindowChange = onRecordWaveformWindowChange,
             onStripNumberModeChange = onStripNumberModeChange,
             onStripIconModeChange = onStripIconModeChange,
             onMonitorGainChange = onMonitorGainChange,
@@ -222,6 +227,7 @@ private data class SettingsSliderRow(
     val description: String,
     val value: Float,
     val valueLabel: String,
+    val valueRange: ClosedFloatingPointRange<Float> = 0.5f..8f,
     val onValueChange: (Float) -> Unit,
 ) : SettingsRowModel {
     override val searchText: String = "$title $description $valueLabel".lowercase()
@@ -294,7 +300,7 @@ private fun SettingsSliderItem(row: SettingsSliderRow) {
         Slider(
             value = row.value,
             onValueChange = row.onValueChange,
-            valueRange = 0.5f..8f,
+            valueRange = row.valueRange,
             modifier = Modifier.fillMaxWidth(),
         )
     }
@@ -342,6 +348,7 @@ private fun buildSettingsRows(
     onHideMonitorChange: (Boolean) -> Unit,
     onHideSoloChange: (Boolean) -> Unit,
     onShowWaveformsChange: (Boolean) -> Unit,
+    onRecordWaveformWindowChange: (Float) -> Unit,
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
     onMonitorGainChange: (Float) -> Unit,
@@ -354,6 +361,16 @@ private fun buildSettingsRows(
         value = monitorGain,
         valueLabel = "${"%.1f".format(monitorGain)}×",
         onValueChange = onMonitorGainChange,
+    ),
+    SettingsSliderRow(
+        id = "record_waveform_window",
+        section = "Display",
+        title = "Live waveform window",
+        description = "How many seconds of recent audio each strip waveform shows while recording or monitoring.",
+        value = state.recordWaveformWindowSec,
+        valueRange = 5f..120f,
+        valueLabel = "${state.recordWaveformWindowSec.toInt()} s",
+        onValueChange = onRecordWaveformWindowChange,
     ),
     SettingsToggleRow(
         id = "show_waveforms",

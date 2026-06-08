@@ -165,6 +165,13 @@ class MixerSessionController(
         applyMonitorRouting()
     }
 
+    fun updateWaveformConfig() {
+        captureEngine.setWaveformConfig(
+            windowSec = settings.recordWaveformWindowSec,
+            peaksPerSecond = CaptureSessionEngine.DEFAULT_WAVEFORM_PEAKS_PER_SEC,
+        )
+    }
+
     fun startMonitoring() {
         val descriptor = activeDescriptor ?: return
         val probe = activeProbe ?: return
@@ -371,6 +378,7 @@ class MixerSessionController(
         descriptor: UsbAudioDeviceDescriptor,
         probe: FullUsbProbeResult,
     ): Result<Int> {
+        updateWaveformConfig()
         if (captureEngine.isCaptureActive && !captureEngine.isUsbDegraded) {
             val count = channelCountFromProbe(probe)
             return Result.success(count)

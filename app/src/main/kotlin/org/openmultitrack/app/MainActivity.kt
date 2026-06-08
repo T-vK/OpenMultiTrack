@@ -106,6 +106,7 @@ class MainActivity : ComponentActivity() {
                     DawMainScreen(
                         state = state.value,
                         monitorGain = settings.monitorGainLinear,
+                        recordWaveformWindowSec = settings.recordWaveformWindowSec,
                         waveformNormalized = settings.waveformNormalized,
                         onAddMixer = { viewModel.showAddMixerDialog(true) },
                         onSelectMixer = viewModel::setActiveMixer,
@@ -136,6 +137,7 @@ class MainActivity : ComponentActivity() {
                         onShowWaveformsChange = viewModel::setShowWaveforms,
                         onStripNumberModeChange = viewModel::setStripNumberMode,
                         onStripIconModeChange = viewModel::setStripIconMode,
+                        onRecordWaveformWindowChange = viewModel::setRecordWaveformWindowSec,
                         onDismissStatusToast = viewModel::dismissStatusToast,
                     )
                 }

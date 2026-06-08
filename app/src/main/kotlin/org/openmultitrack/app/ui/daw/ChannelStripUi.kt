@@ -5,9 +5,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -50,6 +52,9 @@ private val RecordRed = Color(0xFFE53935)
 private val MonitorBlue = Color(0xFF1E88E5)
 private val SoloAmber = Color(0xFFFFB300)
 
+private fun iconContainerSize(colorBarHeight: Dp): Dp =
+    (colorBarHeight * 0.58f).coerceIn(20.dp, 38.dp)
+
 @Composable
 internal fun stripLabelColumnWidth(
     strips: List<ChannelStripState>,
@@ -75,12 +80,10 @@ internal fun stripLabelColumnWidth(
 
     val showsIcon = iconMode != StripIconMode.HIDE &&
         strips.any { MixingStationIcons.emoji(it.iconId) != null }
-    val iconGap = 7.dp
-    val bigIconWidth = if (showsIcon) {
-        (stripHeight * 0.60f).coerceIn(18.dp, 36.dp)
-    } else {
-        0.dp
-    }
+    val innerPad = (stripHeight * 0.12f).coerceIn(3.dp, 10.dp)
+    val colorBarHeight = stripHeight - innerPad * 2
+    val iconGap = 8.dp
+    val bigIconWidth = if (showsIcon) iconContainerSize(colorBarHeight) else 0.dp
     val showsGlyphs = !hideArm || !hideMonitor || !hideSolo
     val glyphWidth = if (showsGlyphs) {
         with(density) { (labelFontSize * 3.6f).sp.toDp() }
@@ -110,9 +113,8 @@ internal fun StripIdentityCell(
     }
     val iconEmoji = parsed.iconEmoji
     val lineText = parsed.lineText
-    val iconGap = 7.dp
-    val bigIconSize = minOf((colorBarHeight * 0.60f).coerceIn(18.dp, 36.dp), colorBarHeight)
-    val bigIconFontSize = (labelFontSize * 1.75f).coerceIn(15f, 28f)
+    val iconGap = 8.dp
+    val bigIconSize = iconContainerSize(colorBarHeight)
     val controlIconSize = (labelFontSize * 0.95f).coerceIn(10f, 16f).dp
     val colorBarWidth = 3.dp
     val iconColumnWidth = if (iconEmoji != null) bigIconSize else 0.dp
@@ -135,20 +137,7 @@ internal fun StripIdentityCell(
                 .background(Color(strip.colorArgb)),
         )
         if (iconEmoji != null) {
-            Box(
-                modifier = Modifier
-                    .size(bigIconSize)
-                    .padding(vertical = 1.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    iconEmoji,
-                    fontSize = bigIconFontSize.sp,
-                    maxLines = 1,
-                    lineHeight = bigIconFontSize.sp,
-                    softWrap = false,
-                )
-            }
+            ScribbleIconEmoji(emoji = iconEmoji, containerSize = bigIconSize)
             Spacer(Modifier.width(iconGap))
         }
         Column(
@@ -176,6 +165,28 @@ internal fun StripIdentityCell(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ScribbleIconEmoji(
+    emoji: String,
+    containerSize: Dp,
+) {
+    BoxWithConstraints(
+        modifier = Modifier.size(containerSize),
+        contentAlignment = Alignment.Center,
+    ) {
+        val fontSize = with(LocalDensity.current) {
+            minOf(maxWidth, maxHeight).times(0.78f).toSp()
+        }
+        Text(
+            text = emoji,
+            fontSize = fontSize,
+            lineHeight = fontSize,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
 

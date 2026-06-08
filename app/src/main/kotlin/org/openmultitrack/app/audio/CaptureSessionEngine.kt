@@ -71,7 +71,10 @@ class CaptureSessionEngine {
     private val monitorOutputRunning = AtomicBoolean(false)
     private var virtualMicOutputRunning = false
     private val waveformRings = Array<LiveWaveformRing?>(64) { null }
-    private var waveformDecimateCounter = 0
+    private val pendingWaveformPeaks = FloatArray(64)
+    private var waveformWindowSec = DEFAULT_WAVEFORM_WINDOW_SEC
+    private var waveformPeaksPerSecond = DEFAULT_WAVEFORM_PEAKS_PER_SEC
+    private var lastWaveformEmitNs = 0L
 
     val isCaptureActive: Boolean
         get() = fanoutJob?.isActive == true
@@ -114,6 +117,14 @@ class CaptureSessionEngine {
         usbDegraded = degraded
     }
 
+    fun setWaveformConfig(windowSec: Float, peaksPerSecond: Int = DEFAULT_WAVEFORM_PEAKS_PER_SEC) {
+        waveformWindowSec = windowSec.coerceIn(5f, 120f)
+        waveformPeaksPerSecond = peaksPerSecond.coerceIn(10, 60)
+        if (isCaptureActive) {
+            allocateWaveformRings()
+        }
+    }
+
     suspend fun startCapture(
         scope: CoroutineScope,
         route: CaptureRoute,
@@ -138,9 +149,7 @@ class CaptureSessionEngine {
         sampleRate = status.sampleRate
         usbDegraded = false
         clearWaveforms()
-        for (ch in 0 until channelCount) {
-            waveformRings[ch] = LiveWaveformRing.forWindow(sampleRate, RECORD_WAVEFORM_WINDOW_SEC)
-        }
+        allocateWaveformRings()
         startFanoutLoop(scope, route.backend)
         Result.success(Unit)
     }
@@ -250,7 +259,18 @@ class CaptureSessionEngine {
 
     fun clearWaveforms() {
         for (i in waveformRings.indices) waveformRings[i] = null
-        waveformDecimateCounter = 0
+        pendingWaveformPeaks.fill(0f)
+        lastWaveformEmitNs = 0L
+    }
+
+    private fun allocateWaveformRings() {
+        for (ch in 0 until channelCount) {
+            waveformRings[ch] = LiveWaveformRing.forWindow(
+                sampleRate,
+                waveformWindowSec,
+                waveformPeaksPerSecond,
+            )
+        }
     }
 
     private fun needsCapture(): Boolean {
@@ -316,7 +336,8 @@ class CaptureSessionEngine {
                         consecutiveEmptyReads = 0
                         droppedFrames = AudioEngineRouter.recordingDroppedFrames(backend)
 
-                        pushWaveformPeaks(scratch, frames, channelCount)
+                        accumulateWaveformPeaks(scratch, frames, channelCount)
+                        maybeEmitWaveformPeaks()
 
                         writeRecordingFrames(scratch, frames, channelCount)
 
@@ -389,17 +410,25 @@ class CaptureSessionEngine {
         }
     }
 
-    private fun pushWaveformPeaks(scratch: FloatArray, frames: Int, channels: Int) {
-        waveformDecimateCounter++
-        if (waveformDecimateCounter < WAVEFORM_DECIMATE_CHUNKS) return
-        waveformDecimateCounter = 0
+    private fun accumulateWaveformPeaks(scratch: FloatArray, frames: Int, channels: Int) {
         for (ch in 0 until channels) {
             var peak = 0f
             for (frame in 0 until frames) {
                 val sample = scratch[frame * channels + ch]
                 peak = maxOf(peak, kotlin.math.abs(sample))
             }
-            waveformRings[ch]?.pushPeak(peak)
+            pendingWaveformPeaks[ch] = maxOf(pendingWaveformPeaks[ch], peak)
+        }
+    }
+
+    private fun maybeEmitWaveformPeaks() {
+        val intervalNs = 1_000_000_000L / waveformPeaksPerSecond
+        val now = System.nanoTime()
+        if (lastWaveformEmitNs != 0L && now - lastWaveformEmitNs < intervalNs) return
+        lastWaveformEmitNs = now
+        for (ch in 0 until channelCount) {
+            waveformRings[ch]?.pushPeak(pendingWaveformPeaks[ch])
+            pendingWaveformPeaks[ch] = 0f
         }
     }
 
@@ -417,9 +446,9 @@ class CaptureSessionEngine {
         }
     }
 
-    private companion object {
-        const val WAVEFORM_DECIMATE_CHUNKS = 2
-        const val RECORD_WAVEFORM_WINDOW_SEC = 15f
+    companion object {
+        const val DEFAULT_WAVEFORM_WINDOW_SEC = 15f
+        const val DEFAULT_WAVEFORM_PEAKS_PER_SEC = 30
     }
 
     private fun ensureVirtualMicOutput(config: VirtualMicConfig) {
