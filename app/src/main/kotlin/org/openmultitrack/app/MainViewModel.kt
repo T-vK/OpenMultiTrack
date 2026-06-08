@@ -41,6 +41,7 @@ import org.openmultitrack.app.ui.daw.StatusToast
 import org.openmultitrack.app.scribble.Flow8BleScribbleImporter
 import org.openmultitrack.app.scribble.IncompleteRecordingStore
 import org.openmultitrack.app.scribble.OscLanDiscovery
+import org.openmultitrack.app.scribble.ScribbleImportSupport
 import org.openmultitrack.mixer.behringer.Xr18ScribbleImporter
 import org.openmultitrack.usb.UsbAudioEnumerator
 import org.openmultitrack.usb.UsbAudioProbeService
@@ -383,9 +384,9 @@ class MainViewModel(
         _uiState.update { it.copy(pendingRecordingResume = false) }
         showStatus("Incomplete recording finalized.", mixerId)
         val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
-        if (supportsOscScribble(profile)) {
+        if (ScribbleImportSupport.supportsOsc(profile)) {
             onOscMixerReady(mixerId)
-        } else if (supportsFlow8Scribble(profile) && mixerId == _uiState.value.activeMixerId) {
+        } else if (ScribbleImportSupport.supportsFlow8(profile) && mixerId == _uiState.value.activeMixerId) {
             onFlow8MixerReady(mixerId)
         }
     }
@@ -507,13 +508,13 @@ class MainViewModel(
         _uiState.update { it.copy(stripIconMode = mode) }
     }
 
-    fun refreshScribble(mixerId: String) {
+    fun loadScribbleStrip(mixerId: String) {
         val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
-        if (!supportsScribbleImport(profile)) {
-            showStatus("Scribble import is not available for this mixer yet.", mixerId)
+        if (!ScribbleImportSupport.supports(profile)) {
+            showStatus("Loading strip labels from this mixer is not supported yet.", mixerId)
             return
         }
-        if (supportsFlow8Scribble(profile)) {
+        if (ScribbleImportSupport.supportsFlow8(profile)) {
             requestFlow8PairingDialog(mixerId)
             return
         }
@@ -545,14 +546,14 @@ class MainViewModel(
     }
 
     private suspend fun importScribbleForMixerLocked(profile: MixerProfile, backgroundRefresh: Boolean = false) {
-        val flow8 = supportsFlow8Scribble(profile)
+        val flow8 = ScribbleImportSupport.supportsFlow8(profile)
         val previousFingerprint = if (backgroundRefresh) scribbleStripCache.loadFingerprint(profile.id) else null
         if (shouldShowScribbleStatus(profile, backgroundRefresh)) {
             showStatus(
                 if (flow8) {
                     Flow8BleScribbleImporter.PAIRING_SCANNING_MESSAGE
                 } else {
-                    "Importing scribble strip over OSC/LAN…"
+                    "Loading strip labels from mixer over OSC/LAN…"
                 },
                 profile.id,
             )
@@ -569,7 +570,7 @@ class MainViewModel(
                         },
                     ).fetchChannelLabels().map { profile to it }
                 }
-                supportsOscScribble(profile) -> {
+                ScribbleImportSupport.supportsOsc(profile) -> {
                     if (shouldShowScribbleStatus(profile, backgroundRefresh)) {
                         showStatus("Searching for mixer on LAN (OSC)…", profile.id)
                     }
@@ -619,7 +620,7 @@ class MainViewModel(
                 } else {
                     AppLogBuffer.append("I", "Scribble", "Imported $named channel labels for ${profile.displayName}")
                     if (shouldShowScribbleStatus(profile, backgroundRefresh)) {
-                        showStatus("Scribble imported — $named channel labels", profile.id)
+                        showStatus("Loaded $named strip labels from mixer", profile.id)
                     }
                     OmtLog.i("ViewModel", "scribble imported $named labels for ${profile.id}")
                 }
@@ -761,10 +762,10 @@ class MainViewModel(
             if (resumePending) {
                 AppLogBuffer.append("I", "Scribble", "Will apply cached labels when resuming incomplete recording")
                 maybeAutoResumeRecording(resolvedProfile.id)
-            } else if (supportsOscScribble(resolvedProfile)) {
+            } else if (ScribbleImportSupport.supportsOsc(resolvedProfile)) {
                 onOscMixerReady(resolvedProfile.id)
             } else if (
-                supportsFlow8Scribble(resolvedProfile) &&
+                ScribbleImportSupport.supportsFlow8(resolvedProfile) &&
                 resolvedProfile.id == _uiState.value.activeMixerId
             ) {
                 onFlow8MixerReady(resolvedProfile.id)
@@ -774,7 +775,7 @@ class MainViewModel(
 
     private fun onFlow8MixerReady(mixerId: String) {
         val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
-        if (!supportsFlow8Scribble(profile)) return
+        if (!ScribbleImportSupport.supportsFlow8(profile)) return
         val session = _uiState.value.sessionByMixer[mixerId]
         if (session == null || session.probing || session.probe == null) {
             OmtLog.d("ViewModel", "defer FLOW 8 scribble until probe completes for ${profile.displayName}")
@@ -789,7 +790,7 @@ class MainViewModel(
 
     private fun onOscMixerReady(mixerId: String) {
         val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
-        if (!supportsOscScribble(profile)) return
+        if (!ScribbleImportSupport.supportsOsc(profile)) return
         val session = _uiState.value.sessionByMixer[mixerId]
         if (session == null || session.probing || session.probe == null) {
             OmtLog.d("ViewModel", "defer OSC scribble until probe completes for ${profile.displayName}")
@@ -813,7 +814,7 @@ class MainViewModel(
 
     private fun maybeBackgroundRefreshOscScribble(mixerId: String, quiet: Boolean) {
         val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
-        if (!supportsOscScribble(profile)) return
+        if (!ScribbleImportSupport.supportsOsc(profile)) return
         if (IncompleteRecordingStore.hasIncompleteRecording(appContext, settings, mixerId)) {
             AppLogBuffer.append("I", "Scribble", "Skipped OSC scribble refresh — incomplete recording to resume")
             return
@@ -853,7 +854,7 @@ class MainViewModel(
 
     private fun maybeAutoImportFlow8Scribble(mixerId: String) {
         val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
-        if (!supportsFlow8Scribble(profile)) return
+        if (!ScribbleImportSupport.supportsFlow8(profile)) return
         if (scribbleStripCache.hasCache(mixerId)) return
         if (!ensureFlow8BluetoothPermission(PendingFlow8Action.ShowPairingDialog(mixerId))) {
             return
@@ -934,26 +935,7 @@ class MainViewModel(
         }
     }
 
-    private fun supportsScribbleImport(profile: MixerProfile): Boolean =
-        supportsOscScribble(profile) || supportsFlow8Scribble(profile)
-
-    private fun supportsOscScribble(profile: MixerProfile): Boolean {
-        if (profile.productId == XR18_PRODUCT_ID) return true
-        val name = "${profile.productName} ${profile.displayName}"
-        return name.contains("XR18", ignoreCase = true) ||
-            name.contains("X18", ignoreCase = true) ||
-            name.contains("X32", ignoreCase = true)
-    }
-
-    private fun supportsFlow8Scribble(profile: MixerProfile): Boolean {
-        if (profile.productId == FLOW8_PRODUCT_ID) return true
-        val name = "${profile.productName} ${profile.displayName}"
-        return name.contains("FLOW 8", ignoreCase = true) || name.contains("FLOW8", ignoreCase = true)
-    }
-
     companion object {
-        private const val XR18_PRODUCT_ID = 0x00d4
-        private const val FLOW8_PRODUCT_ID = 0x050c
         fun factory(context: Context): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")

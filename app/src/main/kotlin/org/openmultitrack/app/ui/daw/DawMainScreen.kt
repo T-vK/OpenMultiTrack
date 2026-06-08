@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
@@ -66,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.openmultitrack.app.DawUiState
 import org.openmultitrack.app.scribble.Flow8BleScribbleImporter
+import org.openmultitrack.app.scribble.ScribbleImportSupport
 import org.openmultitrack.app.data.StripIconMode
 import org.openmultitrack.app.data.StripNumberMode
 import org.openmultitrack.app.ui.settings.SettingsSheet
@@ -114,8 +116,7 @@ fun DawMainScreen(
     onOpenLog: () -> Unit,
     onCloseLog: () -> Unit,
     onMonitorGainChange: (Float) -> Unit,
-    onRefreshUsb: () -> Unit,
-    onRefreshScribble: (String) -> Unit,
+    onLoadScribbleStrip: (String) -> Unit,
     onConfirmFlow8PairingImport: () -> Unit,
     onDismissFlow8PairingDialog: () -> Unit,
     onHideArmChange: (Boolean) -> Unit,
@@ -161,14 +162,17 @@ fun DawMainScreen(
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                 }
                 if (state.mixers.isNotEmpty() && session != null && activeId != null) {
+                    val activeProfile = state.mixers.firstOrNull { it.id == activeId }
                     TransportToolbar(
                         mixers = state.mixers,
                         activeMixerId = activeId,
                         session = session,
                         outputDevices = state.outputDevices,
+                        showLoadScribble = activeProfile != null && ScribbleImportSupport.supports(activeProfile),
                         onSelectMixer = onSelectMixer,
                         onRemoveMixer = onRemoveMixer,
                         onSetAppMode = onSetAppMode,
+                        onLoadScribbleStrip = { onLoadScribbleStrip(activeId) },
                         onSetMonitorOutput = { onSetMonitorOutput(activeId, it) },
                         onStartMonitor = { onStartMonitor(activeId) },
                         onStopMonitor = { onStopMonitor(activeId) },
@@ -186,7 +190,7 @@ fun DawMainScreen(
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 if (state.mixers.isEmpty()) {
-                    EmptyMixersPrompt(onAddMixer = onAddMixer, onRefresh = onRefreshUsb)
+                    EmptyMixersPrompt(onAddMixer = onAddMixer)
                 } else {
                     if (state.pendingRecordingResume) {
                         IncompleteRecordingBanner(
@@ -259,12 +263,6 @@ fun DawMainScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     TextButton(onClick = { menuOpen = false; onOpenSettings() }) { Text("Settings") }
                     TextButton(onClick = { menuOpen = false; onOpenLog() }) { Text("Log viewer") }
-                    activeId?.let { id ->
-                        TextButton(onClick = { menuOpen = false; onRefreshScribble(id) }) {
-                            Text("Import scribble strip")
-                        }
-                    }
-                    TextButton(onClick = { menuOpen = false; onRefreshUsb() }) { Text("Refresh USB") }
                 }
             },
             confirmButton = { TextButton(onClick = { menuOpen = false }) { Text("Close") } },
@@ -319,9 +317,11 @@ private fun TransportToolbar(
     activeMixerId: String,
     session: MixerSessionUiState,
     outputDevices: List<LabeledAudioDevice>,
+    showLoadScribble: Boolean,
     onSelectMixer: (String) -> Unit,
     onRemoveMixer: (String) -> Unit,
     onSetAppMode: (String, AppMode) -> Unit,
+    onLoadScribbleStrip: () -> Unit,
     onSetMonitorOutput: (Int) -> Unit,
     onStartMonitor: () -> Unit,
     onStopMonitor: () -> Unit,
@@ -412,6 +412,13 @@ private fun TransportToolbar(
                     },
                 )
 
+                if (showLoadScribble) {
+                    LoadScribbleStripButton(
+                        showLabel = showLabels,
+                        onClick = onLoadScribbleStrip,
+                    )
+                }
+
                 Spacer(Modifier.weight(1f))
 
                 MonitorControl(
@@ -470,6 +477,29 @@ private fun MixerSelectorChip(
             modifier = Modifier.size(18.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+@Composable
+private fun LoadScribbleStripButton(
+    showLabel: Boolean,
+    onClick: () -> Unit,
+) {
+    ToolbarChip(onClick = onClick) {
+        Icon(
+            Icons.Default.Label,
+            contentDescription = "Load scribble strip from mixer",
+            modifier = Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.tertiary,
+        )
+        if (showLabel) {
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "Load strip labels",
+                maxLines = 1,
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
     }
 }
 
@@ -718,16 +748,21 @@ private fun SoundcheckPlaceholder() {
 }
 
 @Composable
-private fun EmptyMixersPrompt(onAddMixer: () -> Unit, onRefresh: () -> Unit) {
+private fun EmptyMixersPrompt(onAddMixer: () -> Unit) {
     Column(
         Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text("Add an audio interface to begin", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Plug in a mixer, then tap Add to scan USB.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Spacer(Modifier.height(16.dp))
         TextButton(onClick = onAddMixer) { Text("Add mixer") }
-        TextButton(onClick = onRefresh) { Text("Scan USB") }
     }
 }
 
