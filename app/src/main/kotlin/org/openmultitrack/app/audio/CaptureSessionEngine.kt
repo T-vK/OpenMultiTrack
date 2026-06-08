@@ -81,7 +81,6 @@ class CaptureSessionEngine(
     private var virtualMicOutputRunning = false
     private val waveformRings = Array<LiveWaveformRing?>(64) { null }
     private val pendingWaveformPeaks = FloatArray(64)
-    private val pendingMeterPeaks = FloatArray(64)
     private val meterHold = FloatArray(64)
     private val meterLock = Any()
     private var waveformWindowSec = DEFAULT_WAVEFORM_WINDOW_SEC
@@ -292,15 +291,10 @@ class CaptureSessionEngine(
 
     /** Live per-channel input levels for VU meters (independent of waveform history). */
     fun captureMeterLevels(): Map<Int, Float> = synchronized(meterLock) {
-        val out = LinkedHashMap<Int, Float>()
+        val out = LinkedHashMap<Int, Float>(channelCount)
         for (ch in 0 until channelCount) {
-            val raw = pendingMeterPeaks[ch]
-            if (raw > 0f) {
-                meterHold[ch] = maxOf(scaleMeterPeak(raw), meterHold[ch])
-                pendingMeterPeaks[ch] = 0f
-            }
-            meterHold[ch] *= 0.9f
-            if (meterHold[ch] > 1e-4f) {
+            meterHold[ch] *= METER_DECAY_PER_UI_TICK
+            if (meterHold[ch] > METER_OUTPUT_THRESHOLD) {
                 out[ch] = meterHold[ch]
             }
         }
@@ -320,7 +314,6 @@ class CaptureSessionEngine(
     fun clearWaveforms() {
         for (i in waveformRings.indices) waveformRings[i] = null
         pendingWaveformPeaks.fill(0f)
-        pendingMeterPeaks.fill(0f)
         meterHold.fill(0f)
         lastWaveformEmitNs = 0L
     }
@@ -538,12 +531,6 @@ class CaptureSessionEngine(
         buildSessionMetadata(config, sampleRate, framesWritten).writeTo(dir)
     }
 
-    private fun scaleMeterPeak(raw: Float): Float {
-        if (raw <= 1e-6f) return 0f
-        val gain = if (raw < 0.15f) 1f / raw else 1f
-        return (raw * gain).coerceIn(0f, 1f)
-    }
-
     private fun accumulateWaveformPeaks(scratch: FloatArray, frames: Int, channels: Int) {
         synchronized(meterLock) {
             for (ch in 0 until channels) {
@@ -553,8 +540,8 @@ class CaptureSessionEngine(
                     peak = maxOf(peak, kotlin.math.abs(sample))
                 }
                 pendingWaveformPeaks[ch] = maxOf(pendingWaveformPeaks[ch], peak)
-                pendingMeterPeaks[ch] = maxOf(pendingMeterPeaks[ch], peak)
             }
+            absorbInterleavedPeaks(meterHold, scratch, frames, channels)
         }
     }
 
@@ -587,6 +574,8 @@ class CaptureSessionEngine(
     companion object {
         const val DEFAULT_WAVEFORM_WINDOW_SEC = 15f
         const val DEFAULT_WAVEFORM_PEAKS_PER_SEC = 30
+        private const val METER_DECAY_PER_UI_TICK = 0.88f
+        private const val METER_OUTPUT_THRESHOLD = 1e-5f
     }
 
     private fun ensureVirtualMicOutput(config: VirtualMicConfig) {

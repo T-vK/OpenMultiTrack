@@ -1049,7 +1049,7 @@ private fun ChannelStripList(
                     labelColumnWidth = labelColumnWidth,
                     waveform = if (showWaveforms && isRecording) waveformPeaks[strip.index] else null,
                     captureMeterLevel = if (isMonitoring || isRecording) {
-                        captureMeterLevels[strip.index]
+                        captureMeterLevels[strip.index] ?: 0f
                     } else {
                         null
                     },

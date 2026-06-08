@@ -86,7 +86,7 @@ internal fun StripVuMeter(
             .clip(RoundedCornerShape(2.dp))
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)),
     ) {
-        if (animated > 0.01f) {
+        if (animated > 0.005f) {
             Box(
                 Modifier
                     .fillMaxWidth()

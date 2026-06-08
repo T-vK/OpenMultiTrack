@@ -498,8 +498,6 @@ class MixerSessionController(
                 withContext(Dispatchers.IO) {
                     ensureCapture(descriptor, probe).getOrThrow()
                 }
-                applyMonitorRouting(enabled = true)
-                startCaptureUiUpdates()
                 _state.update {
                     it.copy(
                         isMonitoring = true,
@@ -509,6 +507,8 @@ class MixerSessionController(
                         warningMessage = null,
                     )
                 }
+                applyMonitorRouting(enabled = true)
+                startCaptureUiUpdates()
             }
         }
     }
@@ -545,7 +545,6 @@ class MixerSessionController(
                         ).getOrThrow()
                     }
                 }
-                startCaptureUiUpdates()
                 val sessionDir = captureEngine.activeSessionDir
                 if (sessionDir != null) {
                     settings.setActiveRecording(prof.id, sessionDir.absolutePath)
@@ -559,6 +558,7 @@ class MixerSessionController(
                         lastRecordingPath = sessionDir?.absolutePath ?: it.lastRecordingPath,
                     )
                 }
+                startCaptureUiUpdates()
             } catch (e: Exception) {
                 OmtLog.e("MixerSession", "startRecording failed", e)
                 _state.update { it.copy(statusMessage = e.message) }
@@ -586,7 +586,6 @@ class MixerSessionController(
                         captureEngine.resumeRecording(sessionDir).getOrThrow()
                     }
                 }
-                startCaptureUiUpdates()
                 settings.setActiveRecording(
                     meta.mixerId.takeIf { it.isNotBlank() } ?: profile?.id ?: mixerId,
                     sessionDir.absolutePath,
@@ -600,6 +599,7 @@ class MixerSessionController(
                         lastRecordingPath = sessionDir.absolutePath,
                     )
                 }
+                startCaptureUiUpdates()
             } catch (e: Exception) {
                 OmtLog.e("MixerSession", "resumeRecording failed", e)
                 _state.update { it.copy(statusMessage = e.message) }
@@ -919,27 +919,19 @@ class MixerSessionController(
             while (isActive) {
                 if (captureEngine.isCaptureActive) {
                     val levels = captureEngine.captureMeterLevels()
-                    val recording = _state.value.isRecording
-                    val monitoring = _state.value.isMonitoring
-                    when {
-                        recording -> {
-                            val peaks = captureEngine.waveformSnapshots(normalize = true)
-                            _state.update {
-                                it.copy(
-                                    waveformPeaks = peaks,
-                                    recordElapsedSec = captureEngine.recordElapsedSec(),
-                                    captureMeterLevels = levels,
-                                )
-                            }
-                        }
-                        monitoring -> {
-                            _state.update {
-                                it.copy(
-                                    captureMeterLevels = levels,
-                                    waveformPeaks = emptyMap(),
-                                    recordElapsedSec = 0f,
-                                )
-                            }
+                    _state.update { s ->
+                        when {
+                            s.isRecording -> s.copy(
+                                waveformPeaks = captureEngine.waveformSnapshots(normalize = true),
+                                recordElapsedSec = captureEngine.recordElapsedSec(),
+                                captureMeterLevels = levels,
+                            )
+                            s.isMonitoring -> s.copy(
+                                captureMeterLevels = levels,
+                                waveformPeaks = emptyMap(),
+                                recordElapsedSec = 0f,
+                            )
+                            else -> s.copy(captureMeterLevels = levels)
                         }
                     }
                 }
