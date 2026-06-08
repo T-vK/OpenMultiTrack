@@ -342,6 +342,10 @@ class MainViewModel(
         sessionClient.withManager { it.getOrCreate(mixerId).zoomSoundcheckView(scale, focalSec) }
     }
 
+    fun setSoundcheckView(mixerId: String, viewStartSec: Float, viewWindowSec: Float) {
+        sessionClient.withManager { it.getOrCreate(mixerId).setSoundcheckView(viewStartSec, viewWindowSec) }
+    }
+
     fun setSoundcheckLoopRegion(mixerId: String, startSec: Float, endSec: Float) {
         sessionClient.withManager { it.getOrCreate(mixerId).setSoundcheckLoopRegion(startSec, endSec) }
     }

@@ -4,7 +4,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.key
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -41,6 +45,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
@@ -79,6 +84,7 @@ fun SoundcheckPanel(
     onSeek: (Float) -> Unit,
     onPanView: (Float) -> Unit,
     onZoomView: (Float, Float) -> Unit,
+    onSetView: (Float, Float) -> Unit,
     onSetLoopRegion: (Float, Float) -> Unit,
 ) {
     Column(
@@ -133,6 +139,7 @@ fun SoundcheckPanel(
                 onSeek = onSeek,
                 onPanView = onPanView,
                 onZoomView = onZoomView,
+                onSetView = onSetView,
                 onSetLoopRegion = onSetLoopRegion,
             )
         }
@@ -239,6 +246,7 @@ private fun SoundcheckWaveformStripList(
     onSeek: (Float) -> Unit,
     onPanView: (Float) -> Unit,
     onZoomView: (Float, Float) -> Unit,
+    onSetView: (Float, Float) -> Unit,
     onSetLoopRegion: (Float, Float) -> Unit,
 ) {
     val strips = session.channelStrips
@@ -246,26 +254,37 @@ private fun SoundcheckWaveformStripList(
         SoundcheckEmptyState("No channel data in this session.")
         return
     }
-    val viewStart = session.soundcheckViewStartSec
-    val viewWindow = session.soundcheckViewWindowSec
     val duration = session.playbackDurationSec
-    val playheadSec = session.playbackPositionSec
     val loopStart = session.soundcheckLoopStartSec
     val loopEnd = session.soundcheckLoopEndSec
     val loopSelecting = session.soundcheckLoopSelecting
-    val loopEnabled = session.soundcheckLoopEnabled
+
+    var gestureViewStart by remember { mutableFloatStateOf(session.soundcheckViewStartSec) }
+    var gestureViewWindow by remember { mutableFloatStateOf(session.soundcheckViewWindowSec) }
+    var gestureActive by remember { mutableStateOf(false) }
+    LaunchedEffect(session.soundcheckViewStartSec, session.soundcheckViewWindowSec) {
+        if (!gestureActive) {
+            gestureViewStart = session.soundcheckViewStartSec
+            gestureViewWindow = session.soundcheckViewWindowSec
+        }
+    }
+    val viewStart = gestureViewStart
+    val viewWindow = gestureViewWindow
+
+    val onSeekState by rememberUpdatedState(onSeek)
+    val onSetViewState by rememberUpdatedState(onSetView)
+    val onSetLoopRegionState by rememberUpdatedState(onSetLoopRegion)
 
     var dragLoopStart by remember { mutableFloatStateOf(0f) }
     var dragLoopEnd by remember { mutableFloatStateOf(0f) }
     var loopDragActive by remember { mutableStateOf(false) }
-    var panAccum by remember { mutableFloatStateOf(0f) }
     var draggedHandle by remember { mutableStateOf<LoopHandle?>(null) }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val count = strips.size.coerceAtLeast(1)
         val gap = 2.dp
         val totalGaps = gap * (count - 1).coerceAtLeast(0)
-        val rulerAndGap = TimeRulerHeight + 4.dp
+        val rulerAndGap = TimeRulerHeight + gap
         val naturalHeight = (maxHeight - rulerAndGap - totalGaps) / count
         val useScroll = naturalHeight < MinStripHeight
         val stripHeight = if (useScroll) ScrollStripHeight else naturalHeight
@@ -281,8 +300,39 @@ private fun SoundcheckWaveformStripList(
             hideMonitor,
             hideSolo,
         )
-        val density = LocalDensity.current
-        val waveformWidthPx = with(density) { (maxWidth - labelColumnWidth - innerPad * 2).toPx() }
+        val labelGap = innerPad / 2
+        val waveformAreaStart = innerPad + labelColumnWidth + labelGap
+        var waveformWidthPx by remember { mutableFloatStateOf(0f) }
+
+        fun secFromX(x: Float): Float {
+            if (waveformWidthPx <= 0f) return viewStart
+            return (viewStart + (x / waveformWidthPx) * viewWindow).coerceIn(0f, duration)
+        }
+
+        val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+            if (waveformWidthPx <= 0f) return@rememberTransformableState
+            gestureActive = true
+            if (zoomChange != 1f) {
+                val focalSec = gestureViewStart + gestureViewWindow / 2f
+                val newWindow = (gestureViewWindow / zoomChange).coerceIn(30f, 600f)
+                gestureViewWindow = newWindow
+                val maxStart = max(0f, duration - newWindow)
+                gestureViewStart = (focalSec - newWindow / 2f).coerceIn(0f, maxStart)
+            }
+            if (panChange.x != 0f) {
+                val deltaSec = -(panChange.x / waveformWidthPx) * gestureViewWindow
+                val maxStart = max(0f, duration - gestureViewWindow)
+                gestureViewStart = (gestureViewStart + deltaSec).coerceIn(0f, maxStart)
+            }
+        }
+        LaunchedEffect(transformState.isTransformInProgress) {
+            if (!transformState.isTransformInProgress && gestureActive) {
+                gestureActive = false
+                onSetViewState(gestureViewStart, gestureViewWindow)
+            }
+        }
+
+        val loopGestureActive = loopSelecting || (loopStart != null && loopEnd != null)
 
         val listModifier = if (useScroll) {
             Modifier.fillMaxSize().verticalScroll(rememberScrollState())
@@ -293,161 +343,170 @@ private fun SoundcheckWaveformStripList(
         Box(modifier = Modifier.fillMaxSize()) {
             Column(modifier = listModifier, verticalArrangement = Arrangement.spacedBy(gap)) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().height(TimeRulerHeight),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(TimeRulerHeight)
+                        .padding(horizontal = innerPad),
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(labelGap),
                 ) {
-                    Spacer(Modifier.width(labelColumnWidth + innerPad))
-                    Text(
-                        formatDuration(viewWindow),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.width(36.dp),
-                    )
-                    Box(modifier = Modifier.weight(1f).height(TimeRulerHeight)) {
+                    Spacer(Modifier.width(labelColumnWidth))
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(TimeRulerHeight)
+                            .clip(RoundedCornerShape(3.dp))
+                            .onSizeChanged { waveformWidthPx = it.width.toFloat() },
+                    ) {
                         androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
                             drawTimeRuler(
                                 viewStartSec = viewStart,
                                 viewWindowSec = viewWindow,
-                                playheadSec = playheadSec,
-                                loopStartSec = loopStart,
-                                loopEndSec = loopEnd,
-                                loopEnabled = loopEnabled,
                             )
                         }
                     }
                 }
                 strips.forEach { strip ->
-                    SoundcheckStripRow(
-                        strip = strip,
-                        stripHeight = stripHeight,
-                        innerPad = innerPad,
-                        labelFontSize = labelFontSize,
-                        labelColumnWidth = labelColumnWidth,
-                        overview = overview,
-                        viewStartSec = viewStart,
-                        viewWindowSec = viewWindow,
-                        playheadSec = playheadSec,
-                        loopStartSec = loopStart,
-                        loopEndSec = loopEnd,
-                        loopEnabled = loopEnabled,
-                        normalized = normalized,
-                        showWaveform = showWaveforms,
-                        numberMode = numberMode,
-                        iconMode = iconMode,
-                        hideArm = hideArm,
-                        hideMonitor = hideMonitor,
-                        hideSolo = hideSolo,
-                    )
-                }
-            }
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .padding(start = labelColumnWidth + innerPad * 2)
-                    .pointerInput(
-                        viewStart,
-                        viewWindow,
-                        duration,
-                        loopSelecting,
-                        loopStart,
-                        loopEnd,
-                        waveformWidthPx,
-                    ) {
-                        detectTransformGestures { centroid, _, zoom, _ ->
-                            if (zoom != 1f && waveformWidthPx > 0f) {
-                                val focalSec = viewStart + (centroid.x / waveformWidthPx) * viewWindow
-                                onZoomView(zoom, focalSec)
-                            }
-                        }
-                    }
-                    .pointerInput(
-                        viewStart,
-                        viewWindow,
-                        duration,
-                        loopSelecting,
-                        loopStart,
-                        loopEnd,
-                        waveformWidthPx,
-                    ) {
-                        var totalDragX = 0f
-                        var loopAnchor: Float? = null
-                        detectDragGestures(
-                            onDragStart = { offset ->
-                                totalDragX = 0f
-                                panAccum = 0f
-                                loopDragActive = false
-                                loopAnchor = null
-                                if (waveformWidthPx <= 0f) return@detectDragGestures
-                                val sec = viewStart + (offset.x / waveformWidthPx) * viewWindow
-                                draggedHandle = when {
-                                    loopStart != null && loopEnd != null &&
-                                        abs(sec - loopStart) * waveformWidthPx / viewWindow < 24f ->
-                                        LoopHandle.START
-                                    loopStart != null && loopEnd != null &&
-                                        abs(sec - loopEnd) * waveformWidthPx / viewWindow < 24f ->
-                                        LoopHandle.END
-                                    else -> null
-                                }
-                                if (draggedHandle == null && loopSelecting) {
-                                    loopAnchor = sec.coerceIn(0f, duration)
-                                    dragLoopStart = loopAnchor!!
-                                    dragLoopEnd = loopAnchor!!
-                                    loopDragActive = true
-                                }
-                            },
-                            onDrag = { change, dragAmount ->
-                                totalDragX += dragAmount.x
-                                if (waveformWidthPx <= 0f) return@detectDragGestures
-                                val secDelta = (dragAmount.x / waveformWidthPx) * viewWindow
-                                when (draggedHandle) {
-                                    LoopHandle.START -> {
-                                        val end = loopEnd ?: duration
-                                        onSetLoopRegion(
-                                            (loopStart!! + secDelta).coerceIn(0f, end - 0.1f),
-                                            end,
-                                        )
-                                    }
-                                    LoopHandle.END -> {
-                                        val start = loopStart ?: 0f
-                                        onSetLoopRegion(
-                                            start,
-                                            (loopEnd!! + secDelta).coerceIn(start + 0.1f, duration),
-                                        )
-                                    }
-                                    null -> when {
-                                        loopDragActive && loopAnchor != null -> {
-                                            val sec = viewStart + (change.position.x / waveformWidthPx) * viewWindow
-                                            dragLoopEnd = sec.coerceIn(0f, duration)
-                                            onSetLoopRegion(dragLoopStart, dragLoopEnd)
-                                        }
-                                        abs(totalDragX) > 8f -> {
-                                            panAccum += secDelta
-                                            onPanView(secDelta)
-                                        }
-                                    }
-                                }
-                            },
-                            onDragEnd = {
-                                draggedHandle = null
-                                loopDragActive = false
-                                loopAnchor = null
-                            },
+                    key(strip.index) {
+                        SoundcheckStripRow(
+                            strip = strip,
+                            stripHeight = stripHeight,
+                            innerPad = innerPad,
+                            labelFontSize = labelFontSize,
+                            labelColumnWidth = labelColumnWidth,
+                            labelGap = labelGap,
+                            overview = overview,
+                            viewStartSec = viewStart,
+                            viewWindowSec = viewWindow,
+                            normalized = normalized,
+                            showWaveform = showWaveforms,
+                            numberMode = numberMode,
+                            iconMode = iconMode,
+                            hideArm = hideArm,
+                            hideMonitor = hideMonitor,
+                            hideSolo = hideSolo,
                         )
                     }
-                    .pointerInput(viewStart, viewWindow, duration, loopSelecting, waveformWidthPx) {
+                }
+            }
+            var gestureModifier = Modifier
+                .matchParentSize()
+                .padding(start = waveformAreaStart, end = innerPad)
+            if (!loopGestureActive) {
+                gestureModifier = gestureModifier.transformable(
+                    state = transformState,
+                    lockRotationOnZoomPan = true,
+                )
+            }
+            Box(
+                modifier = gestureModifier
+                    .pointerInput(duration, loopSelecting) {
                         detectTapGestures { offset ->
                             if (waveformWidthPx <= 0f) return@detectTapGestures
-                            val sec = (viewStart + (offset.x / waveformWidthPx) * viewWindow)
-                                .coerceIn(0f, duration)
+                            val sec = secFromX(offset.x)
                             if (!loopSelecting) {
-                                onSeek(sec)
+                                onSeekState(sec)
                             } else {
-                                onSetLoopRegion(sec, (sec + 4f).coerceAtMost(duration))
+                                onSetLoopRegionState(sec, (sec + 4f).coerceAtMost(duration))
                             }
                         }
-                    },
-            )
+                    }
+                    .then(
+                        if (loopGestureActive) {
+                            Modifier.pointerInput(duration, loopSelecting, loopStart, loopEnd, viewStart, viewWindow) {
+                                var loopAnchor: Float? = null
+                                detectDragGestures(
+                                    onDragStart = { offset ->
+                                        if (waveformWidthPx <= 0f) return@detectDragGestures
+                                        val sec = secFromX(offset.x)
+                                        draggedHandle = when {
+                                            loopStart != null && loopEnd != null &&
+                                                abs(sec - loopStart) * waveformWidthPx / viewWindow < 24f ->
+                                                LoopHandle.START
+                                            loopStart != null && loopEnd != null &&
+                                                abs(sec - loopEnd) * waveformWidthPx / viewWindow < 24f ->
+                                                LoopHandle.END
+                                            else -> null
+                                        }
+                                        if (draggedHandle == null && loopSelecting) {
+                                            loopAnchor = sec
+                                            dragLoopStart = sec
+                                            dragLoopEnd = sec
+                                            loopDragActive = true
+                                        }
+                                    },
+                                    onDrag = { change, dragAmount ->
+                                        if (waveformWidthPx <= 0f) return@detectDragGestures
+                                        val secDelta = -(dragAmount.x / waveformWidthPx) * viewWindow
+                                        when (draggedHandle) {
+                                            LoopHandle.START -> {
+                                                val end = loopEnd ?: duration
+                                                onSetLoopRegionState(
+                                                    (loopStart!! + secDelta).coerceIn(0f, end - 0.1f),
+                                                    end,
+                                                )
+                                            }
+                                            LoopHandle.END -> {
+                                                val start = loopStart ?: 0f
+                                                onSetLoopRegionState(
+                                                    start,
+                                                    (loopEnd!! + secDelta).coerceIn(start + 0.1f, duration),
+                                                )
+                                            }
+                                            null -> if (loopDragActive && loopAnchor != null) {
+                                                dragLoopEnd = secFromX(change.position.x)
+                                                onSetLoopRegionState(dragLoopStart, dragLoopEnd)
+                                            }
+                                        }
+                                    },
+                                    onDragEnd = {
+                                        draggedHandle = null
+                                        loopDragActive = false
+                                        loopAnchor = null
+                                    },
+                                    onDragCancel = {
+                                        draggedHandle = null
+                                        loopDragActive = false
+                                        loopAnchor = null
+                                    },
+                                )
+                            }
+                        } else {
+                            Modifier
+                        },
+                    ),
+            ) {
+                SoundcheckPlayheadOverlay(
+                    viewStartSec = viewStart,
+                    viewWindowSec = viewWindow,
+                    playheadSec = session.playbackPositionSec,
+                    loopStartSec = loopStart,
+                    loopEndSec = loopEnd,
+                    loopEnabled = session.soundcheckLoopEnabled,
+                )
+            }
         }
+    }
+}
+
+@Composable
+private fun SoundcheckPlayheadOverlay(
+    viewStartSec: Float,
+    viewWindowSec: Float,
+    playheadSec: Float,
+    loopStartSec: Float?,
+    loopEndSec: Float?,
+    loopEnabled: Boolean,
+) {
+    androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+        drawPlayheadAndLoop(
+            viewStartSec = viewStartSec,
+            viewWindowSec = viewWindowSec,
+            playheadSec = playheadSec,
+            loopStartSec = loopStartSec,
+            loopEndSec = loopEndSec,
+            loopEnabled = loopEnabled,
+        )
     }
 }
 
@@ -460,13 +519,10 @@ private fun SoundcheckStripRow(
     innerPad: androidx.compose.ui.unit.Dp,
     labelFontSize: Float,
     labelColumnWidth: androidx.compose.ui.unit.Dp,
+    labelGap: androidx.compose.ui.unit.Dp,
     overview: SessionWaveformOverview,
     viewStartSec: Float,
     viewWindowSec: Float,
-    playheadSec: Float,
-    loopStartSec: Float?,
-    loopEndSec: Float?,
-    loopEnabled: Boolean,
     normalized: Boolean,
     showWaveform: Boolean,
     numberMode: StripNumberMode,
@@ -476,6 +532,13 @@ private fun SoundcheckStripRow(
     hideSolo: Boolean,
 ) {
     val colorBarHeight = stripHeight - innerPad * 2
+    val displayPeaks = rememberViewportPeaks(
+        overview = overview,
+        channelIndex = strip.index,
+        viewStartSec = viewStartSec,
+        viewWindowSec = viewWindowSec,
+        normalized = normalized,
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -483,7 +546,7 @@ private fun SoundcheckStripRow(
             .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp))
             .padding(horizontal = innerPad),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(innerPad / 2),
+        horizontalArrangement = Arrangement.spacedBy(labelGap),
     ) {
         StripIdentityCell(
             strip = strip,
@@ -506,25 +569,9 @@ private fun SoundcheckStripRow(
                     .background(MaterialTheme.colorScheme.surface),
             ) {
                 androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
-                    val peaks = visiblePeaksForViewport(
-                        overview = overview,
-                        channelIndex = strip.index,
-                        viewStartSec = viewStartSec,
-                        viewWindowSec = viewWindowSec,
-                        pixelWidth = size.width.toInt().coerceAtLeast(1),
-                    )
-                    drawSoundcheckWaveform(
-                        peaks = peaks,
+                    drawSoundcheckWaveformPeaks(
+                        peaks = displayPeaks,
                         color = Color(strip.colorArgb),
-                        normalized = normalized,
-                    )
-                    drawPlayheadAndLoop(
-                        viewStartSec = viewStartSec,
-                        viewWindowSec = viewWindowSec,
-                        playheadSec = playheadSec,
-                        loopStartSec = loopStartSec,
-                        loopEndSec = loopEndSec,
-                        loopEnabled = loopEnabled,
                     )
                 }
             }
@@ -534,13 +581,36 @@ private fun SoundcheckStripRow(
     }
 }
 
+@Composable
+private fun rememberViewportPeaks(
+    overview: SessionWaveformOverview,
+    channelIndex: Int,
+    viewStartSec: Float,
+    viewWindowSec: Float,
+    normalized: Boolean,
+): FloatArray {
+    val peaks = overview.peaksByChannel[channelIndex]
+    val quantizedStart = (viewStartSec * 2f).roundToInt() / 2f
+    val quantizedWindow = (viewWindowSec * 2f).roundToInt() / 2f
+    return remember(overview, channelIndex, quantizedStart, quantizedWindow, normalized) {
+        if (peaks == null || peaks.isEmpty()) {
+            FloatArray(0)
+        } else {
+            val sampled = visiblePeaksForViewport(
+                overview = overview,
+                channelIndex = channelIndex,
+                viewStartSec = viewStartSec,
+                viewWindowSec = viewWindowSec,
+                pixelWidth = 512,
+            )
+            scalePeaksForDisplay(sampled, normalized)
+        }
+    }
+}
+
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTimeRuler(
     viewStartSec: Float,
     viewWindowSec: Float,
-    playheadSec: Float,
-    loopStartSec: Float?,
-    loopEndSec: Float?,
-    loopEnabled: Boolean,
 ) {
     val w = size.width
     val h = size.height
@@ -569,31 +639,20 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTimeRuler(
         )
         t += tickStep
     }
-    drawPlayheadAndLoop(
-        viewStartSec = viewStartSec,
-        viewWindowSec = viewWindowSec,
-        playheadSec = playheadSec,
-        loopStartSec = loopStartSec,
-        loopEndSec = loopEndSec,
-        loopEnabled = loopEnabled,
-        drawHandles = false,
-    )
 }
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSoundcheckWaveform(
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSoundcheckWaveformPeaks(
     peaks: FloatArray,
     color: Color,
-    normalized: Boolean,
 ) {
     if (peaks.isEmpty()) return
-    val display = scalePeaksForDisplay(peaks, normalized)
     val w = size.width
     val h = size.height
     val mid = h / 2f
-    val slotWidth = w / display.size
+    val slotWidth = w / peaks.size
     val stroke = (slotWidth * 0.75f).coerceIn(1f, 4f)
     val minBar = h * 0.06f
-    display.forEachIndexed { i, peak ->
+    peaks.forEachIndexed { i, peak ->
         val amp = peak.coerceIn(0f, 1f)
         val barH = maxOf(amp * h * 0.9f, if (amp > 0.02f) minBar else 0f)
         val x = (i + 0.5f) * slotWidth

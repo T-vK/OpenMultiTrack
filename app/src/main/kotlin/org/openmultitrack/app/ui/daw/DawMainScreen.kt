@@ -126,6 +126,7 @@ fun DawMainScreen(
     onSeekSoundcheck: (String, Float) -> Unit,
     onPanSoundcheckView: (String, Float) -> Unit,
     onZoomSoundcheckView: (String, Float, Float) -> Unit,
+    onSetSoundcheckView: (String, Float, Float) -> Unit,
     onSetSoundcheckLoopRegion: (String, Float, Float) -> Unit,
     onToggleSoundcheckLoop: (String) -> Unit,
     onConfirmFlow8PairingImport: () -> Unit,
@@ -230,6 +231,7 @@ fun DawMainScreen(
                                 onSeek = { onSeekSoundcheck(activeId!!, it) },
                                 onPanView = { onPanSoundcheckView(activeId!!, it) },
                                 onZoomView = { scale, focal -> onZoomSoundcheckView(activeId!!, scale, focal) },
+                                onSetView = { start, window -> onSetSoundcheckView(activeId!!, start, window) },
                                 onSetLoopRegion = { start, end ->
                                     onSetSoundcheckLoopRegion(activeId!!, start, end)
                                 },

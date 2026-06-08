@@ -135,6 +135,7 @@ class MainActivity : ComponentActivity() {
                         onSeekSoundcheck = viewModel::seekSoundcheck,
                         onPanSoundcheckView = viewModel::panSoundcheckView,
                         onZoomSoundcheckView = viewModel::zoomSoundcheckView,
+                        onSetSoundcheckView = viewModel::setSoundcheckView,
                         onSetSoundcheckLoopRegion = viewModel::setSoundcheckLoopRegion,
                         onToggleSoundcheckLoop = viewModel::toggleSoundcheckLoop,
                         onConfirmFlow8PairingImport = viewModel::confirmFlow8PairingImport,
