@@ -76,6 +76,9 @@ class CaptureSessionEngine {
     val isCaptureActive: Boolean
         get() = fanoutJob?.isActive == true
 
+    val activeChannelCount: Int
+        get() = channelCount
+
     val isRecording: Boolean
         get() = perChannelWriter != null || legacyWavWriter != null
 
@@ -142,7 +145,7 @@ class CaptureSessionEngine {
         Result.success(Unit)
     }
 
-    fun startRecording(config: RecordingConfig): Result<RecordingSession> {
+    suspend fun startRecording(config: RecordingConfig): Result<RecordingSession> = lifecycleMutex.withLock {
         if (!isCaptureActive) {
             return Result.failure(IllegalStateException("Capture not running"))
         }
@@ -181,7 +184,7 @@ class CaptureSessionEngine {
         ).writeTo(dir)
 
         val armedCount = config.channelStrips.count { it.armed }
-        return Result.success(
+        Result.success(
             RecordingSession(
                 filePath = dir.absolutePath,
                 channelCount = armedCount,
@@ -295,62 +298,70 @@ class CaptureSessionEngine {
         fanoutJob = scope.launch(Dispatchers.IO) {
             try {
                 while (isActive) {
-                    val frames = if (usbDegraded) {
-                        0
-                    } else {
-                        AudioEngineRouter.readRecordedFrames(scratch, framesPerChunk, backend)
-                    }
-
-                    if (frames <= 0) {
-                        consecutiveEmptyReads++
-                        if (isRecording && (usbDegraded || consecutiveEmptyReads > 3)) {
-                            writeRecordingSilence(minOf(256, framesPerChunk))
+                    try {
+                        val rawFrames = if (usbDegraded) {
+                            0
+                        } else {
+                            AudioEngineRouter.readRecordedFrames(scratch, framesPerChunk, backend)
                         }
-                        Thread.sleep(2)
-                        continue
-                    }
-                    consecutiveEmptyReads = 0
-                    droppedFrames = AudioEngineRouter.recordingDroppedFrames(backend)
+                        val frames = rawFrames.coerceIn(0, framesPerChunk)
 
-                    pushWaveformPeaks(scratch, frames, channelCount)
-
-                    writeRecordingFrames(scratch, frames, channelCount)
-
-                    val monitor = monitorConfig.get()
-                    if (monitor.enabled && MonitorMixer.effectiveMonitorChannels(monitor).isNotEmpty()) {
-                        ensureMonitorOutput(monitor.outputDeviceId)
-                        val mixed = MonitorMixer.mixToStereo(
-                            scratch,
-                            frames,
-                            channelCount,
-                            monitor,
-                            monitorScratch,
-                        )
-                        if (mixed > 0 && monitorOutputRunning.get()) {
-                            NativeAudioMonitor.writeFrames(monitorScratch, mixed)
+                        if (frames <= 0) {
+                            consecutiveEmptyReads++
+                            if (isRecording && (usbDegraded || consecutiveEmptyReads > 3)) {
+                                writeRecordingSilence(minOf(256, framesPerChunk))
+                            }
+                            Thread.sleep(2)
+                            continue
                         }
-                    }
+                        consecutiveEmptyReads = 0
+                        droppedFrames = AudioEngineRouter.recordingDroppedFrames(backend)
 
-                    val virtualMic = virtualMicConfig.get()
-                    if (virtualMic != null && virtualMic.enabled && virtualMic.selectedChannels.isNotEmpty()) {
-                        ensureVirtualMicOutput(virtualMic)
-                        val outCh = ChannelMixdown.outputChannelCount(
-                            virtualMic.selectedChannels,
-                            virtualMic.stereo,
-                        )
-                        val mixed = ChannelMixdown.mixToOutput(
-                            scratch,
-                            frames,
-                            channelCount,
-                            virtualMic.selectedChannels,
-                            stereo = outCh == 2,
-                            dest = virtualMicScratch,
-                        )
-                        if (mixed > 0 && virtualMicOutputRunning) {
-                            NativeAudioEngine.writePlaybackFrames(virtualMicScratch, mixed)
+                        pushWaveformPeaks(scratch, frames, channelCount)
+
+                        writeRecordingFrames(scratch, frames, channelCount)
+
+                        val monitor = monitorConfig.get()
+                        if (monitor.enabled && MonitorMixer.effectiveMonitorChannels(monitor).isNotEmpty()) {
+                            ensureMonitorOutput(monitor.outputDeviceId)
+                            val mixed = MonitorMixer.mixToStereo(
+                                scratch,
+                                frames,
+                                channelCount,
+                                monitor,
+                                monitorScratch,
+                            )
+                            if (mixed > 0 && monitorOutputRunning.get()) {
+                                NativeAudioMonitor.writeFrames(monitorScratch, mixed)
+                            }
                         }
+
+                        val virtualMic = virtualMicConfig.get()
+                        if (virtualMic != null && virtualMic.enabled && virtualMic.selectedChannels.isNotEmpty()) {
+                            ensureVirtualMicOutput(virtualMic)
+                            val outCh = ChannelMixdown.outputChannelCount(
+                                virtualMic.selectedChannels,
+                                virtualMic.stereo,
+                            )
+                            val mixed = ChannelMixdown.mixToOutput(
+                                scratch,
+                                frames,
+                                channelCount,
+                                virtualMic.selectedChannels,
+                                stereo = outCh == 2,
+                                dest = virtualMicScratch,
+                            )
+                            if (mixed > 0 && virtualMicOutputRunning) {
+                                NativeAudioEngine.writePlaybackFrames(virtualMicScratch, mixed)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        OmtLog.e("CaptureSession", "fanout chunk failed", e)
+                        Thread.sleep(10)
                     }
                 }
+            } catch (e: Exception) {
+                OmtLog.e("CaptureSession", "fanout loop failed", e)
             } finally {
                 OmtLog.i("CaptureSession", "fanout ended frames=$framesWritten")
             }

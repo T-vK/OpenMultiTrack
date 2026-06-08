@@ -190,7 +190,9 @@ class MixerSessionController(
         captureEngine.updateMonitor(MonitorMixConfig(enabled = false))
         _state.update { it.copy(isMonitoring = false, statusMessage = "Monitor off") }
         stopWaveformUpdatesIfIdle()
-        releaseCaptureIfIdle()
+        scope.launch {
+            captureMutex.withLock { releaseCaptureIfIdleLocked() }
+        }
     }
 
     fun startRecording() {
@@ -203,6 +205,8 @@ class MixerSessionController(
                     withContext(Dispatchers.IO) {
                         if (!captureEngine.isCaptureActive) {
                             ensureCapture(descriptor, probe).getOrThrow()
+                        } else {
+                            syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
                         }
                         captureEngine.startRecording(
                             CaptureSessionEngine.RecordingConfig(
@@ -233,7 +237,9 @@ class MixerSessionController(
     fun stopRecording() {
         scope.launch {
             val session = captureMutex.withLock {
-                withContext(Dispatchers.IO) { captureEngine.stopRecording() }
+                val ended = withContext(Dispatchers.IO) { captureEngine.stopRecording() }
+                releaseCaptureIfIdleLocked()
+                ended
             }
             _state.update {
                 it.copy(
@@ -244,7 +250,6 @@ class MixerSessionController(
                 )
             }
             stopWaveformUpdatesIfIdle()
-            releaseCaptureIfIdle()
         }
     }
 
@@ -381,7 +386,31 @@ class MixerSessionController(
         activeUsbDevice = device
         val route = AudioEngineRouter.resolveCaptureRoute(probe, stream, requested)
             ?: return Result.failure(IllegalStateException("No capture route"))
-        return captureEngine.startCapture(scope, route, device).map { requested }
+        return captureEngine.startCapture(scope, route, device).map {
+            syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
+            captureEngine.activeChannelCount
+        }
+    }
+
+    private fun syncChannelStripsToCaptureCount(captureCh: Int) {
+        if (captureCh <= 0) return
+        _state.update { s ->
+            val existing = s.channelStrips
+            when {
+                existing.size == captureCh -> s.copy(captureChannelCount = captureCh)
+                existing.size > captureCh -> s.copy(
+                    channelStrips = existing.take(captureCh),
+                    captureChannelCount = captureCh,
+                )
+                else -> {
+                    val strips = existing.toMutableList()
+                    for (i in existing.size until captureCh) {
+                        strips.add(ChannelStripState(index = i))
+                    }
+                    s.copy(channelStrips = strips, captureChannelCount = captureCh)
+                }
+            }
+        }
     }
 
     private fun channelCountFromProbe(probe: FullUsbProbeResult): Int =
@@ -395,15 +424,11 @@ class MixerSessionController(
         return UsbAudioStreamHandle.open(appContext, usbManager, device)
     }
 
-    private fun releaseCaptureIfIdle() {
-        scope.launch {
-            captureMutex.withLock {
-                if (!captureEngine.isRecording && !_state.value.isMonitoring) {
-                    withContext(Dispatchers.IO) { captureEngine.stopCapture() }
-                    usbStream?.close()
-                    usbStream = null
-                }
-            }
+    private suspend fun releaseCaptureIfIdleLocked() {
+        if (!captureEngine.isRecording && !_state.value.isMonitoring) {
+            withContext(Dispatchers.IO) { captureEngine.stopCapture() }
+            usbStream?.close()
+            usbStream = null
         }
     }
 }

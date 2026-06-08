@@ -632,6 +632,7 @@ private fun ChannelStripList(
             numberMode,
             iconMode,
             labelFontSize,
+            stripHeight,
             hideArm,
             hideMonitor,
             hideSolo,

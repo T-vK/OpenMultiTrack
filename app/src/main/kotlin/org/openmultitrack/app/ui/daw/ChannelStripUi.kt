@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -56,13 +57,14 @@ internal fun stripLabelColumnWidth(
     numberMode: StripNumberMode,
     iconMode: StripIconMode,
     labelFontSize: Float,
+    stripHeight: Dp,
     hideArm: Boolean,
     hideMonitor: Boolean,
     hideSolo: Boolean,
 ): Dp {
     if (numberMode == StripNumberMode.NUMBERS_ONLY) return 28.dp
     val hasLabels = strips.any { it.displayName.isNotBlank() || it.label.isNotBlank() }
-    if (!hasLabels) return 28.dp
+    if (!hasLabels && iconMode == StripIconMode.HIDE) return 28.dp
 
     val textMeasurer = rememberTextMeasurer()
     val density = LocalDensity.current
@@ -74,21 +76,20 @@ internal fun stripLabelColumnWidth(
 
     val showsIcon = iconMode != StripIconMode.HIDE &&
         strips.any { MixingStationIcons.emoji(it.iconId) != null }
-    val iconWidth = if (showsIcon) {
-        with(density) { (labelFontSize * 1.1f).sp.toDp() }
+    val bigIconWidth = if (showsIcon) {
+        (stripHeight * 0.72f).coerceIn(22.dp, 40.dp)
     } else {
         0.dp
     }
     val showsGlyphs = !hideArm || !hideMonitor || !hideSolo
     val glyphWidth = if (showsGlyphs) {
-        with(density) { (labelFontSize * 2.6f).sp.toDp() }
+        with(density) { (labelFontSize * 3.2f).sp.toDp() }
     } else {
         0.dp
     }
+    val labelWidth = with(density) { maxTextPx.toDp() }
 
-    return with(density) {
-        (3.dp + maxTextPx.toDp() + iconWidth + glyphWidth + 8.dp).coerceAtLeast(28.dp)
-    }
+    return (3.dp + bigIconWidth + maxOf(labelWidth, glyphWidth) + 10.dp).coerceAtLeast(28.dp)
 }
 
 @Composable
@@ -109,6 +110,9 @@ internal fun StripIdentityCell(
     }
     val iconEmoji = parsed.iconEmoji
     val lineText = parsed.lineText
+    val bigIconSize = (colorBarHeight * 0.72f).coerceIn(22.dp, 40.dp)
+    val bigIconFontSize = (labelFontSize * 2.1f).coerceIn(18f, 32f)
+    val controlIconSize = (labelFontSize * 0.95f).coerceIn(10f, 14f).dp
 
     Row(
         modifier = Modifier
@@ -118,7 +122,7 @@ internal fun StripIdentityCell(
             .clickable(onClick = onClick)
             .padding(end = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Box(
             Modifier
@@ -128,26 +132,44 @@ internal fun StripIdentityCell(
                 .background(Color(strip.colorArgb)),
         )
         if (iconEmoji != null) {
-            Text(iconEmoji, fontSize = labelFontSize.sp, maxLines = 1)
+            Box(
+                modifier = Modifier
+                    .size(bigIconSize)
+                    .fillMaxHeight(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    iconEmoji,
+                    fontSize = bigIconFontSize.sp,
+                    maxLines = 1,
+                    lineHeight = bigIconFontSize.sp,
+                )
+            }
         }
-        if (lineText.isNotEmpty()) {
-            Text(
-                lineText,
-                fontSize = labelFontSize.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Visible,
-            )
-        }
-        if (!hideArm || !hideMonitor || !hideSolo) {
-            StripStatusGlyphs(
-                strip = strip,
-                fontSize = (labelFontSize * 0.85f).coerceAtLeast(9f),
-                hideArm = hideArm,
-                hideMonitor = hideMonitor,
-                hideSolo = hideSolo,
-            )
+        Column(
+            modifier = Modifier.weight(1f, fill = false),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            if (!hideArm || !hideMonitor || !hideSolo) {
+                StripStatusGlyphs(
+                    strip = strip,
+                    iconSize = controlIconSize,
+                    hideArm = hideArm,
+                    hideMonitor = hideMonitor,
+                    hideSolo = hideSolo,
+                )
+                Spacer(Modifier.height(1.dp))
+            }
+            if (lineText.isNotEmpty()) {
+                Text(
+                    lineText,
+                    fontSize = labelFontSize.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -155,35 +177,60 @@ internal fun StripIdentityCell(
 @Composable
 private fun StripStatusGlyphs(
     strip: ChannelStripState,
-    fontSize: Float,
+    iconSize: Dp,
     hideArm: Boolean,
     hideMonitor: Boolean,
     hideSolo: Boolean,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(1.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
         if (!hideArm) {
-            Text(
-                "●",
-                fontSize = fontSize.sp,
-                color = if (strip.armed) RecordRed else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+            StripStatusIcon(
+                icon = Icons.Filled.FiberManualRecord,
+                active = strip.armed,
+                activeColor = RecordRed,
+                inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+                iconSize = iconSize,
+                contentDescription = "Arm",
             )
         }
         if (!hideMonitor) {
-            Text(
-                "🎧",
-                fontSize = fontSize.sp,
-                color = if (strip.monitoring) MonitorBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+            StripStatusIcon(
+                icon = Icons.Filled.Headphones,
+                active = strip.monitoring,
+                activeColor = MonitorBlue,
+                inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+                iconSize = iconSize,
+                contentDescription = "Monitor",
             )
         }
         if (!hideSolo) {
-            Text(
-                "S",
-                fontSize = (fontSize * 0.9f).sp,
-                fontWeight = FontWeight.Bold,
-                color = if (strip.solo) SoloAmber else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+            StripStatusIcon(
+                icon = Icons.Filled.VolumeUp,
+                active = strip.solo,
+                activeColor = SoloAmber,
+                inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+                iconSize = iconSize,
+                contentDescription = "Solo",
             )
         }
     }
+}
+
+@Composable
+private fun StripStatusIcon(
+    icon: ImageVector,
+    active: Boolean,
+    activeColor: Color,
+    inactiveColor: Color,
+    iconSize: Dp,
+    contentDescription: String,
+) {
+    Icon(
+        imageVector = icon,
+        contentDescription = contentDescription,
+        modifier = Modifier.size(iconSize),
+        tint = if (active) activeColor else inactiveColor,
+    )
 }
 
 @Composable
@@ -298,7 +345,7 @@ private fun OverlayChannelToggle(
             modifier = Modifier.size(48.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                androidx.compose.material3.Icon(
+                Icon(
                     imageVector = icon,
                     contentDescription = label,
                     modifier = Modifier.size(24.dp),
@@ -346,4 +393,3 @@ private fun buildStripLine(
         }
     }
 }
-

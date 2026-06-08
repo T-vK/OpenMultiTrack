@@ -197,27 +197,30 @@ class MainViewModel(
         loadMixers()
         sessionClient.withManager { mgr ->
             mgr.registerMixer(profile)
-            mgr.setActiveMixer(profile.id)
             autoProbeMixer(profile, mgr)
         }
-        _uiState.update { it.copy(showAddMixerDialog = false, activeMixerId = profile.id) }
+        _uiState.update { it.copy(showAddMixerDialog = false) }
+        setActiveMixer(profile.id)
     }
 
     fun removeMixer(id: String) {
         val removed = _uiState.value.mixers.firstOrNull { it.id == id } ?: return
         mixerStore.removeMixer(id)
+        settings.clearAppModeForMixer(id)
         scribbleStripCache.delete(id)
         observedMixerIds.remove(id)
         sessionClient.withManager { it.unregisterMixer(id) }
-        loadMixers()
-        val remaining = _uiState.value.mixers
+        val remaining = mixerStore.listMixers()
         val nextActive = if (_uiState.value.activeMixerId == id) {
             remaining.firstOrNull()?.id
         } else {
-            _uiState.value.activeMixerId
+            _uiState.value.activeMixerId?.takeIf { active -> remaining.any { it.id == active } }
+                ?: remaining.firstOrNull()?.id
         }
+        settings.lastActiveMixerId = nextActive
         _uiState.update {
             it.copy(
+                mixers = remaining,
                 sessionByMixer = it.sessionByMixer - id,
                 activeMixerId = nextActive,
                 globalStatus = if (remaining.isEmpty()) null else "Removed ${removed.displayName}.",
@@ -226,6 +229,7 @@ class MainViewModel(
     }
 
     fun setActiveMixer(id: String) {
+        settings.lastActiveMixerId = id
         sessionClient.withManager { it.setActiveMixer(id) }
         _uiState.update { it.copy(activeMixerId = id) }
         onFlow8MixerReady(id)
@@ -233,6 +237,7 @@ class MainViewModel(
     }
 
     fun setAppMode(mixerId: String, mode: AppMode) {
+        settings.setAppModeForMixer(mixerId, mode)
         sessionClient.withManager { it.getOrCreate(mixerId).setAppMode(mode) }
     }
 
@@ -507,7 +512,10 @@ class MainViewModel(
 
     private fun loadMixers() {
         val mixers = mixerStore.listMixers()
-        _uiState.update { it.copy(mixers = mixers, activeMixerId = it.activeMixerId ?: mixers.firstOrNull()?.id) }
+        val lastActive = settings.lastActiveMixerId
+        val activeId = lastActive?.takeIf { id -> mixers.any { it.id == id } }
+            ?: mixers.firstOrNull()?.id
+        _uiState.update { it.copy(mixers = mixers, activeMixerId = activeId) }
     }
 
     /**
@@ -519,7 +527,13 @@ class MainViewModel(
         OmtLog.i("ViewModel", "attachToSessionManager mixers=${mixers.size}")
         mixers.forEach { profile ->
             manager.registerMixer(profile)
+            manager.getOrCreate(profile.id).setAppMode(settings.appModeForMixer(profile.id))
             observeMixerSession(profile.id, manager)
+        }
+        _uiState.value.activeMixerId?.let { activeId ->
+            manager.setActiveMixer(activeId)
+            onFlow8MixerReady(activeId)
+            onOscMixerReady(activeId)
         }
     }
 

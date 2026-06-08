@@ -1,6 +1,8 @@
 package org.openmultitrack.app.data
 
 import android.content.Context
+import org.json.JSONObject
+import org.openmultitrack.domain.session.AppMode
 
 class AppSettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -57,6 +59,33 @@ class AppSettingsStore(context: Context) {
         get() = StripIconMode.entries.getOrElse(prefs.getInt(KEY_STRIP_ICON_MODE, 0)) { StripIconMode.SHOW }
         set(value) = prefs.edit().putInt(KEY_STRIP_ICON_MODE, value.ordinal).apply()
 
+    var lastActiveMixerId: String?
+        get() = prefs.getString(KEY_LAST_ACTIVE_MIXER, null)
+        set(value) = prefs.edit().putString(KEY_LAST_ACTIVE_MIXER, value).apply()
+
+    fun appModeForMixer(mixerId: String): AppMode {
+        val json = prefs.getString(KEY_APP_MODES_BY_MIXER, null) ?: return AppMode.MULTITRACK_RECORD
+        return runCatching {
+            val ordinal = JSONObject(json).optInt(mixerId, AppMode.MULTITRACK_RECORD.ordinal)
+            AppMode.entries.getOrElse(ordinal) { AppMode.MULTITRACK_RECORD }
+        }.getOrDefault(AppMode.MULTITRACK_RECORD)
+    }
+
+    fun setAppModeForMixer(mixerId: String, mode: AppMode) {
+        val root = runCatching {
+            JSONObject(prefs.getString(KEY_APP_MODES_BY_MIXER, "{}") ?: "{}")
+        }.getOrDefault(JSONObject())
+        root.put(mixerId, mode.ordinal)
+        prefs.edit().putString(KEY_APP_MODES_BY_MIXER, root.toString()).apply()
+    }
+
+    fun clearAppModeForMixer(mixerId: String) {
+        val raw = prefs.getString(KEY_APP_MODES_BY_MIXER, null) ?: return
+        val root = runCatching { JSONObject(raw) }.getOrNull() ?: return
+        root.remove(mixerId)
+        prefs.edit().putString(KEY_APP_MODES_BY_MIXER, root.toString()).apply()
+    }
+
     fun exportJson(): String = prefs.all.entries.joinToString(prefix = "{", postfix = "}") { (k, v) ->
         """"$k":${if (v is String) "\"$v\"" else v}"""
     }
@@ -76,5 +105,7 @@ class AppSettingsStore(context: Context) {
         private const val KEY_SHOW_WAVEFORMS = "show_waveforms"
         private const val KEY_STRIP_NUMBER_MODE = "strip_number_mode"
         private const val KEY_STRIP_ICON_MODE = "strip_icon_mode"
+        private const val KEY_LAST_ACTIVE_MIXER = "last_active_mixer_id"
+        private const val KEY_APP_MODES_BY_MIXER = "app_modes_by_mixer"
     }
 }
