@@ -15,7 +15,7 @@ data class SessionSummary(
         get() = if (metadata.sampleRate > 0) durationFrames.toFloat() / metadata.sampleRate else 0f
 
     val channelCount: Int
-        get() = metadata.channels.size
+        get() = metadata.resolvedChannels(dir).size
 }
 
 object SessionLibrary {

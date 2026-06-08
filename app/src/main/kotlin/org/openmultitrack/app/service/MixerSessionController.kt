@@ -283,7 +283,7 @@ class MixerSessionController(
         val probe = activeProbe ?: return
         val sessionDir = _state.value.selectedSoundcheckDir ?: return
         val dir = File(sessionDir)
-        val metadata = SessionMetadata.read(dir) ?: return
+        val metadata = SessionMetadata.read(dir)?.withResolvedChannels(dir) ?: return
         scope.launch {
             try {
                 captureMutex.withLock {
@@ -688,7 +688,9 @@ class MixerSessionController(
         _state.update { it.copy(soundcheckWaveformsLoading = true, soundcheckWaveforms = null) }
         soundcheckWaveformJob = scope.launch {
             val dir = File(sessionDir)
-            val metadata = withContext(Dispatchers.IO) { SessionMetadata.read(dir) } ?: run {
+            val metadata = withContext(Dispatchers.IO) {
+                SessionMetadata.read(dir)?.withResolvedChannels(dir)
+            } ?: run {
                 _state.update { it.copy(soundcheckWaveformsLoading = false) }
                 return@launch
             }

@@ -116,6 +116,7 @@ fun SoundcheckPanel(
                 onZoomView = onZoomView,
                 onSetLoopRegion = onSetLoopRegion,
             )
+            else -> SoundcheckEmptyState("Could not load waveforms for this session.")
         }
     }
 }
@@ -129,61 +130,67 @@ private fun SoundcheckSessionSelector(
     var menuOpen by remember { mutableStateOf(false) }
     val selected = sessions.firstOrNull { it.sessionDir == selectedDir }
     val dateFmt = remember { SimpleDateFormat("MMM d, yyyy · HH:mm", Locale.getDefault()) }
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = sessions.isNotEmpty()) { menuOpen = true },
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = sessions.isNotEmpty()) { menuOpen = true },
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
         ) {
-            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
-                Text(
-                    selected?.title ?: "Select multitrack recording",
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    when {
-                        selected == null -> "Tap to choose a completed session"
-                        else -> {
-                            val date = dateFmt.format(Date(selected.startedAtEpochMs))
-                            "$date · ${selected.channelCount} ch · ${formatDuration(selected.durationSec)}"
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
+                    Text(
+                        selected?.title ?: "Select multitrack recording",
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        when {
+                            selected == null -> "Tap to choose a completed session"
+                            else -> {
+                                val date = dateFmt.format(Date(selected.startedAtEpochMs))
+                                "$date · ${selected.channelCount} ch · ${formatDuration(selected.durationSec)}"
+                            }
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Icon(Icons.Default.ArrowDropDown, contentDescription = "Open session list")
+            }
+        }
+        DropdownMenu(
+            expanded = menuOpen,
+            onDismissRequest = { menuOpen = false },
+            modifier = Modifier.fillMaxWidth(0.92f),
+        ) {
+            sessions.forEach { item ->
+                val date = dateFmt.format(Date(item.startedAtEpochMs))
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                "$date · ${item.channelCount} ch · ${formatDuration(item.durationSec)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                    onClick = {
+                        menuOpen = false
+                        onSelectSession(item.sessionDir)
+                    },
                 )
             }
-            Icon(Icons.Default.ArrowDropDown, contentDescription = "Open session list")
-        }
-    }
-    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-        sessions.forEach { item ->
-            val date = dateFmt.format(Date(item.startedAtEpochMs))
-            DropdownMenuItem(
-                text = {
-                    Column {
-                        Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            "$date · ${item.channelCount} ch · ${formatDuration(item.durationSec)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                },
-                onClick = {
-                    menuOpen = false
-                    onSelectSession(item.sessionDir)
-                },
-            )
         }
     }
 }

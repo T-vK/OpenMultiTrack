@@ -23,12 +23,13 @@ object SessionWaveformExtractor {
         metadata: SessionMetadata,
         peaksPerSec: Float = DEFAULT_PEAKS_PER_SEC,
     ): SessionWaveformOverview {
-        val sampleRate = metadata.sampleRate.coerceAtLeast(1)
-        val durationFrames = durationFrames(sessionDir, metadata)
+        val resolved = metadata.withResolvedChannels(sessionDir)
+        val sampleRate = resolved.sampleRate.coerceAtLeast(1)
+        val durationFrames = durationFrames(sessionDir, resolved)
         val durationSec = durationFrames.toFloat() / sampleRate
         val peakCount = max(1, (durationSec * peaksPerSec).toInt())
         val blockFrames = max(1, (sampleRate / peaksPerSec).toInt())
-        val channels = metadata.channels.sortedBy { it.index }
+        val channels = resolved.channels.sortedBy { it.index }
         val peaksByChannel = linkedMapOf<Int, FloatArray>()
         for (ch in channels) {
             val file = File(sessionDir, ch.fileName)
