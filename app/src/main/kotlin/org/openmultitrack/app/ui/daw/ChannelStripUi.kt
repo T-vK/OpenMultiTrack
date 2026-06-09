@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -23,7 +25,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
@@ -343,13 +344,11 @@ private fun StripStatusGlyphs(
                     )
                 }
                 if (!hideSolo) {
-                    StripStatusIcon(
-                        icon = Icons.Filled.VolumeUp,
+                    StripSoloStatusGlyph(
                         active = strip.solo,
                         activeColor = SoloAmber,
                         inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
-                        iconSize = iconSize,
-                        contentDescription = "Solo",
+                        size = iconSize,
                     )
                 }
             }
@@ -363,16 +362,57 @@ private fun StripStatusGlyphs(
                     contentDescription = "Mute",
                 )
                 if (!hideSolo) {
-                    StripStatusIcon(
-                        icon = Icons.Filled.VolumeUp,
+                    StripSoloStatusGlyph(
                         active = strip.solo,
                         activeColor = SoloAmber,
                         inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
-                        iconSize = iconSize,
-                        contentDescription = "Solo",
+                        size = iconSize,
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun StripSoloStatusGlyph(
+    active: Boolean,
+    activeColor: Color,
+    inactiveColor: Color,
+    size: Dp,
+) {
+    SoloCircledGlyph(
+        tint = if (active) activeColor else inactiveColor,
+        size = size,
+        contentDescription = "Solo",
+    )
+}
+
+@Composable
+private fun SoloCircledGlyph(
+    tint: Color,
+    size: Dp,
+    modifier: Modifier = Modifier,
+    contentDescription: String = "Solo",
+) {
+    Box(
+        modifier = modifier.size(size),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .border(1.dp, tint, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "S",
+                color = tint,
+                fontSize = (size.value * 0.58f).sp,
+                fontWeight = FontWeight.Bold,
+                lineHeight = (size.value * 0.58f).sp,
+                maxLines = 1,
+            )
         }
     }
 }
@@ -556,12 +596,10 @@ internal fun ChannelStripControlDialog(
                                 )
                             }
                             if (!hideSolo) {
-                                OverlayChannelToggle(
+                                OverlaySoloToggle(
                                     checked = strip.solo,
-                                    icon = Icons.Filled.VolumeUp,
                                     activeColor = SoloAmber,
                                     iconTintWhenOff = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    label = "Solo",
                                     onClick = onSolo,
                                 )
                             }
@@ -576,12 +614,10 @@ internal fun ChannelStripControlDialog(
                                 onClick = onMute,
                             )
                             if (!hideSolo) {
-                                OverlayChannelToggle(
+                                OverlaySoloToggle(
                                     checked = strip.solo,
-                                    icon = Icons.Filled.VolumeUp,
                                     activeColor = SoloAmber,
                                     iconTintWhenOff = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    label = "Solo",
                                     onClick = onSolo,
                                 )
                             }
@@ -638,6 +674,25 @@ internal fun ChannelStripControlDialog(
 }
 
 @Composable
+private fun OverlaySoloToggle(
+    checked: Boolean,
+    activeColor: Color,
+    iconTintWhenOff: Color,
+    onClick: () -> Unit,
+) {
+    val iconTint = if (checked) Color.White else iconTintWhenOff
+    OverlayChannelToggle(
+        checked = checked,
+        activeColor = activeColor,
+        iconTintWhenOff = iconTintWhenOff,
+        label = "Solo",
+        onClick = onClick,
+    ) {
+        SoloCircledGlyph(tint = iconTint, size = 24.dp)
+    }
+}
+
+@Composable
 private fun OverlayChannelToggle(
     checked: Boolean,
     icon: ImageVector,
@@ -646,9 +701,33 @@ private fun OverlayChannelToggle(
     label: String,
     onClick: () -> Unit,
 ) {
+    OverlayChannelToggle(
+        checked = checked,
+        activeColor = activeColor,
+        iconTintWhenOff = iconTintWhenOff,
+        label = label,
+        onClick = onClick,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            modifier = Modifier.size(24.dp),
+            tint = if (checked) Color.White else iconTintWhenOff,
+        )
+    }
+}
+
+@Composable
+private fun OverlayChannelToggle(
+    checked: Boolean,
+    activeColor: Color,
+    iconTintWhenOff: Color,
+    label: String,
+    onClick: () -> Unit,
+    iconContent: @Composable () -> Unit,
+) {
     val bg = if (checked) activeColor else MaterialTheme.colorScheme.surfaceVariant
     val border = if (checked) activeColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-    val iconTint = if (checked) Color.White else iconTintWhenOff
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Surface(
             onClick = onClick,
@@ -658,12 +737,7 @@ private fun OverlayChannelToggle(
             modifier = Modifier.size(48.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = label,
-                    modifier = Modifier.size(24.dp),
-                    tint = iconTint,
-                )
+                iconContent()
             }
         }
         Text(label, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)

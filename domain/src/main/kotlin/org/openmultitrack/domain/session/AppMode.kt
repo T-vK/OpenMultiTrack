@@ -14,5 +14,21 @@ val AppMode.displayLabel: String
         AppMode.SIMPLE_PLAY -> "Simple Play Mode"
     }
 
+/** Shorter toolbar label when horizontal space is tight. */
+val AppMode.shortLabel: String
+    get() = when (this) {
+        AppMode.MULTITRACK_RECORD -> "Recording"
+        AppMode.VIRTUAL_SOUNDCHECK -> "Soundcheck"
+        AppMode.SIMPLE_PLAY -> "Simple Play"
+    }
+
+/** Minimal toolbar label before falling back to icon-only. */
+val AppMode.abbrevLabel: String
+    get() = when (this) {
+        AppMode.MULTITRACK_RECORD -> "Rec…"
+        AppMode.VIRTUAL_SOUNDCHECK -> "SC…"
+        AppMode.SIMPLE_PLAY -> "Play…"
+    }
+
 val AppMode.isPlaybackMode: Boolean
     get() = this != AppMode.MULTITRACK_RECORD
