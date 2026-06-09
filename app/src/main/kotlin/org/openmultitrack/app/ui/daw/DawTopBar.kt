@@ -54,6 +54,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,15 +71,85 @@ import androidx.compose.ui.unit.Dp
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.domain.remote.RemoteConnectionState
 import org.openmultitrack.domain.session.AppMode
+import org.openmultitrack.domain.session.abbrevLabel
 import org.openmultitrack.domain.session.displayLabel
+import org.openmultitrack.domain.session.shortLabel
 import org.openmultitrack.domain.session.isPlaybackMode
 
 private val ToolbarShape = RoundedCornerShape(8.dp)
 private val ToolbarControlHeight = 40.dp
-private val BothTransportsMinWidth = 420.dp
 private val MixerNameWideMaxWidth = 160.dp
 private val MixerNameMediumMaxWidth = 112.dp
 private val MixerNameNarrowMaxWidth = 80.dp
+
+internal enum class AppModeLabelDensity {
+    FULL,
+    SHORT,
+    ABBREV,
+    ICON_ONLY,
+}
+
+private fun AppMode.toolbarLabel(density: AppModeLabelDensity): String? = when (density) {
+    AppModeLabelDensity.FULL -> displayLabel
+    AppModeLabelDensity.SHORT -> shortLabel
+    AppModeLabelDensity.ABBREV -> abbrevLabel
+    AppModeLabelDensity.ICON_ONLY -> null
+}
+
+/** Which toolbar items stay in the top bar vs overflow into the navigation drawer. */
+internal data class ToolbarLayout(
+    val mixerNameMaxWidth: Dp,
+    val showBothTransports: Boolean,
+    val showMixerSettingsInBar: Boolean,
+    val showModeInBar: Boolean,
+    val modeLabelDensity: AppModeLabelDensity,
+    val showStorageInBar: Boolean,
+    val showOpenInBar: Boolean,
+    val showRemoteInBar: Boolean,
+    val showSettingsInBar: Boolean,
+) {
+    val showMixerSettingsInDrawer: Boolean get() = !showMixerSettingsInBar
+    val showModeInDrawer: Boolean get() = !showModeInBar
+    val showOpenInDrawer: Boolean get() = !showOpenInBar
+    val showRemoteInDrawer: Boolean get() = !showRemoteInBar
+    val showSettingsInDrawer: Boolean get() = !showSettingsInBar
+    val showStorageInDrawer: Boolean get() = !showStorageInBar
+}
+
+internal fun computeToolbarLayout(
+    barWidth: Dp,
+    appMode: AppMode?,
+    showRecordingStorageInfoButton: Boolean,
+): ToolbarLayout {
+    val isPlaybackMode = appMode?.isPlaybackMode == true
+    val showRecordTransport = barWidth >= 380.dp || appMode == AppMode.MULTITRACK_RECORD
+    val showPlaybackTransport = barWidth >= 380.dp || isPlaybackMode
+    val showBothTransports = showRecordTransport && showPlaybackTransport &&
+        (barWidth >= 420.dp || appMode == null)
+
+    return ToolbarLayout(
+        mixerNameMaxWidth = when {
+            barWidth >= 720.dp -> MixerNameWideMaxWidth
+            barWidth >= 520.dp -> MixerNameMediumMaxWidth
+            else -> MixerNameNarrowMaxWidth
+        },
+        showBothTransports = showBothTransports,
+        showMixerSettingsInBar = barWidth >= 580.dp,
+        showModeInBar = barWidth >= 500.dp,
+        modeLabelDensity = when {
+            barWidth >= 900.dp -> AppModeLabelDensity.FULL
+            barWidth >= 760.dp -> AppModeLabelDensity.SHORT
+            barWidth >= 580.dp -> AppModeLabelDensity.ABBREV
+            else -> AppModeLabelDensity.ICON_ONLY
+        },
+        showStorageInBar = showRecordingStorageInfoButton &&
+            showRecordTransport &&
+            barWidth >= 460.dp,
+        showOpenInBar = isPlaybackMode && barWidth >= 640.dp,
+        showRemoteInBar = barWidth >= 600.dp,
+        showSettingsInBar = barWidth >= 720.dp,
+    )
+}
 
 private fun AppMode.toolbarIcon(): ImageVector = when (this) {
     AppMode.MULTITRACK_RECORD -> Icons.Default.FiberManualRecord
@@ -121,36 +192,143 @@ internal fun ToolbarChip(
 }
 
 @Composable
-private fun MixerPickerButton(
+private fun MixerControlCluster(
     activeMixerName: String?,
-    mixerNameMaxWidth: Dp,
+    appMode: AppMode?,
+    layout: ToolbarLayout,
     onOpenMixerPicker: () -> Unit,
+    onOpenMixerSettings: () -> Unit,
+    onSetAppMode: (AppMode) -> Unit,
 ) {
     val border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
     Surface(
-        onClick = onOpenMixerPicker,
         shape = ToolbarShape,
         border = border,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
         modifier = Modifier.height(ToolbarControlHeight),
     ) {
         Row(
-            Modifier.padding(horizontal = 10.dp),
+            modifier = Modifier.fillMaxHeight(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Text(
-                activeMixerName ?: "Select mixer",
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = mixerNameMaxWidth),
-                style = MaterialTheme.typography.labelLarge,
-            )
-            Icon(
-                Icons.Default.ArrowDropDown,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-            )
+            Surface(
+                onClick = onOpenMixerPicker,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+                modifier = Modifier.height(ToolbarControlHeight),
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        activeMixerName ?: "Select mixer",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = layout.mixerNameMaxWidth),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Icon(
+                        Icons.Default.ArrowDropDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+            if (layout.showMixerSettingsInBar) {
+                clusterDivider()
+                IconButton(
+                    onClick = onOpenMixerSettings,
+                    modifier = Modifier.size(ToolbarControlHeight),
+                ) {
+                    Icon(Icons.Default.Tune, contentDescription = "Mixer settings")
+                }
+            }
+            if (layout.showModeInBar && appMode != null) {
+                clusterDivider()
+                AppModeDropdown(
+                    appMode = appMode,
+                    labelDensity = layout.modeLabelDensity,
+                    onSetAppMode = onSetAppMode,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppModeDropdown(
+    appMode: AppMode,
+    labelDensity: AppModeLabelDensity,
+    onSetAppMode: (AppMode) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val modeIcon = appMode.toolbarIcon()
+    val label = appMode.toolbarLabel(labelDensity)
+    Box {
+        Surface(
+            onClick = { expanded = true },
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+            modifier = Modifier.height(ToolbarControlHeight),
+        ) {
+            Row(
+                Modifier.padding(horizontal = if (label == null) 8.dp else 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(
+                    modeIcon,
+                    contentDescription = appMode.displayLabel,
+                    modifier = Modifier.size(16.dp),
+                    tint = when (appMode) {
+                        AppMode.MULTITRACK_RECORD -> RecordRed
+                        AppMode.VIRTUAL_SOUNDCHECK -> MaterialTheme.colorScheme.primary
+                        AppMode.SIMPLE_PLAY -> MaterialTheme.colorScheme.tertiary
+                    },
+                )
+                if (label != null) {
+                    Text(
+                        label,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.widthIn(max = 96.dp),
+                    )
+                }
+                Icon(
+                    Icons.Default.ArrowDropDown,
+                    contentDescription = "Change mode",
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            AppMode.entries.forEach { mode ->
+                DropdownMenuItem(
+                    text = {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                mode.toolbarIcon(),
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = when (mode) {
+                                    AppMode.MULTITRACK_RECORD -> RecordRed
+                                    AppMode.VIRTUAL_SOUNDCHECK -> MaterialTheme.colorScheme.primary
+                                    AppMode.SIMPLE_PLAY -> MaterialTheme.colorScheme.tertiary
+                                },
+                            )
+                            Text(mode.displayLabel)
+                        }
+                    },
+                    onClick = {
+                        expanded = false
+                        if (mode != appMode) onSetAppMode(mode)
+                    },
+                )
+            }
         }
     }
 }
@@ -421,7 +599,8 @@ private fun clusterDivider() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DawTopBar(
+internal fun DawTopBar(
+    layout: ToolbarLayout,
     activeMixerName: String?,
     appMode: AppMode?,
     session: MixerSessionUiState?,
@@ -430,8 +609,12 @@ fun DawTopBar(
     remoteHostLabel: String?,
     remoteConnectedClientCount: Int = 0,
     isRemoteHost: Boolean = false,
+    remoteConnectionState: RemoteConnectionState = RemoteConnectionState.DISCONNECTED,
+    showOpenSessionHint: Boolean = false,
     onExitRemoteMode: () -> Unit = {},
     onOpenMixerPicker: () -> Unit,
+    onOpenMixerSettings: () -> Unit = {},
+    onSetAppMode: (AppMode) -> Unit = {},
     onStartRecord: () -> Unit,
     onStopRecord: () -> Unit,
     onToggleSoundcheckPlayback: () -> Unit,
@@ -441,8 +624,20 @@ fun DawTopBar(
     onSetSoundcheckLoopOut: () -> Unit,
     showRecordingStorageInfoButton: Boolean = false,
     onShowStorageInfo: () -> Unit = {},
+    onOpenSessionPicker: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
+    onOpenRemoteControl: () -> Unit = {},
     onOpenMenu: () -> Unit = {},
 ) {
+    val remoteHighlight = isRemoteClient ||
+        (isRemoteHost && remoteConnectedClientCount > 0) ||
+        remoteConnectionState == RemoteConnectionState.CONNECTING
+    val openSessionEnabled = appMode?.isPlaybackMode == true &&
+        session?.soundcheckSessions?.isNotEmpty() == true
+    val showRecordTransport = layout.showBothTransports ||
+        appMode == AppMode.MULTITRACK_RECORD
+    val showPlaybackTransport = layout.showBothTransports ||
+        appMode?.isPlaybackMode == true
     Column {
         if (isRemoteClient && remoteHostLabel != null) {
             Surface(
@@ -492,52 +687,70 @@ fun DawTopBar(
             },
             title = {
                 if (showMixerCluster) {
-                    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                        val showBothTransports = maxWidth >= BothTransportsMinWidth
-                        val mixerNameMaxWidth = when {
-                            maxWidth >= 480.dp -> MixerNameWideMaxWidth
-                            maxWidth >= 360.dp -> MixerNameMediumMaxWidth
-                            else -> MixerNameNarrowMaxWidth
-                        }
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            MixerPickerButton(
-                                activeMixerName = activeMixerName,
-                                mixerNameMaxWidth = mixerNameMaxWidth,
-                                onOpenMixerPicker = onOpenMixerPicker,
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        MixerControlCluster(
+                            activeMixerName = activeMixerName,
+                            appMode = appMode,
+                            layout = layout,
+                            onOpenMixerPicker = onOpenMixerPicker,
+                            onOpenMixerSettings = onOpenMixerSettings,
+                            onSetAppMode = onSetAppMode,
+                        )
+                        if (showRecordTransport) {
+                            RecordTransportCluster(
+                                session = session,
+                                isRemoteClient = isRemoteClient,
+                                onStartRecord = onStartRecord,
+                                onStopRecord = onStopRecord,
                             )
-                            val showRecordTransport = showBothTransports ||
-                                appMode == AppMode.MULTITRACK_RECORD
-                            val showPlaybackTransport = showBothTransports ||
-                                appMode?.isPlaybackMode == true
-                            if (showRecordTransport) {
-                                RecordTransportCluster(
-                                    session = session,
-                                    isRemoteClient = isRemoteClient,
-                                    onStartRecord = onStartRecord,
-                                    onStopRecord = onStopRecord,
-                                )
-                            }
-                            if (showRecordTransport && showRecordingStorageInfoButton) {
-                                RecordingStorageButton(
-                                    session = session,
-                                    onShowStorageInfo = onShowStorageInfo,
-                                )
-                            }
-                            if (showPlaybackTransport) {
-                                PlaybackTransportCluster(
-                                    session = session,
-                                    isRemoteClient = isRemoteClient,
-                                    onTogglePlayback = onToggleSoundcheckPlayback,
-                                    onStopPlayback = onStopSoundcheck,
-                                    onToggleLoop = onToggleSoundcheckLoop,
-                                    onSetLoopIn = onSetSoundcheckLoopIn,
-                                    onSetLoopOut = onSetSoundcheckLoopOut,
-                                )
-                            }
                         }
+                        if (layout.showStorageInBar) {
+                            RecordingStorageButton(
+                                session = session,
+                                onShowStorageInfo = onShowStorageInfo,
+                            )
+                        }
+                        if (showPlaybackTransport) {
+                            PlaybackTransportCluster(
+                                session = session,
+                                isRemoteClient = isRemoteClient,
+                                onTogglePlayback = onToggleSoundcheckPlayback,
+                                onStopPlayback = onStopSoundcheck,
+                                onToggleLoop = onToggleSoundcheckLoop,
+                                onSetLoopIn = onSetSoundcheckLoopIn,
+                                onSetLoopOut = onSetSoundcheckLoopOut,
+                            )
+                        }
+                    }
+                }
+            },
+            actions = {
+                if (layout.showOpenInBar) {
+                    OpenSessionButton(
+                        enabled = openSessionEnabled,
+                        showHint = showOpenSessionHint,
+                        onClick = onOpenSessionPicker,
+                    )
+                }
+                if (layout.showRemoteInBar) {
+                    IconButton(onClick = onOpenRemoteControl) {
+                        Icon(
+                            Icons.Default.Cast,
+                            contentDescription = "Remote control",
+                            tint = if (remoteHighlight) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                    }
+                }
+                if (layout.showSettingsInBar) {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = "App settings")
                     }
                 }
             },
@@ -548,9 +761,40 @@ fun DawTopBar(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DawNavigationDrawer(
+private fun OpenSessionButton(
+    enabled: Boolean,
+    showHint: Boolean,
+    onClick: () -> Unit,
+) {
+    val openTooltipState = rememberTooltipState()
+    LaunchedEffect(showHint, enabled) {
+        if (showHint && enabled) {
+            openTooltipState.show()
+        } else {
+            openTooltipState.dismiss()
+        }
+    }
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = {
+            PlainTooltip {
+                Text("Load most recent recording")
+            }
+        },
+        state = openTooltipState,
+    ) {
+        IconButton(onClick = onClick, enabled = enabled) {
+            Icon(Icons.Default.FolderOpen, contentDescription = "Open recording")
+        }
+    }
+}
+
+@Composable
+internal fun DawNavigationDrawer(
     drawerState: DrawerState,
+    layout: ToolbarLayout,
     appMode: AppMode?,
     session: MixerSessionUiState?,
     isRemoteClient: Boolean,
@@ -558,12 +802,14 @@ fun DawNavigationDrawer(
     remoteConnectedClientCount: Int,
     remoteConnectionState: RemoteConnectionState,
     showOpenSessionHint: Boolean,
+    showRecordingStorageInfoButton: Boolean,
     mixerSettingsEnabled: Boolean,
     onOpenMixerSettings: () -> Unit,
     onSetAppMode: (AppMode) -> Unit,
     onOpenSessionPicker: () -> Unit,
     onOpenRemoteControl: () -> Unit,
     onOpenSettings: () -> Unit,
+    onShowStorageInfo: () -> Unit,
     onOpenLog: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -591,54 +837,76 @@ fun DawNavigationDrawer(
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.padding(horizontal = 28.dp, vertical = 24.dp),
         )
-        NavigationDrawerItem(
-            icon = {
-                Icon(
-                    Icons.Default.Tune,
-                    contentDescription = null,
-                    tint = if (mixerSettingsEnabled) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                    },
-                )
-            },
-            label = { Text("Mixer settings") },
-            selected = false,
-            onClick = {
-                if (mixerSettingsEnabled) {
-                    closeAnd(onOpenMixerSettings)
-                }
-            },
-            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
-        )
-        HorizontalDivider(modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp))
-        AppMode.entries.forEach { mode ->
-            val modeTint = when (mode) {
-                AppMode.MULTITRACK_RECORD -> RecordRed
-                AppMode.VIRTUAL_SOUNDCHECK -> MaterialTheme.colorScheme.primary
-                AppMode.SIMPLE_PLAY -> MaterialTheme.colorScheme.tertiary
-            }
+        if (layout.showMixerSettingsInDrawer) {
             NavigationDrawerItem(
                 icon = {
                     Icon(
-                        imageVector = mode.toolbarIcon(),
+                        Icons.Default.Tune,
                         contentDescription = null,
-                        tint = modeTint,
+                        tint = if (mixerSettingsEnabled) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        },
                     )
                 },
-                label = { Text(mode.displayLabel) },
-                selected = mode == appMode,
+                label = { Text("Mixer settings") },
+                selected = false,
                 onClick = {
-                    closeAnd {
-                        if (mode != appMode) onSetAppMode(mode)
+                    if (mixerSettingsEnabled) {
+                        closeAnd(onOpenMixerSettings)
                     }
                 },
                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
             )
         }
-        HorizontalDivider(modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp))
-        if (appMode?.isPlaybackMode == true) {
+        if (layout.showModeInDrawer) {
+            if (layout.showMixerSettingsInDrawer) {
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp))
+            }
+            Text(
+                "Mode",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 28.dp, vertical = 4.dp),
+            )
+            AppMode.entries.forEach { mode ->
+                val modeTint = when (mode) {
+                    AppMode.MULTITRACK_RECORD -> RecordRed
+                    AppMode.VIRTUAL_SOUNDCHECK -> MaterialTheme.colorScheme.primary
+                    AppMode.SIMPLE_PLAY -> MaterialTheme.colorScheme.tertiary
+                }
+                NavigationDrawerItem(
+                    icon = {
+                        Icon(
+                            imageVector = mode.toolbarIcon(),
+                            contentDescription = null,
+                            tint = modeTint,
+                        )
+                    },
+                    label = { Text(mode.displayLabel) },
+                    selected = mode == appMode,
+                    onClick = {
+                        closeAnd {
+                            if (mode != appMode) onSetAppMode(mode)
+                        }
+                    },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+                )
+            }
+        }
+        if (layout.showStorageInDrawer && showRecordingStorageInfoButton) {
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp))
+            NavigationDrawerItem(
+                icon = { Icon(RecordingStorageIcon, contentDescription = null) },
+                label = { Text("Storage info") },
+                selected = false,
+                onClick = { closeAnd(onShowStorageInfo) },
+                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+            )
+        }
+        if (layout.showOpenInDrawer && appMode?.isPlaybackMode == true) {
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp))
             NavigationDrawerItem(
                 icon = {
                     Icon(
@@ -661,30 +929,36 @@ fun DawNavigationDrawer(
                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
             )
         }
-        NavigationDrawerItem(
-            icon = {
-                Icon(
-                    imageVector = Icons.Default.Cast,
-                    contentDescription = null,
-                    tint = if (remoteHighlight) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-            },
-            label = { Text("Remote control") },
-            selected = false,
-            onClick = { closeAnd(onOpenRemoteControl) },
-            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
-        )
-        NavigationDrawerItem(
-            icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-            label = { Text("Settings") },
-            selected = false,
-            onClick = { closeAnd(onOpenSettings) },
-            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
-        )
+        if (layout.showRemoteInDrawer) {
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp))
+            NavigationDrawerItem(
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.Cast,
+                        contentDescription = null,
+                        tint = if (remoteHighlight) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                },
+                label = { Text("Remote control") },
+                selected = false,
+                onClick = { closeAnd(onOpenRemoteControl) },
+                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+            )
+        }
+        if (layout.showSettingsInDrawer) {
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp))
+            NavigationDrawerItem(
+                icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                label = { Text("Settings") },
+                selected = false,
+                onClick = { closeAnd(onOpenSettings) },
+                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+            )
+        }
         HorizontalDivider(modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp))
         NavigationDrawerItem(
             icon = { Icon(Icons.Default.Article, contentDescription = null) },

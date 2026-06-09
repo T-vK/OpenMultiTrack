@@ -370,63 +370,84 @@ fun DawMainScreen(
         return
     }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            DawNavigationDrawer(
-                drawerState = drawerState,
-                appMode = session?.appMode,
-                session = session,
-                isRemoteClient = isRemoteClient,
-                isRemoteHost = isRemoteHost,
-                remoteConnectedClientCount = state.remoteConnectedClientCount,
-                remoteConnectionState = state.remoteConnectionState,
-                showOpenSessionHint = activeId?.let { mixerId ->
-                    session?.let { s ->
-                        hasNewerRecordingThanSelected(
-                            s.soundcheckSessions,
-                            lastSelectedSoundcheckSession(mixerId),
+    val showOpenSessionHint = activeId?.let { mixerId ->
+        session?.let { s ->
+            hasNewerRecordingThanSelected(
+                s.soundcheckSessions,
+                lastSelectedSoundcheckSession(mixerId),
+            )
+        }
+    } == true
+
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val toolbarLayout = computeToolbarLayout(
+            barWidth = maxWidth,
+            appMode = session?.appMode,
+            showRecordingStorageInfoButton = state.showRecordingStorageInfoButton,
+        )
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            drawerContent = {
+                DawNavigationDrawer(
+                    drawerState = drawerState,
+                    layout = toolbarLayout,
+                    appMode = session?.appMode,
+                    session = session,
+                    isRemoteClient = isRemoteClient,
+                    isRemoteHost = isRemoteHost,
+                    remoteConnectedClientCount = state.remoteConnectedClientCount,
+                    remoteConnectionState = state.remoteConnectionState,
+                    showOpenSessionHint = showOpenSessionHint,
+                    showRecordingStorageInfoButton = state.showRecordingStorageInfoButton,
+                    mixerSettingsEnabled = activeId != null,
+                    onOpenMixerSettings = { activeId?.let(onOpenMixerSettings) },
+                    onSetAppMode = { mode -> activeId?.let { id -> onSetAppMode(id, mode) } },
+                    onOpenSessionPicker = onOpenSessionPicker,
+                    onOpenRemoteControl = onOpenRemoteControl,
+                    onOpenSettings = onOpenSettings,
+                    onShowStorageInfo = { storageInfoDialogOpen = true },
+                    onOpenLog = onOpenLog,
+                )
+            },
+        ) {
+            Scaffold(
+                topBar = {
+                    Column {
+                        DawTopBar(
+                            layout = toolbarLayout,
+                            activeMixerName = activeProfile?.displayName,
+                            appMode = session?.appMode,
+                            session = session,
+                            showMixerCluster = state.mixers.isNotEmpty(),
+                            isRemoteClient = isRemoteClient,
+                            remoteHostLabel = state.remoteHostName ?: state.remoteConnectedHost,
+                            remoteConnectedClientCount = state.remoteConnectedClientCount,
+                            isRemoteHost = isRemoteHost,
+                            remoteConnectionState = state.remoteConnectionState,
+                            showOpenSessionHint = showOpenSessionHint,
+                            onExitRemoteMode = onExitRemoteMode,
+                            onOpenMixerPicker = onOpenMixerPicker,
+                            onOpenMixerSettings = { activeId?.let(onOpenMixerSettings) },
+                            onSetAppMode = { mode ->
+                                activeId?.let { id -> onSetAppMode(id, mode) }
+                            },
+                            onStartRecord = { activeId?.let(onStartRecord) },
+                            onStopRecord = { activeId?.let(onStopRecord) },
+                            onToggleSoundcheckPlayback = { activeId?.let(onToggleSoundcheckPlayback) },
+                            onStopSoundcheck = { activeId?.let(onStopSoundcheck) },
+                            onToggleSoundcheckLoop = { activeId?.let(onToggleSoundcheckLoop) },
+                            onSetSoundcheckLoopIn = { activeId?.let(onSetSoundcheckLoopIn) },
+                            onSetSoundcheckLoopOut = { activeId?.let(onSetSoundcheckLoopOut) },
+                            showRecordingStorageInfoButton = state.showRecordingStorageInfoButton,
+                            onShowStorageInfo = { storageInfoDialogOpen = true },
+                            onOpenSessionPicker = onOpenSessionPicker,
+                            onOpenSettings = onOpenSettings,
+                            onOpenRemoteControl = onOpenRemoteControl,
+                            onOpenMenu = { drawerScope.launch { drawerState.open() } },
                         )
                     }
-                } == true,
-                mixerSettingsEnabled = activeId != null,
-                onOpenMixerSettings = { activeId?.let(onOpenMixerSettings) },
-                onSetAppMode = { mode -> activeId?.let { id -> onSetAppMode(id, mode) } },
-                onOpenSessionPicker = onOpenSessionPicker,
-                onOpenRemoteControl = onOpenRemoteControl,
-                onOpenSettings = onOpenSettings,
-                onOpenLog = onOpenLog,
-            )
-        },
-    ) {
-        Scaffold(
-            topBar = {
-                Column {
-                    DawTopBar(
-                        activeMixerName = activeProfile?.displayName,
-                        appMode = session?.appMode,
-                        session = session,
-                        showMixerCluster = state.mixers.isNotEmpty(),
-                        isRemoteClient = isRemoteClient,
-                        remoteHostLabel = state.remoteHostName ?: state.remoteConnectedHost,
-                        remoteConnectedClientCount = state.remoteConnectedClientCount,
-                        isRemoteHost = isRemoteHost,
-                        onExitRemoteMode = onExitRemoteMode,
-                        onOpenMixerPicker = onOpenMixerPicker,
-                        onStartRecord = { activeId?.let(onStartRecord) },
-                        onStopRecord = { activeId?.let(onStopRecord) },
-                        onToggleSoundcheckPlayback = { activeId?.let(onToggleSoundcheckPlayback) },
-                        onStopSoundcheck = { activeId?.let(onStopSoundcheck) },
-                        onToggleSoundcheckLoop = { activeId?.let(onToggleSoundcheckLoop) },
-                        onSetSoundcheckLoopIn = { activeId?.let(onSetSoundcheckLoopIn) },
-                        onSetSoundcheckLoopOut = { activeId?.let(onSetSoundcheckLoopOut) },
-                        showRecordingStorageInfoButton = state.showRecordingStorageInfoButton,
-                        onShowStorageInfo = { storageInfoDialogOpen = true },
-                        onOpenMenu = { drawerScope.launch { drawerState.open() } },
-                    )
-                }
-            },
-        ) { padding ->
+                },
+            ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -528,6 +549,7 @@ fun DawMainScreen(
                 onDismiss = onDismissStatusToast,
             )
         }
+            }
         }
     }
 
