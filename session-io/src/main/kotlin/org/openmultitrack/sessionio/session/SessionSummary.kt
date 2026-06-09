@@ -43,10 +43,6 @@ object SessionLibrary {
             ?: emptyList()
     }
 
-    private fun durationFrames(dir: File, meta: SessionMetadata): Long {
-        if (meta.timelineFramesWritten > 0) return meta.timelineFramesWritten
-        return meta.channels.minOfOrNull { ch ->
-            org.openmultitrack.sessionio.wav.PerChannelWavWriter.framesOnDisk(File(dir, ch.fileName))
-        } ?: 0L
-    }
+    private fun durationFrames(dir: File, meta: SessionMetadata): Long =
+        SessionPlaybackDuration.durationFrames(dir, meta)
 }

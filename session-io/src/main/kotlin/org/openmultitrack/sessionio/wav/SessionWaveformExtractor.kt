@@ -1,6 +1,7 @@
 package org.openmultitrack.sessionio.wav
 
 import org.openmultitrack.sessionio.session.SessionMetadata
+import org.openmultitrack.sessionio.session.SessionPlaybackDuration
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
@@ -64,11 +65,8 @@ object SessionWaveformExtractor {
         )
     }
 
-    fun durationSec(sessionDir: File, metadata: SessionMetadata): Float {
-        val resolved = metadata.withResolvedChannels(sessionDir)
-        val sampleRate = resolved.sampleRate.coerceAtLeast(1)
-        return durationFrames(sessionDir, resolved).toFloat() / sampleRate
-    }
+    fun durationSec(sessionDir: File, metadata: SessionMetadata): Float =
+        SessionPlaybackDuration.durationSec(sessionDir, metadata)
 
     private data class ExtractionPlan(
         val channels: List<org.openmultitrack.sessionio.session.ChannelMetadata>,
@@ -95,12 +93,8 @@ object SessionWaveformExtractor {
         )
     }
 
-    private fun durationFrames(sessionDir: File, metadata: SessionMetadata): Long {
-        if (metadata.timelineFramesWritten > 0) return metadata.timelineFramesWritten
-        return metadata.channels.minOfOrNull { ch ->
-            PerChannelWavWriter.framesOnDisk(File(sessionDir, ch.fileName))
-        } ?: 0L
-    }
+    private fun durationFrames(sessionDir: File, metadata: SessionMetadata): Long =
+        SessionPlaybackDuration.durationFrames(sessionDir, metadata)
 
     /** Sparse sampling: one short read per peak bucket instead of scanning the whole file. */
     private fun extractChannelPeaks(file: File, peakCount: Int): FloatArray {

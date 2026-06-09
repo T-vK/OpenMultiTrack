@@ -4,6 +4,7 @@ import android.content.Context
 import android.hardware.usb.UsbDevice
 import android.os.Build
 import android.os.PowerManager
+import android.os.StatFs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -36,6 +37,7 @@ import org.openmultitrack.domain.session.isPlaybackMode
 import org.openmultitrack.domain.session.TransportState
 import org.openmultitrack.sessionio.session.SessionLibrary
 import org.openmultitrack.sessionio.session.SessionMetadata
+import org.openmultitrack.sessionio.session.SessionPlaybackDuration
 import org.openmultitrack.sessionio.wav.SessionWaveformCache
 import org.openmultitrack.sessionio.wav.SessionWaveformExtractor
 import org.openmultitrack.sessionio.wav.SessionWaveformOverview
@@ -82,6 +84,8 @@ data class MixerSessionUiState(
     val captureChannelCount: Int = 0,
     val playbackChannelCount: Int = 0,
     val recordElapsedSec: Float = 0f,
+    val storageFreeBytes: Long = 0L,
+    val storageRecordEstimateSec: Float = 0f,
     val waveformPeaks: Map<Int, LiveWaveformSnapshot> = emptyMap(),
     val captureMeterLevels: Map<Int, Float> = emptyMap(),
     val soundcheckSessions: List<SoundcheckSessionItem> = emptyList(),
@@ -188,6 +192,7 @@ class MixerSessionController(
             )
         }
         syncVuMeterCapture()
+        refreshStorageEstimate()
     }
 
     fun setProbing(probing: Boolean) {
@@ -200,6 +205,7 @@ class MixerSessionController(
         }
         if (mode == AppMode.MULTITRACK_RECORD) {
             stopSoundcheck()
+            refreshStorageEstimate()
         }
         _state.update { it.copy(appMode = mode) }
         if (mode.isPlaybackMode) {
@@ -254,7 +260,7 @@ class MixerSessionController(
                 SessionMetadata.read(dir)?.withResolvedChannels(dir)
             } ?: return@launch
             val durationSec = item?.durationSec?.takeIf { it > 0f }
-                ?: withContext(Dispatchers.IO) { SessionWaveformExtractor.durationSec(dir, metadata) }
+                ?: withContext(Dispatchers.IO) { SessionPlaybackDuration.durationSec(dir, metadata) }
             prepareSoundcheckSessionUi(sessionDir, metadata, durationSec)
             loadSoundcheckWaveformsBackground(dir, metadata)
         }
@@ -927,10 +933,16 @@ class MixerSessionController(
                         delay(50)
                         continue
                     }
+                    val finalPos = if (sampleRate > 0) {
+                        player.status.positionFrames.toFloat() / sampleRate
+                    } else {
+                        _state.value.playbackPositionSec
+                    }
                     _state.update {
                         it.copy(
                             isPlaying = false,
                             transportState = TransportState.IDLE,
+                            playbackPositionSec = finalPos,
                             soundcheckMeterLevels = emptyMap(),
                         )
                     }
@@ -991,13 +1003,27 @@ class MixerSessionController(
     }
 
     private fun loadSoundcheckWaveforms(sessionDir: String) {
+        val current = _state.value
+        if (current.selectedSoundcheckDir == sessionDir && current.isPlaying) {
+            soundcheckWaveformJob?.cancel()
+            soundcheckWaveformJob = scope.launch {
+                val dir = File(sessionDir)
+                val metadata = withContext(Dispatchers.IO) {
+                    SessionMetadata.read(dir)?.withResolvedChannels(dir)
+                } ?: return@launch
+                loadSoundcheckWaveformsBackground(dir, metadata)
+            }
+            return
+        }
         soundcheckWaveformJob?.cancel()
         soundcheckWaveformJob = scope.launch {
             val dir = File(sessionDir)
             val metadata = withContext(Dispatchers.IO) {
                 SessionMetadata.read(dir)?.withResolvedChannels(dir)
             } ?: return@launch
-            val durationSec = withContext(Dispatchers.IO) { SessionWaveformExtractor.durationSec(dir, metadata) }
+            val durationSec = withContext(Dispatchers.IO) {
+                SessionPlaybackDuration.durationSec(dir, metadata)
+            }
             prepareSoundcheckSessionUi(sessionDir, metadata, durationSec)
             loadSoundcheckWaveformsBackground(dir, metadata)
         }
@@ -1098,11 +1124,34 @@ class MixerSessionController(
         playbackStatusJob = null
     }
 
+    private fun refreshStorageEstimate() {
+        val root = storageRoot
+        if (!root.isDirectory) return
+        val freeBytes = runCatching {
+            StatFs(root.absolutePath).availableBytes
+        }.getOrDefault(0L)
+        val armed = _state.value.channelStrips.count { it.armed }.coerceAtLeast(1)
+        val sampleRate = (_state.value.probe?.input?.sampleRate ?: 48_000).coerceAtLeast(1)
+        val bytesPerSec = sampleRate.toLong() * 3L * armed
+        val estimateSec = if (bytesPerSec > 0) freeBytes.toFloat() / bytesPerSec else 0f
+        _state.update {
+            it.copy(
+                storageFreeBytes = freeBytes,
+                storageRecordEstimateSec = estimateSec,
+            )
+        }
+    }
+
     private fun startCaptureUiUpdates() {
         waveformJob?.cancel()
+        refreshStorageEstimate()
         waveformJob = scope.launch {
+            var storageTick = 0
             while (isActive) {
                 if (captureEngine.isCaptureActive) {
+                    if (storageTick++ % 25 == 0) {
+                        refreshStorageEstimate()
+                    }
                     val levels = captureEngine.captureMeterLevels()
                     val nowNs = System.nanoTime()
                     if (nowNs - lastVuLogNs >= 2_000_000_000L) {

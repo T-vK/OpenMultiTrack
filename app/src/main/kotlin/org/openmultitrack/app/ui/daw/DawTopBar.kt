@@ -237,23 +237,29 @@ private fun RecordTransportCluster(
     val isRecording = session?.isRecording == true
     val hostReady = session?.probe != null || (isRemoteClient && session?.captureChannelCount?.let { it > 0 } == true)
     val canRecord = hostReady && !isRecording
-    TransportButtonCluster {
-        TransportIconButton(
-            onClick = onStartRecord,
-            enabled = canRecord,
-            icon = Icons.Default.FiberManualRecord,
-            contentDescription = "Record",
-            tint = RecordRed,
-        )
-        clusterDivider()
-        TransportIconButton(
-            onClick = onStopRecord,
-            enabled = isRecording,
-            icon = Icons.Default.Stop,
-            contentDescription = "Stop recording",
-            tint = if (isRecording) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
-            background = if (isRecording) RecordRed else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-        )
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RecordingTimeReadout(session = session, isRecording = isRecording)
+        TransportButtonCluster {
+            TransportIconButton(
+                onClick = onStartRecord,
+                enabled = canRecord,
+                icon = Icons.Default.FiberManualRecord,
+                contentDescription = "Record",
+                tint = RecordRed,
+            )
+            clusterDivider()
+            TransportIconButton(
+                onClick = onStopRecord,
+                enabled = isRecording,
+                icon = Icons.Default.Stop,
+                contentDescription = "Stop recording",
+                tint = if (isRecording) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                background = if (isRecording) RecordRed else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+            )
+        }
     }
 }
 
@@ -272,7 +278,12 @@ private fun PlaybackTransportCluster(
         (isRemoteClient && session?.captureChannelCount?.let { it > 0 } == true)
     val hasSession = session?.selectedSoundcheckDir != null && hostReady
     val canStop = hasSession && (isPlaying || (session?.playbackPositionSec ?: 0f) > 0.05f)
-    TransportButtonCluster {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PlaybackTimeReadout(session = session, hasSession = hasSession)
+        TransportButtonCluster {
         TransportIconButton(
             onClick = onTogglePlayback,
             enabled = hasSession,
@@ -300,6 +311,73 @@ private fun PlaybackTransportCluster(
             onSetLoopOut = onSetLoopOut,
             onToggleLoop = onToggleLoop,
         )
+        }
+    }
+}
+
+@Composable
+private fun RecordingTimeReadout(
+    session: MixerSessionUiState?,
+    isRecording: Boolean,
+) {
+    val elapsed = session?.recordElapsedSec ?: 0f
+    val freeLabel = formatStorageBytes(session?.storageFreeBytes ?: 0L)
+    val remainingLabel = formatRecordRemainingEstimate(session?.storageRecordEstimateSec ?: 0f)
+    Surface(
+        shape = ToolbarShape,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        modifier = Modifier.height(ToolbarControlHeight),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = if (isRecording) formatTransportTime(elapsed) else "0:00",
+                style = MaterialTheme.typography.labelLarge,
+                color = if (isRecording) RecordRed else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+            )
+            Text(
+                text = "$freeLabel · $remainingLabel",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PlaybackTimeReadout(
+    session: MixerSessionUiState?,
+    hasSession: Boolean,
+) {
+    val position = session?.playbackPositionSec ?: 0f
+    val duration = session?.playbackDurationSec ?: 0f
+    Surface(
+        shape = ToolbarShape,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        modifier = Modifier.height(ToolbarControlHeight),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = if (hasSession) {
+                    "${formatTransportTime(position)} / ${formatTransportTime(duration)}"
+                } else {
+                    "0:00 / 0:00"
+                },
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+            )
+        }
     }
 }
 
