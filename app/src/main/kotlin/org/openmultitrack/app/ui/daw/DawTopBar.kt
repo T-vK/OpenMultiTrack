@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -65,9 +66,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.domain.remote.RemoteConnectionState
 import org.openmultitrack.domain.session.AppMode
@@ -160,7 +163,42 @@ private fun AppMode.toolbarIcon(): ImageVector = when (this) {
 private val RecordRed = Color(0xFFE53935)
 private val LoopAmber = Color(0xFFFFB300)
 
-private val RecordingStorageIcon: ImageVector = Icons.Default.SdCard
+@Composable
+private fun RecordingStorageGlyph(
+    tint: Color,
+    modifier: Modifier = Modifier,
+    iconSize: Dp = 20.dp,
+) {
+    val badgeSize = iconSize * 0.48f
+    Box(modifier = modifier.size(iconSize)) {
+        Icon(
+            imageVector = Icons.Default.SdCard,
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            tint = tint,
+        )
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .size(badgeSize),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
+            shadowElevation = 1.dp,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = "i",
+                    fontSize = (badgeSize.value * 0.62f).sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    lineHeight = (badgeSize.value * 0.62f).sp,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
 
 @Composable
 internal fun ToolbarChip(
@@ -535,9 +573,9 @@ private fun LoopTransportButton(
 @Composable
 private fun StandaloneToolbarIconButton(
     onClick: () -> Unit,
-    icon: ImageVector,
     contentDescription: String,
-    tint: Color,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
 ) {
     val border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
     Surface(
@@ -545,15 +583,10 @@ private fun StandaloneToolbarIconButton(
         shape = ToolbarShape,
         border = border,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        modifier = Modifier.size(ToolbarControlHeight),
+        modifier = modifier.size(ToolbarControlHeight),
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = icon,
-                contentDescription = contentDescription,
-                modifier = Modifier.size(20.dp),
-                tint = tint,
-            )
+            content()
         }
     }
 }
@@ -582,10 +615,10 @@ private fun RecordingStorageButton(
     ) {
         StandaloneToolbarIconButton(
             onClick = onShowStorageInfo,
-            icon = RecordingStorageIcon,
             contentDescription = "Recording storage and time remaining",
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        ) {
+            RecordingStorageGlyph(tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -898,7 +931,12 @@ internal fun DawNavigationDrawer(
         if (layout.showStorageInDrawer && showRecordingStorageInfoButton) {
             HorizontalDivider(modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp))
             NavigationDrawerItem(
-                icon = { Icon(RecordingStorageIcon, contentDescription = null) },
+                icon = {
+                    RecordingStorageGlyph(
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        iconSize = 24.dp,
+                    )
+                },
                 label = { Text("Storage info") },
                 selected = false,
                 onClick = { closeAnd(onShowStorageInfo) },
