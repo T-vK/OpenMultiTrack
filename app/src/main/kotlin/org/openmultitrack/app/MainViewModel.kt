@@ -507,13 +507,25 @@ class MainViewModel(
         return false
     }
 
-    fun refreshUsbAndOutputs(recordingSafe: Boolean = false) {
+    fun refreshUsbAndOutputs(recordingSafe: Boolean = false, scanAllUsb: Boolean = false) {
         viewModelScope.launch {
-            val usb = withContext(Dispatchers.IO) { enumerator.listUsbDevices() }
+            val profiles = mixerStore.listMixers()
+            val usb = withContext(Dispatchers.IO) {
+                if (scanAllUsb || profiles.isEmpty()) {
+                    enumerator.listUsbDevices()
+                } else {
+                    enumerator.listDevicesForProfiles(profiles)
+                }
+            }
             val outputs = withContext(Dispatchers.IO) {
                 AudioOutputDeviceLabel.labelAll(enumerator.listAudioOutputDevices())
             }
-            val addable = usb.filter { !mixerStore.isAlreadyAdded(it) }
+            val addable = if (scanAllUsb || _uiState.value.showAddMixerDialog) {
+                withContext(Dispatchers.IO) { enumerator.listUsbDevices() }
+                    .filter { !mixerStore.isAlreadyAdded(it) }
+            } else {
+                _uiState.value.addableUsbDevices
+            }
             _uiState.update {
                 it.copy(availableUsbDevices = usb, addableUsbDevices = addable, outputDevices = outputs)
             }
@@ -528,15 +540,31 @@ class MainViewModel(
                     mixerStore.listMixers().forEach { autoProbeMixer(it, mgr, usb) }
                 }
             }
-            if (!recordingSafe || !isAnyMixerRecording()) {
-                scheduleUsbRecoveryIfNeeded()
-            }
+            scheduleUsbRecoveryIfNeeded()
         }
     }
 
     fun showAddMixerDialog(show: Boolean) {
         _uiState.update { it.copy(showAddMixerDialog = show) }
-        if (show) refreshUsbAndOutputs()
+        if (show) refreshUsbAndOutputs(scanAllUsb = true)
+    }
+
+    fun isSavedMixerUsbDevice(device: android.hardware.usb.UsbDevice): Boolean {
+        val desc = org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor(
+            deviceName = device.deviceName,
+            vendorId = device.vendorId,
+            productId = device.productId,
+            manufacturerName = device.manufacturerName,
+            productName = device.productName,
+            serialNumber = null,
+            isLikelyBehringerMixer = org.openmultitrack.usb.BehringerUsbIdentifiers.isLikelyBehringerMixer(
+                device.vendorId,
+                device.productName,
+            ),
+            guessedModel = org.openmultitrack.usb.BehringerUsbIdentifiers.guessModel(device.productName),
+            androidAudioDeviceId = null,
+        )
+        return mixerStore.findMatchingMixer(desc) != null
     }
 
     fun addMixer(descriptor: UsbAudioDeviceDescriptor) {
@@ -1016,7 +1044,8 @@ class MainViewModel(
 
     fun onUsbDetached(deviceName: String?) {
         sessionClient.withManager { it.onUsbDetached(deviceName) }
-        refreshUsbAndOutputs()
+        refreshUsbAndOutputs(recordingSafe = isAnyMixerRecording())
+        scheduleUsbRecoveryIfNeeded()
     }
 
     fun onUsbAttached(device: UsbAudioDeviceDescriptor) {
@@ -1361,6 +1390,11 @@ class MainViewModel(
         usbDevices: List<UsbAudioDeviceDescriptor> = _uiState.value.availableUsbDevices,
     ) {
         if (manager.getOrCreate(profile.id).state.value.isRecording) {
+            val usb = resolveUsbDevice(profile, usbDevices)
+            if (usb != null && enumerator.hasUsbPermission(usb.deviceName)) {
+                OmtLog.i("ViewModel", "USB back while recording — reconnecting ${profile.displayName}")
+                manager.onUsbAttached(usb)
+            }
             refreshInterruptedRecording(profile.id, manager)
             return
         }
@@ -1399,11 +1433,26 @@ class MainViewModel(
                     resolvedProfile.id,
                 ) != null
             if (resumePending) {
-                AppLogBuffer.append(
-                    "I",
-                    "Record",
-                    "Interrupted recording detected for ${resolvedProfile.displayName} — tap Resume to continue",
+                val sessionDir = IncompleteRecordingStore.recoverableSession(
+                    appContext,
+                    settings,
+                    resolvedProfile.id,
                 )
+                if (sessionDir != null && RecordAudioPermissions.hasPermission(appContext)) {
+                    OmtLog.i("ViewModel", "Auto-resuming recording for ${resolvedProfile.displayName}")
+                    AppLogBuffer.append(
+                        "I",
+                        "Record",
+                        "Auto-resuming interrupted recording for ${resolvedProfile.displayName}",
+                    )
+                    resumeRecordingInternal(resolvedProfile.id, sessionDir)
+                } else {
+                    AppLogBuffer.append(
+                        "I",
+                        "Record",
+                        "Interrupted recording detected for ${resolvedProfile.displayName} — tap Resume to continue",
+                    )
+                }
             } else if (ScribbleImportSupport.supportsOsc(resolvedProfile)) {
                 onOscMixerReady(resolvedProfile.id)
             } else if (
@@ -1542,12 +1591,13 @@ class MainViewModel(
     }
 
     private fun scheduleUsbRecoveryIfNeeded() {
-        if (isAnyMixerRecording()) return
+        val recordingActive = isAnyMixerRecording()
         val needsRecovery = mixerStore.listMixers().any { profile ->
             val session = _uiState.value.sessionByMixer[profile.id]
             val stripsEmpty = session?.channelStrips.isNullOrEmpty()
             val usbMissing = resolveUsbDevice(profile, _uiState.value.availableUsbDevices) == null
-            stripsEmpty || usbMissing
+            val usbDegraded = session?.isUsbDegraded == true
+            stripsEmpty || usbMissing || (recordingActive && usbDegraded)
         }
         if (!needsRecovery) {
             usbRecoveryJob?.cancel()
@@ -1555,11 +1605,20 @@ class MainViewModel(
         }
         if (usbRecoveryJob?.isActive == true) return
         usbRecoveryJob = viewModelScope.launch {
-            repeat(10) { attempt ->
+            val attempts = if (recordingActive) 30 else 10
+            val delayMs = if (recordingActive) 1_000L else 2_000L
+            repeat(attempts) { attempt ->
                 if (!isActive) return@launch
-                delay(2_000)
-                OmtLog.i("ViewModel", "USB auto-recovery attempt ${attempt + 1}/10")
-                val usb = withContext(Dispatchers.IO) { enumerator.listUsbDevices() }
+                delay(delayMs)
+                OmtLog.i("ViewModel", "USB auto-recovery attempt ${attempt + 1}/$attempts")
+                val profiles = mixerStore.listMixers()
+                val usb = withContext(Dispatchers.IO) {
+                    if (recordingActive) {
+                        enumerator.listDevicesForProfiles(profiles)
+                    } else {
+                        enumerator.listUsbDevices()
+                    }
+                }
                 _uiState.update { it.copy(availableUsbDevices = usb) }
                 syncMixerUsbNames(usb)
                 sessionClient.withManager { mgr ->
@@ -1567,7 +1626,11 @@ class MainViewModel(
                 }
                 val recovered = mixerStore.listMixers().all { profile ->
                     val session = _uiState.value.sessionByMixer[profile.id]
-                    !session?.channelStrips.isNullOrEmpty()
+                    if (recordingActive) {
+                        session?.isUsbDegraded != true && !session?.channelStrips.isNullOrEmpty()
+                    } else {
+                        !session?.channelStrips.isNullOrEmpty()
+                    }
                 }
                 if (recovered) {
                     dismissStatusToast()

@@ -8,6 +8,7 @@ import android.media.AudioManager
 import android.os.Build
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
+import org.openmultitrack.domain.mixer.MixerProfile
 
 /**
  * Lists USB devices and correlates them with Android [AudioDeviceInfo] when possible.
@@ -90,13 +91,25 @@ class UsbAudioEnumerator(
         return usbManager.hasPermission(device)
     }
 
+    /** Lists only USB nodes that match saved mixer profiles (avoids touching unrelated USB gadgets). */
+    fun listDevicesForProfiles(profiles: List<MixerProfile>): List<UsbAudioDeviceDescriptor> {
+        if (profiles.isEmpty()) return emptyList()
+        val connected = usbManager.deviceList.values
+        return profiles.mapNotNull { profile ->
+            connected.firstOrNull { device -> profileMatchesDevice(profile, device) }
+                ?.let { toDescriptor(it) }
+        }.distinctBy { it.deviceName }.also { matches ->
+            OmtLog.d("Usb", "listDevicesForProfiles saved=${profiles.size} matched=${matches.size}")
+        }
+    }
+
     fun findMatchingDevice(
         vendorId: Int,
         productId: Int,
         serialNumber: String? = null,
         preferredDeviceName: String? = null,
     ): UsbAudioDeviceDescriptor? {
-        val devices = listUsbDevices()
+        val devices = usbManager.deviceList.values.map { toDescriptor(it) }
         preferredDeviceName?.let { name ->
             devices.firstOrNull { it.deviceName == name }?.let { return it }
         }
@@ -133,6 +146,22 @@ class UsbAudioEnumerator(
             OmtLog.w("Usb", "getRawConfigDescriptor: openDevice failed for $deviceName")
         }
         return null
+    }
+
+    private fun profileMatchesDevice(profile: MixerProfile, device: UsbDevice): Boolean {
+        if (profile.vendorId != device.vendorId || profile.productId != device.productId) {
+            return false
+        }
+        profile.usbDeviceName?.let { if (it == device.deviceName) return true }
+        val serial = if (usbManager.hasPermission(device)) {
+            runCatching { device.serialNumber }.getOrNull()
+        } else {
+            null
+        }
+        profile.serialNumber?.let { saved ->
+            if (serial != null) return saved == serial
+        }
+        return profile.serialNumber == null
     }
 
     private fun toDescriptor(device: UsbDevice): UsbAudioDeviceDescriptor {

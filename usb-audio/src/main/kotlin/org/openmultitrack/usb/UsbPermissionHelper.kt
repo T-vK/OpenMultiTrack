@@ -14,13 +14,18 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 object UsbPermissionHelper {
-    private const val ACTION_USB_PERMISSION = "org.openmultitrack.USB_PERMISSION"
+    fun permissionAction(packageName: String): String = "$packageName.USB_PERMISSION"
 
     /**
      * Ensures [UsbManager.hasPermission] is true, using [UsbManager.requestPermission] when needed.
      * On userdebug emulator builds, also tries the hidden grantDevicePermission service call.
      */
-    fun ensurePermission(context: Context, usbManager: UsbManager, device: UsbDevice): Boolean {
+    fun ensurePermission(
+        context: Context,
+        usbManager: UsbManager,
+        device: UsbDevice,
+        permissionAction: String = permissionAction(context.packageName),
+    ): Boolean {
         if (usbManager.hasPermission(device)) return true
 
         if (tryHiddenGrant(context, usbManager, device)) {
@@ -33,7 +38,7 @@ object UsbPermissionHelper {
 
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
-                if (intent.action != ACTION_USB_PERMISSION) return
+                if (intent.action != permissionAction) return
                 if (intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)?.deviceName
                     != device.deviceName
                 ) {
@@ -49,11 +54,11 @@ object UsbPermissionHelper {
         val pending = PendingIntent.getBroadcast(
             context,
             device.deviceId,
-            Intent(ACTION_USB_PERMISSION).setPackage(context.packageName),
+            Intent(permissionAction).setPackage(context.packageName),
             flags,
         )
 
-        val filter = IntentFilter(ACTION_USB_PERMISSION)
+        val filter = IntentFilter(permissionAction)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {

@@ -160,6 +160,9 @@ class CaptureSessionEngine(
         if (isCaptureActive && activeRoute?.backend == route.backend && !usbDegraded) {
             return Result.success(Unit)
         }
+        if (isRecording && (usbDegraded || isCaptureActive)) {
+            return reconnectCaptureLocked(scope, route, usbDevice)
+        }
         stopCaptureInternalLocked()
         activeBackend = route.backend
         activeRoute = route
@@ -354,6 +357,47 @@ class CaptureSessionEngine(
             monitor.enabled ||
             (virtualMic?.enabled == true) ||
             vuMeteringEnabled.get()
+    }
+
+    private suspend fun reconnectCaptureLocked(
+        scope: CoroutineScope,
+        route: CaptureRoute,
+        usbDevice: UsbDevice?,
+    ): Result<Unit> {
+        OmtLog.i(
+            "CaptureSession",
+            "reconnectCapture while recording=$isRecording degraded=$usbDegraded backend=${route.backend}",
+        )
+        fanoutJob?.cancelAndJoin()
+        fanoutJob = null
+        val oldBackend = activeBackend
+        if (oldBackend != null) {
+            AudioEngineRouter.stopRecording(oldBackend, ownerId)
+        }
+        activeBackend = route.backend
+        activeRoute = route
+        val status = AudioEngineRouter.startRecording(route, ownerId, usbDevice)
+        if (!status.active) {
+            activeBackend = oldBackend
+            activeRoute = null
+            usbDegraded = true
+            return Result.failure(IllegalStateException(status.errorMessage ?: "USB reconnect failed"))
+        }
+        if (status.channelCount > 0 && channelCount > 0 && status.channelCount != channelCount) {
+            OmtLog.w(
+                "CaptureSession",
+                "USB reconnect channel count changed $channelCount → ${status.channelCount}",
+            )
+        }
+        if (status.channelCount > 0) {
+            channelCount = status.channelCount
+        }
+        if (status.sampleRate > 0) {
+            sampleRate = status.sampleRate
+        }
+        usbDegraded = false
+        startFanoutLoop(scope, route.backend)
+        return Result.success(Unit)
     }
 
     private suspend fun stopCaptureInternalLocked() {

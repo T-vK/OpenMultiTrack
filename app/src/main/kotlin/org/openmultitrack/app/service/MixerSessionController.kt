@@ -850,11 +850,30 @@ class MixerSessionController(
         activeDescriptor = descriptor
         scope.launch {
             val probe = activeProbe
-            if (probe == null) return@launch
-            captureMutex.withLock {
+            if (probe == null) {
+                OmtLog.w("MixerSession", "USB attached but no cached probe for $mixerId — re-probe required")
+                _state.update {
+                    it.copy(
+                        usbDescriptor = descriptor,
+                        statusMessage = "USB reconnected — probing mixer…",
+                    )
+                }
+                return@launch
+            }
+            val reconnectResult = captureMutex.withLock {
                 withContext(Dispatchers.IO) {
                     runCatching { ensureCapture(descriptor, probe) }
                 }
+            }
+            reconnectResult.onFailure { e ->
+                OmtLog.e("MixerSession", "USB reconnect capture failed for $mixerId", e)
+                _state.update {
+                    it.copy(
+                        warningMessage = "USB reconnected but audio failed: ${e.message}",
+                        statusMessage = "Retrying USB audio…",
+                    )
+                }
+                return@launch
             }
             captureEngine.setUsbDegraded(false)
             _state.update {
@@ -862,11 +881,16 @@ class MixerSessionController(
                     isUsbDegraded = false,
                     warningMessage = null,
                     usbDescriptor = descriptor,
-                    transportState = if (it.isRecording) TransportState.RECORDING else it.transportState,
-                    statusMessage = "USB reconnected",
+                    transportState = when {
+                        it.isRecording -> TransportState.RECORDING
+                        it.transportState == TransportState.RECORDING_DEGRADED -> TransportState.RECORDING
+                        else -> it.transportState
+                    },
+                    statusMessage = if (it.isRecording) "USB reconnected — recording resumed" else "USB reconnected",
                 )
             }
             if (_state.value.isMonitoring) applyMonitorRouting(enabled = true)
+            startCaptureUiUpdates()
         }
     }
 
@@ -1210,11 +1234,13 @@ class MixerSessionController(
             return Result.success(count)
         }
         if (captureEngine.isCaptureActive && !captureEngine.isNativeCaptureOwner()) {
-            if (_state.value.isRecording) {
+            if (_state.value.isRecording && !captureEngine.isUsbDegraded) {
                 OmtLog.e("MixerSession", "Refusing capture handoff while recording ($mixerId)")
                 return Result.failure(IllegalStateException("USB capture busy while recording"))
             }
-            withContext(Dispatchers.IO) { captureEngine.stopCapture() }
+            if (!_state.value.isRecording) {
+                withContext(Dispatchers.IO) { captureEngine.stopCapture() }
+            }
         }
         val requested = channelCountFromProbe(probe)
         val device = enumerator.getUsbDevice(descriptor.deviceName)

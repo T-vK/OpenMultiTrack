@@ -105,6 +105,14 @@ class MainActivity : ComponentActivity() {
                 }
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
                     val attached = parseUsbDevice(intent) ?: return
+                    if (!viewModel.isSavedMixerUsbDevice(attached)) {
+                        OmtLog.d(
+                            "Activity",
+                            "Ignoring USB attach for non-saved device: ${attached.productName} " +
+                                "vid=${attached.vendorId} pid=${attached.productId}",
+                        )
+                        return
+                    }
                     val desc = toDescriptor(attached)
                     viewModel.onUsbAttached(desc)
                     requestUsbPermission(attached)
@@ -321,6 +329,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleUsbIntent(intent: Intent?) {
         val device = parseUsbDevice(intent ?: return) ?: return
+        if (!viewModel.isSavedMixerUsbDevice(device)) return
         requestUsbPermission(device)
     }
 
@@ -397,7 +406,7 @@ class MainActivity : ComponentActivity() {
     private fun requestPermissionsForConnectedMixers() {
         val usbManager = getSystemService(USB_SERVICE) as UsbManager
         usbManager.deviceList.values
-            .filter { BehringerUsbIdentifiers.isLikelyBehringerMixer(it.vendorId, it.productName) }
+            .filter { viewModel.isSavedMixerUsbDevice(it) }
             .forEach { requestUsbPermission(it) }
     }
 
@@ -408,7 +417,12 @@ class MainActivity : ComponentActivity() {
             return
         }
         val permissionIntent = Intent(usbPermissionAction).setPackage(packageName)
-        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                PendingIntent.FLAG_MUTABLE
+            } else {
+                0
+            }
         val pi = PendingIntent.getBroadcast(this, device.deviceId, permissionIntent, flags)
         usbManager.requestPermission(device, pi)
     }
