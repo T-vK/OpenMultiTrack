@@ -5,6 +5,8 @@ data class RemoteDiscoveredHost(
     val host: String,
     val port: Int,
     val protocolVersion: Int,
+    val hostId: String? = null,
+    val isPaired: Boolean = false,
 )
 
 data class RemoteSettingsSnapshot(

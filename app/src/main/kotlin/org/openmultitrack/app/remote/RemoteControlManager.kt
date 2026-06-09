@@ -22,6 +22,8 @@ import org.openmultitrack.app.service.MultiMixerSessionManager
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.domain.remote.RemoteConnectionState
+import org.openmultitrack.domain.remote.RemotePairedHost
+import org.openmultitrack.domain.remote.RemotePairing
 import org.openmultitrack.domain.remote.RemoteProtocol
 import org.openmultitrack.domain.remote.RemoteRole
 import org.openmultitrack.remote.RemoteClient
@@ -39,6 +41,10 @@ data class RemoteControlUiState(
     val localHostIp: String? = null,
     val connectedHost: String? = null,
     val discoveredHosts: List<RemoteDiscoveredHost> = emptyList(),
+    val pairedHosts: List<RemotePairedHost> = emptyList(),
+    val hostDeviceId: String? = null,
+    val pairingPin: String? = null,
+    val pairingUri: String? = null,
     val errorMessage: String? = null,
     val mixers: List<MixerProfile> = emptyList(),
     val activeMixerId: String? = null,
@@ -87,38 +93,99 @@ class RemoteControlManager(
         }
     }
 
+    fun enterRemoteClientMode() {
+        if (_state.value.role == RemoteRole.CLIENT && isRemoteClientConnected()) return
+        applyRole(RemoteRole.CLIENT)
+        refreshPairingState()
+        discoverHosts()
+    }
+
     fun discoverHosts() {
         if (_state.value.role != RemoteRole.CLIENT) return
         scope.launch {
             _state.update { it.copy(connectionState = RemoteConnectionState.DISCOVERING, errorMessage = null) }
-            val hosts = RemoteDiscovery.discoverHosts(appContext)
+            val pairedIds = settings.listPairedRemoteHosts().map { it.hostId }.toSet()
+            val hosts = RemoteDiscovery.discoverHosts(appContext, pairedHostIds = pairedIds)
+                .sortedWith(compareByDescending<RemoteDiscoveredHost> { it.isPaired }.thenBy { it.name })
             _state.update {
                 it.copy(
                     discoveredHosts = hosts,
-                    connectionState = if (hosts.isEmpty()) {
-                        RemoteConnectionState.DISCONNECTED
-                    } else {
-                        RemoteConnectionState.DISCONNECTED
-                    },
+                    pairedHosts = settings.listPairedRemoteHosts(),
+                    connectionState = RemoteConnectionState.DISCONNECTED,
                     errorMessage = if (hosts.isEmpty()) "No hosts found on LAN" else null,
                 )
             }
+            hosts.firstOrNull { it.isPaired }?.let { connectToHost(it) }
         }
     }
 
     fun connectToHost(host: RemoteDiscoveredHost) {
         if (_state.value.role != RemoteRole.CLIENT) return
+        val pin = host.hostId?.let { settings.pinForPairedHost(it) } ?: settings.remoteAuthToken
+        connectToAddress(host.host, host.port, host.name, host.hostId, pin)
+    }
+
+    fun connectManual(host: String, pin: String, port: Int = RemoteProtocol.HTTP_PORT) {
+        if (_state.value.role != RemoteRole.CLIENT) enterRemoteClientMode()
+        connectToAddress(host.trim(), port, host.trim(), hostId = null, pin = pin.trim())
+    }
+
+    fun pairFromQr(uri: String) {
+        val payload = RemotePairing.parsePairingUri(uri) ?: run {
+            _state.update { it.copy(errorMessage = "Invalid pairing QR code") }
+            return
+        }
+        settings.savePairedRemoteHost(
+            RemotePairedHost(
+                hostId = payload.hostId,
+                displayName = payload.name,
+                pin = payload.pin,
+            ),
+        )
+        refreshPairingState()
+        if (_state.value.role != RemoteRole.CLIENT) enterRemoteClientMode()
+        payload.host?.let { host ->
+            connectToAddress(host, payload.port, payload.name, payload.hostId, payload.pin)
+        } ?: run {
+            discoverHosts()
+        }
+    }
+
+    fun refreshPairingState() {
+        val hostId = settings.remoteHostDeviceId
+        val pin = settings.remotePairingPin
+        val name = Build.MODEL.ifBlank { "OpenMultiTrack" }
+        _state.update {
+            it.copy(
+                hostDeviceId = hostId,
+                pairingPin = pin,
+                pairingUri = RemotePairing.buildPairingUri(hostId, pin, name),
+                pairedHosts = settings.listPairedRemoteHosts(),
+            )
+        }
+    }
+
+    private fun connectToAddress(
+        host: String,
+        port: Int,
+        name: String,
+        hostId: String?,
+        pin: String?,
+    ) {
         stopClient()
         _state.update {
             it.copy(
                 connectionState = RemoteConnectionState.CONNECTING,
-                hostName = host.name,
-                connectedHost = host.host,
+                hostName = name,
+                connectedHost = host,
                 errorMessage = null,
             )
         }
         client = RemoteClient(listener = clientListener).also {
-            it.connect(host.host, host.port, settings.remoteAuthToken)
+            it.connect(host, port, pin)
+        }
+        if (hostId != null && !pin.isNullOrBlank()) {
+            settings.savePairedRemoteHost(RemotePairedHost(hostId, name, pin))
         }
     }
 
@@ -164,8 +231,15 @@ class RemoteControlManager(
     private fun startHost() {
         val hostName = Build.MODEL.ifBlank { "OpenMultiTrack" }
         val localIp = RemoteDiscovery.localIpv4(appContext)
-        val authToken = settings.remoteAuthToken
-        val server = RemoteHostServer(authToken = authToken, listener = hostListener)
+        val hostId = settings.remoteHostDeviceId
+        val pin = settings.remotePairingPin
+        settings.remoteAuthToken = pin
+        val server = RemoteHostServer(
+            authToken = pin,
+            hostId = hostId,
+            hostName = hostName,
+            listener = hostListener,
+        )
         runCatching {
             server.start(NanoTimeoutMs, false)
         }.onFailure { e ->
@@ -180,13 +254,16 @@ class RemoteControlManager(
             return
         }
         hostServer = server
-        announcer = RemoteDiscovery.HostAnnouncer(appContext, hostName).also { it.start() }
+        announcer = RemoteDiscovery.HostAnnouncer(appContext, hostName, hostId).also { it.start() }
         _state.update {
             it.copy(
                 role = RemoteRole.HOST,
                 connectionState = RemoteConnectionState.CONNECTED,
                 hostName = hostName,
                 localHostIp = localIp,
+                hostDeviceId = hostId,
+                pairingPin = pin,
+                pairingUri = RemotePairing.buildPairingUri(hostId, pin, hostName),
             )
         }
         startHostSyncLoop()

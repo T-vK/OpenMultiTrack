@@ -10,6 +10,8 @@ import java.util.concurrent.CopyOnWriteArraySet
 class RemoteHostServer(
     port: Int = RemoteProtocol.HTTP_PORT,
     private val authToken: String?,
+    private val hostId: String? = null,
+    private val hostName: String? = null,
     private val listener: Listener,
 ) : NanoWSD(port) {
     interface Listener {
@@ -22,10 +24,16 @@ class RemoteHostServer(
 
     override fun serve(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
         if (session.uri == "/api/v1/status" && session.method == NanoHTTPD.Method.GET) {
+            val body = JSONObject().apply {
+                put("ok", true)
+                put("protocolVersion", RemoteProtocol.VERSION)
+                hostId?.let { put("hostId", it) }
+                hostName?.let { put("name", it) }
+            }.toString()
             return NanoHTTPD.newFixedLengthResponse(
                 NanoHTTPD.Response.Status.OK,
                 "application/json",
-                """{"ok":true,"protocolVersion":${RemoteProtocol.VERSION}}""",
+                body,
             )
         }
         return super.serve(session)

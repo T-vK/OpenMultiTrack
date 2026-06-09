@@ -21,6 +21,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.data.MixerDeviceStore
+import org.openmultitrack.app.data.MixerRoutingStore
 import org.openmultitrack.app.data.ScribbleStripCache
 import org.openmultitrack.app.service.AudioSessionClient
 import org.openmultitrack.app.service.MixerSessionUiState
@@ -38,7 +39,9 @@ import org.openmultitrack.app.data.StripNumberMode
 import org.openmultitrack.app.audio.RecordAudioPermissions
 import org.openmultitrack.app.scribble.Flow8BlePermissions
 import org.openmultitrack.app.ui.daw.StatusToast
+import org.openmultitrack.domain.mixer.MixerRoutingConfig
 import org.openmultitrack.domain.remote.RemoteConnectionState
+import org.openmultitrack.domain.remote.RemotePairedHost
 import org.openmultitrack.domain.remote.RemoteRole
 import org.openmultitrack.remote.RemoteDiscoveredHost
 import org.json.JSONObject
@@ -73,6 +76,10 @@ data class DawUiState(
     val availableUsbDevices: List<UsbAudioDeviceDescriptor> = emptyList(),
     val addableUsbDevices: List<UsbAudioDeviceDescriptor> = emptyList(),
     val showAddMixerDialog: Boolean = false,
+    val showMixerPicker: Boolean = false,
+    val mixerSettingsMixerId: String? = null,
+    val showRemoteControlSheet: Boolean = false,
+    val mixerRoutingById: Map<String, MixerRoutingConfig> = emptyMap(),
     val showSettings: Boolean = false,
     val showLogViewer: Boolean = false,
     val flow8PairingDialog: Flow8PairingDialogState? = null,
@@ -92,6 +99,10 @@ data class DawUiState(
     val remoteConnectedHost: String? = null,
     val remoteLocalIp: String? = null,
     val remoteDiscoveredHosts: List<RemoteDiscoveredHost> = emptyList(),
+    val remotePairedHosts: List<RemotePairedHost> = emptyList(),
+    val remotePairingUri: String? = null,
+    val remotePairingPin: String? = null,
+    val remoteHostDeviceId: String? = null,
     val remoteError: String? = null,
 )
 
@@ -102,6 +113,7 @@ class MainViewModel(
     private val mixerStore: MixerDeviceStore,
     private val scribbleStripCache: ScribbleStripCache,
     private val settings: AppSettingsStore,
+    private val routingStore: MixerRoutingStore,
     private val sessionClient: AudioSessionClient,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(
@@ -171,6 +183,7 @@ class MainViewModel(
     private fun attachRemoteControl() {
         val remote = sessionClient.getRemoteControl() ?: return
         remote.applyRole(settings.remoteRole)
+        remote.refreshPairingState()
         viewModelScope.launch {
             remote.state.collect { remoteState -> applyRemoteState(remoteState) }
         }
@@ -185,6 +198,10 @@ class MainViewModel(
                 remoteConnectedHost = remoteState.connectedHost,
                 remoteLocalIp = remoteState.localHostIp,
                 remoteDiscoveredHosts = remoteState.discoveredHosts,
+                remotePairedHosts = remoteState.pairedHosts,
+                remotePairingUri = remoteState.pairingUri,
+                remotePairingPin = remoteState.pairingPin,
+                remoteHostDeviceId = remoteState.hostDeviceId,
                 remoteError = remoteState.errorMessage,
             )
             if (remoteState.role == RemoteRole.CLIENT &&
@@ -232,6 +249,85 @@ class MainViewModel(
     fun disconnectRemote() {
         sessionClient.withRemoteControl { it.disconnect() }
     }
+
+    fun showMixerPicker(show: Boolean) {
+        _uiState.update { it.copy(showMixerPicker = show) }
+    }
+
+    fun showMixerSettings(mixerId: String?) {
+        _uiState.update { it.copy(mixerSettingsMixerId = mixerId) }
+    }
+
+    fun showRemoteControlSheet(show: Boolean) {
+        if (show) {
+            sessionClient.withRemoteControl { it.refreshPairingState() }
+        }
+        _uiState.update { it.copy(showRemoteControlSheet = show) }
+    }
+
+    fun enterRemoteClientMode() {
+        sessionClient.withRemoteControl { it.enterRemoteClientMode() }
+        _uiState.update { it.copy(showRemoteControlSheet = true) }
+    }
+
+    fun enableRemoteHosting() {
+        sessionClient.withRemoteControl {
+            it.applyRole(RemoteRole.HOST)
+            it.refreshPairingState()
+        }
+    }
+
+    fun pairRemoteFromQr(uri: String) {
+        sessionClient.withRemoteControl { it.pairFromQr(uri) }
+    }
+
+    fun connectRemoteManual(host: String, pin: String) {
+        sessionClient.withRemoteControl { it.connectManual(host, pin) }
+    }
+
+    fun saveMixerRouting(mixerId: String, config: MixerRoutingConfig) {
+        routingStore.save(mixerId, config)
+        _uiState.update { it.copy(mixerRoutingById = routingStore.loadAll()) }
+    }
+
+    fun updateChannelInputSource(mixerId: String, logicalIndex: Int, usbIndex: Int) {
+        val updated = routingStore.get(mixerId).copy(
+            inputMap = routingStore.get(mixerId).inputMap + (logicalIndex to usbIndex),
+        )
+        saveMixerRouting(mixerId, updated)
+    }
+
+    fun updateChannelOutputTarget(mixerId: String, logicalIndex: Int, usbIndex: Int) {
+        val updated = routingStore.get(mixerId).copy(
+            outputMap = routingStore.get(mixerId).outputMap + (logicalIndex to usbIndex),
+        )
+        saveMixerRouting(mixerId, updated)
+    }
+
+    fun setChannelHidden(mixerId: String, logicalIndex: Int, soundcheckMode: Boolean, hidden: Boolean) {
+        val current = routingStore.get(mixerId)
+        val updated = if (soundcheckMode) {
+            current.copy(
+                hiddenSoundcheck = if (hidden) {
+                    current.hiddenSoundcheck + logicalIndex
+                } else {
+                    current.hiddenSoundcheck - logicalIndex
+                },
+            )
+        } else {
+            current.copy(
+                hiddenRecord = if (hidden) {
+                    current.hiddenRecord + logicalIndex
+                } else {
+                    current.hiddenRecord - logicalIndex
+                },
+            )
+        }
+        saveMixerRouting(mixerId, updated)
+    }
+
+    fun routingFor(mixerId: String): MixerRoutingConfig =
+        _uiState.value.mixerRoutingById[mixerId] ?: MixerRoutingConfig()
 
     fun onAppResumed() {
         refreshUsbAndOutputs()
@@ -372,6 +468,7 @@ class MainViewModel(
     fun removeMixer(id: String) {
         val removed = _uiState.value.mixers.firstOrNull { it.id == id } ?: return
         mixerStore.removeMixer(id)
+        routingStore.remove(id)
         settings.clearAppModeForMixer(id)
         scribbleStripCache.delete(id)
         observedMixerIds.remove(id)
@@ -969,7 +1066,13 @@ class MainViewModel(
         val lastActive = settings.lastActiveMixerId
         val activeId = lastActive?.takeIf { id -> mixers.any { it.id == id } }
             ?: mixers.firstOrNull()?.id
-        _uiState.update { it.copy(mixers = mixers, activeMixerId = activeId) }
+        _uiState.update {
+            it.copy(
+                mixers = mixers,
+                activeMixerId = activeId,
+                mixerRoutingById = routingStore.loadAll(),
+            )
+        }
     }
 
     /**
@@ -1269,6 +1372,7 @@ class MainViewModel(
                         MixerDeviceStore(appContext),
                         ScribbleStripCache(appContext),
                         AppSettingsStore(appContext),
+                        MixerRoutingStore(appContext),
                         AudioSessionClient(appContext),
                     ) as T
                 }

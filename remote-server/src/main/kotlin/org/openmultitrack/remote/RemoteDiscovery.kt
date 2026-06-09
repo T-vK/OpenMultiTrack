@@ -28,9 +28,10 @@ object RemoteDiscovery {
   suspend fun discoverHosts(
     context: Context,
     timeoutMs: Long = 3000,
+    pairedHostIds: Set<String> = emptySet(),
   ): List<RemoteDiscoveredHost> = withContext(Dispatchers.IO) {
     withMulticastLock(context) {
-      val found = linkedMapOf<String, RemoteDiscoveredHost>()
+      val found = linkedMapOf<String, RemoteDiscoveredHost>() // key = hostId or ip
       DatagramSocket().use { socket ->
         socket.broadcast = true
         socket.soTimeout = 200
@@ -54,8 +55,13 @@ object RemoteDiscovery {
             val packet = DatagramPacket(buf, buf.size)
             socket.receive(packet)
             val sourceIp = (packet.address as? Inet4Address)?.hostAddress ?: continue
-            parseAnnounce(String(packet.data, 0, packet.length, StandardCharsets.UTF_8), sourceIp)?.let { host ->
-              found[host.host] = host
+            parseAnnounce(
+              String(packet.data, 0, packet.length, StandardCharsets.UTF_8),
+              sourceIp,
+              pairedHostIds,
+            )?.let { host ->
+              val key = host.hostId ?: host.host
+              found[key] = host
             }
           } catch (_: java.net.SocketTimeoutException) {
             // keep listening until deadline
@@ -69,6 +75,7 @@ object RemoteDiscovery {
   class HostAnnouncer(
     private val context: Context,
     private val hostName: String,
+    private val hostId: String,
     private val port: Int = RemoteProtocol.HTTP_PORT,
   ) : AutoCloseable {
     @Volatile
@@ -90,7 +97,7 @@ object RemoteDiscovery {
                   socket.receive(packet)
                   val msg = String(packet.data, 0, packet.length, StandardCharsets.UTF_8).trim()
                   if (msg != RemoteProtocol.DISCOVER_REQUEST) continue
-                  val reply = announceJson(hostName, port)
+                  val reply = announceJson(hostName, hostId, port)
                   val bytes = reply.toByteArray(StandardCharsets.UTF_8)
                   socket.send(DatagramPacket(bytes, bytes.size, packet.address, packet.port))
                 } catch (_: Exception) {
@@ -111,23 +118,31 @@ object RemoteDiscovery {
     }
   }
 
-  private fun announceJson(name: String, port: Int): String =
+  private fun announceJson(name: String, hostId: String, port: Int): String =
     JSONObject().apply {
       put("type", RemoteProtocol.DISCOVER_REPLY)
       put("name", name)
+      put("hostId", hostId)
       put("host", "0.0.0.0") // replaced by receiver with packet source IP
       put("port", port)
       put("protocolVersion", RemoteProtocol.VERSION)
     }.toString()
 
-  private fun parseAnnounce(json: String, sourceIp: String): RemoteDiscoveredHost? = runCatching {
+  private fun parseAnnounce(
+    json: String,
+    sourceIp: String,
+    pairedHostIds: Set<String>,
+  ): RemoteDiscoveredHost? = runCatching {
     val root = JSONObject(json)
     if (root.optString("type") != RemoteProtocol.DISCOVER_REPLY) return null
+    val hostId = root.optString("hostId").takeIf { it.isNotBlank() }
     RemoteDiscoveredHost(
       name = root.optString("name", "OpenMultiTrack"),
       host = sourceIp,
       port = root.optInt("port", RemoteProtocol.HTTP_PORT),
       protocolVersion = root.optInt("protocolVersion", RemoteProtocol.VERSION),
+      hostId = hostId,
+      isPaired = hostId != null && hostId in pairedHostIds,
     )
   }.getOrNull()
 

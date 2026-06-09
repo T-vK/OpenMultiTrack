@@ -80,6 +80,7 @@ import org.openmultitrack.app.util.AppLogBuffer
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 import org.openmultitrack.domain.channel.ChannelStripState
 import org.openmultitrack.domain.mixer.MixerProfile
+import org.openmultitrack.domain.mixer.MixerRoutingConfig
 import org.openmultitrack.domain.remote.RemoteConnectionState
 import org.openmultitrack.domain.remote.RemoteRole
 import org.openmultitrack.domain.session.AppMode
@@ -148,10 +149,29 @@ fun DawMainScreen(
     onPlaybackWaveformWindowChange: (Float) -> Unit,
     onDismissStatusToast: () -> Unit,
     onFinalizeIncompleteRecording: (String) -> Unit,
-    onRemoteRoleChange: (RemoteRole) -> Unit = {},
+    onOpenMixerPicker: () -> Unit = {},
+    onOpenMixerSettings: (String) -> Unit = {},
+    onCloseMixerSettings: () -> Unit = {},
+    onSaveMixerRouting: (String, MixerRoutingConfig) -> Unit = { _, _ -> },
+    onOpenRemoteControl: () -> Unit = {},
+    onCloseRemoteControl: () -> Unit = {},
+    onEnterRemoteClientMode: () -> Unit = {},
     onDiscoverRemoteHosts: () -> Unit = {},
     onConnectRemoteHost: (RemoteDiscoveredHost) -> Unit = {},
+    onConnectRemoteManual: (String, String) -> Unit = { _, _ -> },
     onDisconnectRemote: () -> Unit = {},
+    onScanRemoteQr: () -> Unit = {},
+    onEnableRemoteHosting: () -> Unit = {},
+    mixerRoutingById: Map<String, MixerRoutingConfig> = emptyMap(),
+    showMixerPicker: Boolean = false,
+    onCloseMixerPicker: () -> Unit = {},
+    mixerSettingsMixerId: String? = null,
+    showRemoteControlSheet: Boolean = false,
+    remotePairingUri: String? = null,
+    remotePairingPin: String? = null,
+    onUpdateChannelInput: (String, Int, Int) -> Unit = { _, _, _ -> },
+    onUpdateChannelOutput: (String, Int, Int) -> Unit = { _, _, _ -> },
+    onSetChannelHidden: (String, Int, Boolean, Boolean) -> Unit = { _, _, _, _ -> },
 ) {
     val activeId = state.activeMixerId
     val session = activeId?.let { state.sessionByMixer[it] }
@@ -159,61 +179,38 @@ fun DawMainScreen(
     val isRemoteClient = state.remoteRole == RemoteRole.CLIENT &&
         state.remoteConnectionState == RemoteConnectionState.CONNECTED
 
+    val activeProfile = activeId?.let { id -> state.mixers.firstOrNull { it.id == id } }
+    val activeRouting = activeId?.let { mixerRoutingById[it] } ?: MixerRoutingConfig()
+
     Scaffold(
         topBar = {
             Column {
-                if (isRemoteClient) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            "Remote → ${state.remoteHostName ?: state.remoteConnectedHost ?: "host"}",
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        )
-                    }
-                }
-                TopAppBar(
-                    title = {
-                        Text(
-                            "OpenMultiTrack",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = { menuOpen = true }) {
-                            Icon(Icons.Default.Menu, contentDescription = "Menu")
-                        }
-                    },
-                    actions = {
-                        if (!isRemoteClient) {
-                            IconButton(onClick = onAddMixer) {
-                                Icon(Icons.Default.Add, contentDescription = "Add mixer")
+                DawTopBar(
+                    activeMixerName = activeProfile?.displayName,
+                    appMode = session?.appMode,
+                    isRemoteClient = isRemoteClient,
+                    remoteHostLabel = state.remoteHostName ?: state.remoteConnectedHost,
+                    remoteConnectionState = state.remoteConnectionState,
+                    onOpenMixerPicker = onOpenMixerPicker,
+                    onToggleAppMode = {
+                        activeId?.let { id ->
+                            val next = if (session?.appMode == AppMode.MULTITRACK_RECORD) {
+                                AppMode.VIRTUAL_SOUNDCHECK
+                            } else {
+                                AppMode.MULTITRACK_RECORD
                             }
+                            onSetAppMode(id, next)
                         }
                     },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                    ),
+                    onOpenSettings = onOpenSettings,
+                    onOpenRemoteControl = onOpenRemoteControl,
+                    onOpenMenu = { menuOpen = true },
                 )
                 if (state.mixers.isNotEmpty() && session != null && activeId != null) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-                }
-                if (state.mixers.isNotEmpty() && session != null && activeId != null) {
-                    val activeProfile = state.mixers.firstOrNull { it.id == activeId }
                     TransportToolbar(
-                        mixers = state.mixers,
-                        activeMixerId = activeId,
                         session = session,
                         outputDevices = state.outputDevices,
-                        showLoadScribble = activeProfile != null && ScribbleImportSupport.supports(activeProfile),
-                        onSelectMixer = onSelectMixer,
-                        onRemoveMixer = onRemoveMixer,
-                        onSetAppMode = onSetAppMode,
-                        onLoadScribbleStrip = { onLoadScribbleStrip(activeId) },
                         onSetMonitorOutput = { onSetMonitorOutput(activeId, it) },
                         onStartMonitor = { onStartMonitor(activeId) },
                         onStopMonitor = { onStopMonitor(activeId) },
@@ -252,6 +249,7 @@ fun DawMainScreen(
                         AppMode.VIRTUAL_SOUNDCHECK -> session?.let { s ->
                             SoundcheckPanel(
                                 session = s,
+                                routing = activeRouting,
                                 normalized = waveformNormalized,
                                 showWaveforms = state.showWaveforms,
                                 numberMode = state.stripNumberMode,
@@ -271,7 +269,10 @@ fun DawMainScreen(
                         }
                         else -> session?.let { s ->
                             ChannelStripList(
+                                mixerId = s.mixerId,
                                 strips = s.channelStrips,
+                                routing = activeRouting,
+                                soundcheckMode = false,
                                 normalized = waveformNormalized,
                                 waveformPeaks = s.waveformPeaks,
                                 captureMeterLevels = s.captureMeterLevels,
@@ -288,6 +289,11 @@ fun DawMainScreen(
                                 onArm = { onToggleArm(s.mixerId, it) },
                                 onMonitor = { onToggleMonitor(s.mixerId, it) },
                                 onSolo = { onToggleSolo(s.mixerId, it) },
+                                onUpdateInput = { ch, usb -> onUpdateChannelInput(s.mixerId, ch, usb) },
+                                onUpdateOutput = { ch, usb -> onUpdateChannelOutput(s.mixerId, ch, usb) },
+                                onSetHidden = { ch, hidden ->
+                                    onSetChannelHidden(s.mixerId, ch, false, hidden)
+                                },
                             )
                         }
                     }
@@ -333,7 +339,6 @@ fun DawMainScreen(
             title = { Text("Menu") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(onClick = { menuOpen = false; onOpenSettings() }) { Text("Settings") }
                     TextButton(onClick = { menuOpen = false; onOpenLog() }) { Text("Log viewer") }
                 }
             },
@@ -353,13 +358,6 @@ fun DawMainScreen(
                 playbackWaveformWindowSec = playbackWaveformWindowSec,
                 stripNumberMode = state.stripNumberMode,
                 stripIconMode = state.stripIconMode,
-                remoteRole = state.remoteRole,
-                remoteConnectionState = state.remoteConnectionState,
-                remoteLocalIp = state.remoteLocalIp,
-                remoteHostName = state.remoteHostName,
-                remoteConnectedHost = state.remoteConnectedHost,
-                remoteDiscoveredHosts = state.remoteDiscoveredHosts,
-                remoteError = state.remoteError,
             ),
             monitorGain = monitorGain,
             onMonitorGainChange = onMonitorGainChange,
@@ -373,10 +371,55 @@ fun DawMainScreen(
             onPlaybackWaveformWindowChange = onPlaybackWaveformWindowChange,
             onStripNumberModeChange = onStripNumberModeChange,
             onStripIconModeChange = onStripIconModeChange,
-            onRemoteRoleChange = onRemoteRoleChange,
-            onDiscoverRemoteHosts = onDiscoverRemoteHosts,
-            onConnectRemoteHost = onConnectRemoteHost,
-            onDisconnectRemote = onDisconnectRemote,
+        )
+    }
+
+    if (showMixerPicker) {
+        MixerPickerSheet(
+            mixers = state.mixers,
+            activeMixerId = state.activeMixerId,
+            onDismiss = onCloseMixerPicker,
+            onSelectMixer = onSelectMixer,
+            onAddNewDevice = onAddMixer,
+            onLoadChannelNames = onLoadScribbleStrip,
+            onOpenMixerSettings = onOpenMixerSettings,
+            onRemoveMixer = onRemoveMixer,
+        )
+    }
+
+    mixerSettingsMixerId?.let { settingsMixerId ->
+        val profile = state.mixers.firstOrNull { it.id == settingsMixerId }
+        val sessionForSettings = state.sessionByMixer[settingsMixerId]
+        if (profile != null) {
+            MixerSettingsSheet(
+                mixerName = profile.displayName,
+                channelCount = sessionForSettings?.captureChannelCount ?: profile.channelStrips.size,
+                config = mixerRoutingById[settingsMixerId] ?: MixerRoutingConfig(),
+                onDismiss = onCloseMixerSettings,
+                onSave = { onSaveMixerRouting(settingsMixerId, it) },
+            )
+        }
+    }
+
+    if (showRemoteControlSheet) {
+        RemoteControlSheet(
+            role = state.remoteRole,
+            connectionState = state.remoteConnectionState,
+            hostName = state.remoteHostName,
+            connectedHost = state.remoteConnectedHost,
+            localHostIp = state.remoteLocalIp,
+            pairingUri = remotePairingUri,
+            pairingPin = remotePairingPin,
+            discoveredHosts = state.remoteDiscoveredHosts,
+            errorMessage = state.remoteError,
+            onDismiss = onCloseRemoteControl,
+            onEnterRemoteMode = onEnterRemoteClientMode,
+            onDisconnect = onDisconnectRemote,
+            onScanLan = onDiscoverRemoteHosts,
+            onConnectHost = onConnectRemoteHost,
+            onConnectManual = onConnectRemoteManual,
+            onScanQr = onScanRemoteQr,
+            onEnableHosting = onEnableRemoteHosting,
         )
     }
 
@@ -400,15 +443,8 @@ fun DawMainScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TransportToolbar(
-    mixers: List<MixerProfile>,
-    activeMixerId: String,
     session: MixerSessionUiState,
     outputDevices: List<LabeledAudioDevice>,
-    showLoadScribble: Boolean,
-    onSelectMixer: (String) -> Unit,
-    onRemoveMixer: (String) -> Unit,
-    onSetAppMode: (String, AppMode) -> Unit,
-    onLoadScribbleStrip: () -> Unit,
     onSetMonitorOutput: (Int) -> Unit,
     onStartMonitor: () -> Unit,
     onStopMonitor: () -> Unit,
@@ -420,33 +456,7 @@ private fun TransportToolbar(
     onSetSoundcheckLoopIn: () -> Unit,
     onSetSoundcheckLoopOut: () -> Unit,
 ) {
-    var mixerMenuOpen by remember { mutableStateOf(false) }
-    var removeMixerConfirm by remember { mutableStateOf<MixerProfile?>(null) }
     var monitorDeviceMenuOpen by remember { mutableStateOf(false) }
-    val activeMixer = mixers.firstOrNull { it.id == activeMixerId }
-
-    removeMixerConfirm?.let { mixer ->
-        AlertDialog(
-            onDismissRequest = { removeMixerConfirm = null },
-            title = { Text("Remove mixer?") },
-            text = {
-                Text("Remove ${mixer.displayName} from this app? USB recording settings for this device will be cleared.")
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        removeMixerConfirm = null
-                        onRemoveMixer(mixer.id)
-                    },
-                ) {
-                    Text("Remove", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { removeMixerConfirm = null }) { Text("Cancel") }
-            },
-        )
-    }
 
     BoxWithConstraints {
         val showLabels = maxWidth >= 640.dp
@@ -458,59 +468,6 @@ private fun TransportToolbar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Box {
-                    MixerSelectorChip(
-                        label = activeMixer?.displayName ?: "Mixer",
-                        showLabel = showLabels,
-                        onClick = { mixerMenuOpen = true },
-                    )
-                    DropdownMenu(expanded = mixerMenuOpen, onDismissRequest = { mixerMenuOpen = false }) {
-                        mixers.forEach { m ->
-                            DropdownMenuItem(
-                                text = { Text(m.displayName) },
-                                onClick = {
-                                    mixerMenuOpen = false
-                                    onSelectMixer(m.id)
-                                },
-                            )
-                        }
-                        if (activeMixer != null) {
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        "Remove ${activeMixer.displayName}",
-                                        color = MaterialTheme.colorScheme.error,
-                                    )
-                                },
-                                onClick = {
-                                    mixerMenuOpen = false
-                                    removeMixerConfirm = activeMixer
-                                },
-                            )
-                        }
-                    }
-                }
-
-                AppModeToggle(
-                    appMode = session.appMode,
-                    showLabel = showLabels,
-                    onToggle = {
-                        val next = if (session.appMode == AppMode.MULTITRACK_RECORD) {
-                            AppMode.VIRTUAL_SOUNDCHECK
-                        } else {
-                            AppMode.MULTITRACK_RECORD
-                        }
-                        onSetAppMode(activeMixerId, next)
-                    },
-                )
-
-                if (showLoadScribble) {
-                    LoadScribbleStripButton(
-                        showLabel = showLabels,
-                        onClick = onLoadScribbleStrip,
-                    )
-                }
-
                 Spacer(Modifier.weight(1f))
 
                 MonitorControl(
@@ -560,97 +517,6 @@ private fun TransportToolbar(
 }
 
 @Composable
-private fun MixerSelectorChip(
-    label: String,
-    showLabel: Boolean,
-    onClick: () -> Unit,
-) {
-    ToolbarChip(onClick = onClick) {
-        Icon(
-            Icons.Default.GraphicEq,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-            tint = MaterialTheme.colorScheme.primary,
-        )
-        if (showLabel) {
-            Spacer(Modifier.width(6.dp))
-            Text(
-                label,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 140.dp),
-                style = MaterialTheme.typography.labelLarge,
-            )
-        }
-        Spacer(Modifier.width(2.dp))
-        Icon(
-            Icons.Default.ArrowDropDown,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun LoadScribbleStripButton(
-    showLabel: Boolean,
-    onClick: () -> Unit,
-) {
-    ToolbarChip(onClick = onClick) {
-        Icon(
-            Icons.Default.Label,
-            contentDescription = "Load scribble strip from mixer",
-            modifier = Modifier.size(18.dp),
-            tint = MaterialTheme.colorScheme.tertiary,
-        )
-        if (showLabel) {
-            Spacer(Modifier.width(6.dp))
-            Text(
-                "Load strip labels",
-                maxLines = 1,
-                style = MaterialTheme.typography.labelLarge,
-            )
-        }
-    }
-}
-
-@Composable
-private fun AppModeToggle(
-    appMode: AppMode,
-    showLabel: Boolean,
-    onToggle: () -> Unit,
-) {
-    val isRecordingMode = appMode == AppMode.MULTITRACK_RECORD
-    val icon = if (isRecordingMode) Icons.Default.Mic else Icons.Default.VolumeUp
-    val label = if (isRecordingMode) "Recording mode" else "Virtual soundcheck"
-    ToolbarChip(
-        onClick = onToggle,
-        selected = true,
-        accent = if (isRecordingMode) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-            tint = if (isRecordingMode) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.secondary
-            },
-        )
-        if (showLabel) {
-            Spacer(Modifier.width(6.dp))
-            Text(
-                label,
-                maxLines = 1,
-                style = MaterialTheme.typography.labelLarge,
-            )
-        }
-    }
-}
-
-@Composable
 private fun TransportWarningChip() {
     Surface(
         shape = ToolbarShape,
@@ -662,34 +528,6 @@ private fun TransportWarningChip() {
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onErrorContainer,
-        )
-    }
-}
-
-@Composable
-private fun ToolbarChip(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    selected: Boolean = false,
-    enabled: Boolean = true,
-    accent: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
-    content: @Composable RowScope.() -> Unit,
-) {
-    val borderColor = MaterialTheme.colorScheme.outline.copy(alpha = if (selected) 0.45f else 0.3f)
-    val background = if (selected) accent else MaterialTheme.colorScheme.surfaceContainerHigh
-    Surface(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier.height(ToolbarControlHeight),
-        shape = ToolbarShape,
-        color = background,
-        border = BorderStroke(1.dp, borderColor),
-        contentColor = MaterialTheme.colorScheme.onSurface,
-    ) {
-        Row(
-            Modifier.padding(horizontal = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            content = content,
         )
     }
 }
@@ -956,7 +794,7 @@ private fun EmptyMixersPrompt(onAddMixer: () -> Unit) {
         Text("Add an audio interface to begin", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Plug in a mixer, then tap Add to scan USB.",
+            "Plug in a mixer, then open the mixer list and choose Add new device.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1008,7 +846,10 @@ private fun IncompleteRecordingBanner(
 
 @Composable
 private fun ChannelStripList(
+    mixerId: String,
     strips: List<ChannelStripState>,
+    routing: MixerRoutingConfig,
+    soundcheckMode: Boolean,
     normalized: Boolean,
     waveformPeaks: Map<Int, LiveWaveformSnapshot>,
     captureMeterLevels: Map<Int, Float>,
@@ -1025,14 +866,18 @@ private fun ChannelStripList(
     onArm: (Int) -> Unit,
     onMonitor: (Int) -> Unit,
     onSolo: (Int) -> Unit,
+    onUpdateInput: (Int, Int) -> Unit,
+    onUpdateOutput: (Int, Int) -> Unit,
+    onSetHidden: (Int, Boolean) -> Unit,
 ) {
     var overlayIndex by remember { mutableStateOf<Int?>(null) }
+    val visibleStrips = strips.filter { !routing.isHidden(it.index, soundcheckMode) }
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 4.dp, vertical = 2.dp),
     ) {
-        val count = strips.size.coerceAtLeast(1)
+        val count = visibleStrips.size.coerceAtLeast(1)
         val gap = 2.dp
         val totalGaps = gap * (count - 1).coerceAtLeast(0)
         val naturalHeight = (maxHeight - totalGaps) / count
@@ -1041,7 +886,7 @@ private fun ChannelStripList(
         val innerPad = (stripHeight * 0.12f).coerceIn(3.dp, 10.dp)
         val labelFontSize = (stripHeight.value * 0.30f).coerceIn(10f, 16f)
         val labelColumnWidth = stripLabelColumnWidth(
-            strips,
+            visibleStrips,
             numberMode,
             iconMode,
             labelFontSize,
@@ -1051,7 +896,7 @@ private fun ChannelStripList(
             hideSolo,
         )
 
-        if (strips.isEmpty()) {
+        if (visibleStrips.isEmpty()) {
             Column(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.Center,
@@ -1082,9 +927,11 @@ private fun ChannelStripList(
             modifier = listModifier,
             verticalArrangement = Arrangement.spacedBy(gap),
         ) {
-            strips.forEach { strip ->
+            visibleStrips.forEach { strip ->
                 ChannelStripRow(
                     strip = strip,
+                    routing = routing,
+                    soundcheckMode = soundcheckMode,
                     stripHeight = stripHeight,
                     innerPad = innerPad,
                     labelFontSize = labelFontSize,
@@ -1112,6 +959,8 @@ private fun ChannelStripList(
         val strip = strips.firstOrNull { it.index == index } ?: return@let
         ChannelStripControlDialog(
             strip = strip,
+            routing = routing,
+            soundcheckMode = soundcheckMode,
             hideArm = false,
             hideMonitor = false,
             hideSolo = false,
@@ -1119,6 +968,9 @@ private fun ChannelStripList(
             onArm = { onArm(strip.index) },
             onMonitor = { onMonitor(strip.index) },
             onSolo = { onSolo(strip.index) },
+            onInputSourceChange = { onUpdateInput(strip.index, it) },
+            onOutputTargetChange = { onUpdateOutput(strip.index, it) },
+            onHiddenChange = { onSetHidden(strip.index, it) },
         )
     }
 }
@@ -1126,6 +978,8 @@ private fun ChannelStripList(
 @Composable
 private fun ChannelStripRow(
     strip: ChannelStripState,
+    routing: MixerRoutingConfig,
+    soundcheckMode: Boolean,
     stripHeight: Dp,
     innerPad: Dp,
     labelFontSize: Float,
@@ -1161,6 +1015,8 @@ private fun ChannelStripRow(
             hideArm = hideArm,
             hideMonitor = hideMonitor,
             hideSolo = hideSolo,
+            routing = routing,
+            soundcheckMode = soundcheckMode,
             onClick = onOpenControls,
         )
         StripVuMeter(

@@ -29,6 +29,8 @@ import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.data.MixerDeviceStore
 import org.openmultitrack.app.audio.RecordAudioPermissions
 import org.openmultitrack.app.scribble.Flow8BlePermissions
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import org.openmultitrack.app.ui.daw.DawMainScreen
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
@@ -63,6 +65,10 @@ class MainActivity : ComponentActivity() {
     ) { granted ->
         OmtLog.i("Activity", "RECORD_AUDIO granted=$granted")
         viewModel.onAudioPermissionResult(granted)
+    }
+
+    private val remoteQrScanLauncher = registerForActivityResult(ScanContract()) { result ->
+        result.contents?.let { viewModel.pairRemoteFromQr(it) }
     }
 
     private val usbReceiver = object : BroadcastReceiver() {
@@ -110,6 +116,34 @@ class MainActivity : ComponentActivity() {
                         playbackWaveformWindowSec = settings.playbackWaveformWindowSec,
                         waveformNormalized = settings.waveformNormalized,
                         onAddMixer = { viewModel.showAddMixerDialog(true) },
+                        showMixerPicker = state.value.showMixerPicker,
+                        onOpenMixerPicker = { viewModel.showMixerPicker(true) },
+                        onCloseMixerPicker = { viewModel.showMixerPicker(false) },
+                        mixerSettingsMixerId = state.value.mixerSettingsMixerId,
+                        onOpenMixerSettings = viewModel::showMixerSettings,
+                        onCloseMixerSettings = { viewModel.showMixerSettings(null) },
+                        mixerRoutingById = state.value.mixerRoutingById,
+                        onSaveMixerRouting = viewModel::saveMixerRouting,
+                        onUpdateChannelInput = viewModel::updateChannelInputSource,
+                        onUpdateChannelOutput = viewModel::updateChannelOutputTarget,
+                        onSetChannelHidden = viewModel::setChannelHidden,
+                        showRemoteControlSheet = state.value.showRemoteControlSheet,
+                        remotePairingUri = state.value.remotePairingUri,
+                        remotePairingPin = state.value.remotePairingPin,
+                        onOpenRemoteControl = { viewModel.showRemoteControlSheet(true) },
+                        onCloseRemoteControl = { viewModel.showRemoteControlSheet(false) },
+                        onEnterRemoteClientMode = viewModel::enterRemoteClientMode,
+                        onEnableRemoteHosting = viewModel::enableRemoteHosting,
+                        onConnectRemoteManual = viewModel::connectRemoteManual,
+                        onScanRemoteQr = {
+                            remoteQrScanLauncher.launch(
+                                ScanOptions().apply {
+                                    setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                                    setPrompt("Scan OpenMultiTrack pairing QR")
+                                    setBeepEnabled(false)
+                                },
+                            )
+                        },
                         onSelectMixer = viewModel::setActiveMixer,
                         onRemoveMixer = viewModel::removeMixer,
                         onAddMixerDevice = viewModel::addMixer,
@@ -154,7 +188,6 @@ class MainActivity : ComponentActivity() {
                         onPlaybackWaveformWindowChange = viewModel::setPlaybackWaveformWindowSec,
                         onDismissStatusToast = viewModel::dismissStatusToast,
                         onFinalizeIncompleteRecording = viewModel::finalizeIncompleteRecording,
-                        onRemoteRoleChange = viewModel::setRemoteRole,
                         onDiscoverRemoteHosts = viewModel::discoverRemoteHosts,
                         onConnectRemoteHost = viewModel::connectRemoteHost,
                         onDisconnectRemote = viewModel::disconnectRemote,

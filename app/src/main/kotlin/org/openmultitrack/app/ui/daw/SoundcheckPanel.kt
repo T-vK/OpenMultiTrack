@@ -55,6 +55,7 @@ import org.openmultitrack.app.data.StripNumberMode
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.app.service.SoundcheckSessionItem
 import org.openmultitrack.domain.channel.ChannelStripState
+import org.openmultitrack.domain.mixer.MixerRoutingConfig
 import org.openmultitrack.sessionio.wav.SessionWaveformOverview
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -73,6 +74,7 @@ private val TimeRulerHeight = 22.dp
 @Composable
 fun SoundcheckPanel(
     session: MixerSessionUiState,
+    routing: MixerRoutingConfig = MixerRoutingConfig(),
     normalized: Boolean,
     showWaveforms: Boolean,
     numberMode: StripNumberMode,
@@ -128,7 +130,10 @@ fun SoundcheckPanel(
                     durationSec = session.playbackDurationSec,
                 )
                 SoundcheckWaveformStripList(
-                    strips = session.channelStrips,
+                    strips = session.channelStrips.filter {
+                        !routing.isHidden(it.index, soundcheckMode = true)
+                    },
+                    routing = routing,
                     durationSec = session.playbackDurationSec,
                     viewStartSec = session.soundcheckViewStartSec,
                     viewWindowSec = session.soundcheckViewWindowSec,
@@ -244,6 +249,7 @@ private fun SoundcheckEmptyState(message: String = "No completed sessions yet. R
 @Composable
 private fun SoundcheckWaveformStripList(
     strips: List<ChannelStripState>,
+    routing: MixerRoutingConfig,
     durationSec: Float,
     viewStartSec: Float,
     viewWindowSec: Float,
@@ -446,6 +452,7 @@ private fun SoundcheckWaveformStripList(
                         key(strip.index) {
                         SoundcheckStripRow(
                             strip = strip,
+                            routing = routing,
                             stripHeight = stripHeight,
                             innerPad = innerPad,
                             labelFontSize = labelFontSize,
@@ -597,6 +604,7 @@ private enum class LoopHandle { START, END }
 @Composable
 private fun SoundcheckStripRow(
     strip: ChannelStripState,
+    routing: MixerRoutingConfig,
     stripHeight: androidx.compose.ui.unit.Dp,
     innerPad: androidx.compose.ui.unit.Dp,
     labelFontSize: Float,
@@ -641,6 +649,8 @@ private fun SoundcheckStripRow(
             hideArm = hideArm,
             hideMonitor = hideMonitor,
             hideSolo = hideSolo,
+            routing = routing,
+            soundcheckMode = true,
             onClick = {},
         )
         StripVuMeter(

@@ -24,14 +24,18 @@ import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import org.openmultitrack.app.data.StripIconMode
 import org.openmultitrack.app.data.StripNumberMode
 import org.openmultitrack.domain.channel.ChannelStripState
+import org.openmultitrack.domain.mixer.MixerRoutingConfig
 import org.openmultitrack.mixer.behringer.MixingStationIcons
 import org.openmultitrack.mixer.behringer.ScribbleStripLabel
 
@@ -167,6 +172,8 @@ internal fun StripIdentityCell(
     hideArm: Boolean,
     hideMonitor: Boolean,
     hideSolo: Boolean,
+    routing: MixerRoutingConfig,
+    soundcheckMode: Boolean,
     onClick: () -> Unit,
 ) {
     val parsed = remember(strip.label, strip.displayName, strip.iconId) {
@@ -207,16 +214,29 @@ internal fun StripIdentityCell(
             modifier = Modifier.width(textAreaWidth),
             verticalArrangement = Arrangement.Center,
         ) {
-            if (!hideArm || !hideMonitor || !hideSolo) {
-                StripStatusGlyphs(
-                    strip = strip,
-                    iconSize = controlIconSize,
-                    hideArm = hideArm,
-                    hideMonitor = hideMonitor,
-                    hideSolo = hideSolo,
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (!hideArm || !hideMonitor || !hideSolo) {
+                    StripStatusGlyphs(
+                        strip = strip,
+                        iconSize = controlIconSize,
+                        hideArm = hideArm,
+                        hideMonitor = hideMonitor,
+                        hideSolo = hideSolo,
+                    )
+                }
+                val routeText = if (soundcheckMode) {
+                    "→${routing.outputTarget(strip.index) + 1}"
+                } else {
+                    "←${routing.inputSource(strip.index) + 1}"
+                }
+                Text(
+                    routeText,
+                    fontSize = (labelFontSize * 0.75f).sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 4.dp),
                 )
-                Spacer(Modifier.height(1.dp))
             }
+            Spacer(Modifier.height(1.dp))
             if (lineText.isNotEmpty()) {
                 Text(
                     lineText,
@@ -315,6 +335,8 @@ private fun StripStatusIcon(
 @Composable
 internal fun ChannelStripControlDialog(
     strip: ChannelStripState,
+    routing: MixerRoutingConfig,
+    soundcheckMode: Boolean,
     hideArm: Boolean,
     hideMonitor: Boolean,
     hideSolo: Boolean,
@@ -322,7 +344,17 @@ internal fun ChannelStripControlDialog(
     onArm: () -> Unit,
     onMonitor: () -> Unit,
     onSolo: () -> Unit,
+    onInputSourceChange: (Int) -> Unit,
+    onOutputTargetChange: (Int) -> Unit,
+    onHiddenChange: (Boolean) -> Unit,
 ) {
+    var inputText by remember(strip.index, routing) {
+        mutableStateOf((routing.inputSource(strip.index) + 1).toString())
+    }
+    var outputText by remember(strip.index, routing) {
+        mutableStateOf((routing.outputTarget(strip.index) + 1).toString())
+    }
+    val hidden = routing.isHidden(strip.index, soundcheckMode)
     val parsed = StripTextParts(
         strip,
         StripNumberMode.BOTH,
@@ -391,10 +423,36 @@ internal fun ChannelStripControlDialog(
                     }
                 }
                 Text(
-                    "Name, color, and icon editing will be available here in a future update.",
-                    style = MaterialTheme.typography.bodySmall,
+                    "Routing",
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                OutlinedTextField(
+                    value = inputText,
+                    onValueChange = {
+                        inputText = it
+                        it.toIntOrNull()?.minus(1)?.let(onInputSourceChange)
+                    },
+                    label = { Text("USB input (record)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = outputText,
+                    onValueChange = {
+                        outputText = it
+                        it.toIntOrNull()?.minus(1)?.let(onOutputTargetChange)
+                    },
+                    label = { Text("USB output (soundcheck)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = hidden, onCheckedChange = onHiddenChange)
+                    Text(
+                        if (soundcheckMode) "Hide in soundcheck" else "Hide when recording",
+                    )
+                }
             }
         },
         confirmButton = {

@@ -2,6 +2,9 @@ package org.openmultitrack.app.data
 
 import android.content.Context
 import org.json.JSONObject
+import org.json.JSONArray
+import org.openmultitrack.domain.remote.RemotePairedHost
+import org.openmultitrack.domain.remote.RemotePairing
 import org.openmultitrack.domain.remote.RemoteRole
 import org.openmultitrack.domain.session.AppMode
 
@@ -76,6 +79,69 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getString(KEY_REMOTE_AUTH_TOKEN, null)
         set(value) = prefs.edit().putString(KEY_REMOTE_AUTH_TOKEN, value).apply()
 
+    var remoteHostDeviceId: String
+        get() = RemotePairing.ensureHostDeviceId(prefs.getString(KEY_REMOTE_HOST_DEVICE_ID, null))
+        set(value) = prefs.edit().putString(KEY_REMOTE_HOST_DEVICE_ID, value).apply()
+
+    var remotePairingPin: String
+        get() {
+            val existing = prefs.getString(KEY_REMOTE_PAIRING_PIN, null)
+            if (existing != null) return existing
+            val pin = RemotePairing.generatePin()
+            prefs.edit().putString(KEY_REMOTE_PAIRING_PIN, pin).apply()
+            return pin
+        }
+        set(value) = prefs.edit().putString(KEY_REMOTE_PAIRING_PIN, value).apply()
+
+    fun listPairedRemoteHosts(): List<RemotePairedHost> {
+        val raw = prefs.getString(KEY_REMOTE_PAIRED_HOSTS, null) ?: return emptyList()
+        return runCatching {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).map { i ->
+                val obj = arr.getJSONObject(i)
+                RemotePairedHost(
+                    hostId = obj.getString("hostId"),
+                    displayName = obj.optString("displayName", "OpenMultiTrack"),
+                    pin = obj.getString("pin"),
+                )
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    fun savePairedRemoteHost(host: RemotePairedHost) {
+        val updated = listPairedRemoteHosts()
+            .filter { it.hostId != host.hostId } + host
+        val arr = JSONArray()
+        updated.forEach { h ->
+            arr.put(
+                JSONObject().apply {
+                    put("hostId", h.hostId)
+                    put("displayName", h.displayName)
+                    put("pin", h.pin)
+                },
+            )
+        }
+        prefs.edit().putString(KEY_REMOTE_PAIRED_HOSTS, arr.toString()).apply()
+    }
+
+    fun removePairedRemoteHost(hostId: String) {
+        val updated = listPairedRemoteHosts().filter { it.hostId != hostId }
+        val arr = JSONArray()
+        updated.forEach { h ->
+            arr.put(
+                JSONObject().apply {
+                    put("hostId", h.hostId)
+                    put("displayName", h.displayName)
+                    put("pin", h.pin)
+                },
+            )
+        }
+        prefs.edit().putString(KEY_REMOTE_PAIRED_HOSTS, arr.toString()).apply()
+    }
+
+    fun pinForPairedHost(hostId: String): String? =
+        listPairedRemoteHosts().firstOrNull { it.hostId == hostId }?.pin
+
     val activeRecordingMixerId: String?
         get() = prefs.getString(KEY_ACTIVE_RECORDING_MIXER, null)
 
@@ -145,5 +211,8 @@ class AppSettingsStore(context: Context) {
         private const val KEY_APP_MODES_BY_MIXER = "app_modes_by_mixer"
         private const val KEY_REMOTE_ROLE = "remote_role"
         private const val KEY_REMOTE_AUTH_TOKEN = "remote_auth_token"
+        private const val KEY_REMOTE_HOST_DEVICE_ID = "remote_host_device_id"
+        private const val KEY_REMOTE_PAIRING_PIN = "remote_pairing_pin"
+        private const val KEY_REMOTE_PAIRED_HOSTS = "remote_paired_hosts"
     }
 }

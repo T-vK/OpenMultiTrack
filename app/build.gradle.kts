@@ -82,6 +82,8 @@ dependencies {
     implementation(project(":mixer-behringer"))
     implementation(project(":session-io"))
     implementation(project(":remote-server"))
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
     implementation(libs.androidx.core.ktx)
     implementation("androidx.core:core:1.15.0")
