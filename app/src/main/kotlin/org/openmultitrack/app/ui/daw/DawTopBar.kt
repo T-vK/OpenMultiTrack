@@ -19,6 +19,8 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
@@ -34,15 +36,23 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -156,6 +166,8 @@ private fun TransportControlCluster(
     appMode: AppMode,
     session: MixerSessionUiState?,
     isRemoteClient: Boolean,
+    showRecordingStorageInfoButton: Boolean,
+    autoShowRecordingStorageTooltip: Boolean,
     onStartRecord: () -> Unit,
     onStopRecord: () -> Unit,
     onToggleSoundcheckPlayback: () -> Unit,
@@ -168,6 +180,8 @@ private fun TransportControlCluster(
         appMode == AppMode.MULTITRACK_RECORD -> RecordTransportCluster(
             session = session,
             isRemoteClient = isRemoteClient,
+            showStorageInfoButton = showRecordingStorageInfoButton,
+            autoShowStorageTooltip = autoShowRecordingStorageTooltip,
             onStartRecord = onStartRecord,
             onStopRecord = onStopRecord,
         )
@@ -227,39 +241,98 @@ private fun TransportIconButton(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RecordTransportCluster(
     session: MixerSessionUiState?,
     isRemoteClient: Boolean,
+    showStorageInfoButton: Boolean,
+    autoShowStorageTooltip: Boolean,
     onStartRecord: () -> Unit,
     onStopRecord: () -> Unit,
 ) {
     val isRecording = session?.isRecording == true
     val hostReady = session?.probe != null || (isRemoteClient && session?.captureChannelCount?.let { it > 0 } == true)
     val canRecord = hostReady && !isRecording
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RecordingTimeReadout(session = session, isRecording = isRecording)
-        TransportButtonCluster {
-            TransportIconButton(
-                onClick = onStartRecord,
-                enabled = canRecord,
-                icon = Icons.Default.FiberManualRecord,
-                contentDescription = "Record",
-                tint = RecordRed,
-            )
-            clusterDivider()
-            TransportIconButton(
-                onClick = onStopRecord,
-                enabled = isRecording,
-                icon = Icons.Default.Stop,
-                contentDescription = "Stop recording",
-                tint = if (isRecording) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
-                background = if (isRecording) RecordRed else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-            )
+    val elapsed = session?.recordElapsedSec ?: 0f
+    val storageTooltipText = remember(session?.storageFreeBytes, session?.storageRecordEstimateSec) {
+        val freeLabel = formatStorageBytes(session?.storageFreeBytes ?: 0L)
+        val remainingLabel = formatRecordRemainingEstimate(session?.storageRecordEstimateSec ?: 0f)
+        "$freeLabel\n$remainingLabel"
+    }
+    val storageTooltipState = rememberTooltipState(isPersistent = true)
+    val scope = rememberCoroutineScope()
+    var wasRecording by remember { mutableStateOf(false) }
+    LaunchedEffect(isRecording, autoShowStorageTooltip) {
+        if (isRecording && !wasRecording && autoShowStorageTooltip && showStorageInfoButton) {
+            storageTooltipState.show()
+            delay(5_000)
+            storageTooltipState.dismiss()
         }
+        wasRecording = isRecording
+    }
+    TransportButtonCluster {
+        Surface(
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+            modifier = Modifier.height(ToolbarControlHeight),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (isRecording) formatAdaptiveTransportTime(elapsed) else "0:00",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (isRecording) RecordRed else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                )
+            }
+        }
+        if (showStorageInfoButton) {
+            clusterDivider()
+            TooltipBox(
+                positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+                tooltip = {
+                    PlainTooltip {
+                        Text(storageTooltipText)
+                    }
+                },
+                state = storageTooltipState,
+            ) {
+                TransportIconButton(
+                    onClick = {
+                        scope.launch {
+                            if (storageTooltipState.isVisible) {
+                                storageTooltipState.dismiss()
+                            } else {
+                                storageTooltipState.show()
+                            }
+                        }
+                    },
+                    enabled = true,
+                    icon = Icons.Default.Info,
+                    contentDescription = "Storage and recording time estimate",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        clusterDivider()
+        TransportIconButton(
+            onClick = onStartRecord,
+            enabled = canRecord,
+            icon = Icons.Default.FiberManualRecord,
+            contentDescription = "Record",
+            tint = RecordRed,
+        )
+        clusterDivider()
+        TransportIconButton(
+            onClick = onStopRecord,
+            enabled = isRecording,
+            icon = Icons.Default.Stop,
+            contentDescription = "Stop recording",
+            tint = if (isRecording) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+            background = if (isRecording) RecordRed else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+        )
     }
 }
 
@@ -278,12 +351,7 @@ private fun PlaybackTransportCluster(
         (isRemoteClient && session?.captureChannelCount?.let { it > 0 } == true)
     val hasSession = session?.selectedSoundcheckDir != null && hostReady
     val canStop = hasSession && (isPlaying || (session?.playbackPositionSec ?: 0f) > 0.05f)
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        PlaybackTimeReadout(session = session, hasSession = hasSession)
-        TransportButtonCluster {
+    TransportButtonCluster {
         TransportIconButton(
             onClick = onTogglePlayback,
             enabled = hasSession,
@@ -311,73 +379,6 @@ private fun PlaybackTransportCluster(
             onSetLoopOut = onSetLoopOut,
             onToggleLoop = onToggleLoop,
         )
-        }
-    }
-}
-
-@Composable
-private fun RecordingTimeReadout(
-    session: MixerSessionUiState?,
-    isRecording: Boolean,
-) {
-    val elapsed = session?.recordElapsedSec ?: 0f
-    val freeLabel = formatStorageBytes(session?.storageFreeBytes ?: 0L)
-    val remainingLabel = formatRecordRemainingEstimate(session?.storageRecordEstimateSec ?: 0f)
-    Surface(
-        shape = ToolbarShape,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        modifier = Modifier.height(ToolbarControlHeight),
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text(
-                text = if (isRecording) formatTransportTime(elapsed) else "0:00",
-                style = MaterialTheme.typography.labelLarge,
-                color = if (isRecording) RecordRed else MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-            )
-            Text(
-                text = "$freeLabel · $remainingLabel",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
-@Composable
-private fun PlaybackTimeReadout(
-    session: MixerSessionUiState?,
-    hasSession: Boolean,
-) {
-    val position = session?.playbackPositionSec ?: 0f
-    val duration = session?.playbackDurationSec ?: 0f
-    Surface(
-        shape = ToolbarShape,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        modifier = Modifier.height(ToolbarControlHeight),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = if (hasSession) {
-                    "${formatTransportTime(position)} / ${formatTransportTime(duration)}"
-                } else {
-                    "0:00 / 0:00"
-                },
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-            )
-        }
     }
 }
 
@@ -517,6 +518,9 @@ fun DawTopBar(
     remoteConnectionState: RemoteConnectionState,
     remoteConnectedClientCount: Int = 0,
     isRemoteHost: Boolean = false,
+    showRecordingStorageInfoButton: Boolean = true,
+    autoShowRecordingStorageTooltip: Boolean = true,
+    showOpenSessionHint: Boolean = false,
     onExitRemoteMode: () -> Unit = {},
     onOpenMixerPicker: () -> Unit,
     onOpenMixerSettings: () -> Unit,
@@ -528,6 +532,7 @@ fun DawTopBar(
     onToggleSoundcheckLoop: () -> Unit,
     onSetSoundcheckLoopIn: () -> Unit,
     onSetSoundcheckLoopOut: () -> Unit,
+    onOpenSessionPicker: () -> Unit = {},
     onOpenSettings: () -> Unit,
     onOpenRemoteControl: () -> Unit,
     onOpenMenu: () -> Unit = {},
@@ -597,6 +602,8 @@ fun DawTopBar(
                                 appMode = mode,
                                 session = session,
                                 isRemoteClient = isRemoteClient,
+                                showRecordingStorageInfoButton = showRecordingStorageInfoButton,
+                                autoShowRecordingStorageTooltip = autoShowRecordingStorageTooltip,
                                 onStartRecord = onStartRecord,
                                 onStopRecord = onStopRecord,
                                 onToggleSoundcheckPlayback = onToggleSoundcheckPlayback,
@@ -610,6 +617,13 @@ fun DawTopBar(
                 }
             },
             actions = {
+                if (appMode?.isPlaybackMode == true) {
+                    OpenSessionButton(
+                        enabled = session?.soundcheckSessions?.isNotEmpty() == true,
+                        showHint = showOpenSessionHint,
+                        onClick = onOpenSessionPicker,
+                    )
+                }
                 val remoteHighlight = isRemoteClient ||
                     (isRemoteHost && remoteConnectedClientCount > 0) ||
                     remoteConnectionState == RemoteConnectionState.CONNECTING
@@ -632,5 +646,35 @@ fun DawTopBar(
                 containerColor = MaterialTheme.colorScheme.surface,
             ),
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun OpenSessionButton(
+    enabled: Boolean,
+    showHint: Boolean,
+    onClick: () -> Unit,
+) {
+    val openTooltipState = rememberTooltipState()
+    LaunchedEffect(showHint, enabled) {
+        if (showHint && enabled) {
+            openTooltipState.show()
+        } else {
+            openTooltipState.dismiss()
+        }
+    }
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = {
+            PlainTooltip {
+                Text("Load most recent recording")
+            }
+        },
+        state = openTooltipState,
+    ) {
+        IconButton(onClick = onClick, enabled = enabled) {
+            Icon(Icons.Default.FolderOpen, contentDescription = "Open recording")
+        }
     }
 }

@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.openmultitrack.app.DawUiState
+import org.openmultitrack.app.hasNewerRecordingThanSelected
 import org.openmultitrack.app.device.PrerequisiteKind
 import org.openmultitrack.app.scribble.Flow8BleScribbleImporter
 import org.openmultitrack.app.scribble.ScribbleImportSupport
@@ -177,12 +178,19 @@ fun DawMainScreen(
     onSetChannelHidden: (String, Int, Boolean, Boolean) -> Unit = { _, _, _, _ -> },
     onPrerequisiteAction: (PrerequisiteKind) -> Unit = {},
     onLoadRecordingIntoSoundcheck: (String, String) -> Unit = { _, _ -> },
+    onLoadRecordingIntoSimplePlay: (String, String) -> Unit = { _, _ -> },
     onDismissSoundcheckLoadPrompt: () -> Unit = {},
     onPromptLoadSoundcheckAfterRecordChange: (Boolean) -> Unit = {},
+    onShowRecordingStorageInfoButtonChange: (Boolean) -> Unit = {},
+    onAutoShowRecordingStorageTooltipChange: (Boolean) -> Unit = {},
+    onRenameSoundcheckSession: (String, String, String) -> Unit = { _, _, _ -> },
+    onDeleteSoundcheckSession: (String, String) -> Unit = { _, _ -> },
+    lastSelectedSoundcheckSession: (String) -> String? = { null },
 ) {
     val activeId = state.activeMixerId
     val session = activeId?.let { state.sessionByMixer[it] }
     var menuOpen by remember { mutableStateOf(false) }
+    var sessionPickerOpen by remember { mutableStateOf(false) }
     var playbackStripOverlay by remember { mutableStateOf<Int?>(null) }
     val isRemoteClient = state.remoteRole == RemoteRole.CLIENT &&
         state.remoteConnectionState == RemoteConnectionState.CONNECTED
@@ -208,6 +216,16 @@ fun DawMainScreen(
                     remoteConnectionState = state.remoteConnectionState,
                     remoteConnectedClientCount = state.remoteConnectedClientCount,
                     isRemoteHost = isRemoteHost,
+                    showRecordingStorageInfoButton = state.showRecordingStorageInfoButton,
+                    autoShowRecordingStorageTooltip = state.autoShowRecordingStorageTooltip,
+                    showOpenSessionHint = activeId?.let { mixerId ->
+                        session?.let { s ->
+                            hasNewerRecordingThanSelected(
+                                s.soundcheckSessions,
+                                lastSelectedSoundcheckSession(mixerId),
+                            )
+                        }
+                    } == true,
                     onExitRemoteMode = onExitRemoteMode,
                     onOpenMixerPicker = onOpenMixerPicker,
                     onOpenMixerSettings = { activeId?.let(onOpenMixerSettings) },
@@ -221,6 +239,7 @@ fun DawMainScreen(
                     onToggleSoundcheckLoop = { activeId?.let(onToggleSoundcheckLoop) },
                     onSetSoundcheckLoopIn = { activeId?.let(onSetSoundcheckLoopIn) },
                     onSetSoundcheckLoopOut = { activeId?.let(onSetSoundcheckLoopOut) },
+                    onOpenSessionPicker = { sessionPickerOpen = true },
                     onOpenSettings = onOpenSettings,
                     onOpenRemoteControl = onOpenRemoteControl,
                     onOpenMenu = { menuOpen = true },
@@ -275,7 +294,6 @@ fun DawMainScreen(
                                 hideSolo = state.hideSoloButton,
                                 hideRoutingBadges = state.hideRoutingBadges ||
                                     s.appMode == AppMode.SIMPLE_PLAY,
-                                onSelectSession = { onSelectSoundcheckSession(activeId!!, it) },
                                 onSeek = { onSeekSoundcheck(activeId!!, it) },
                                 onPanView = { onPanSoundcheckView(activeId!!, it) },
                                 onZoomView = { scale, focal -> onZoomSoundcheckView(activeId!!, scale, focal) },
@@ -342,27 +360,42 @@ fun DawMainScreen(
     }
 
     state.soundcheckLoadPrompt?.let { prompt ->
-        AlertDialog(
-            onDismissRequest = onDismissSoundcheckLoadPrompt,
-            title = { Text("Load into Virtual Soundcheck?") },
-            text = {
-                Text(
-                    "Your recording is saved. Open it in Virtual Soundcheck mode to audition and route channels back to the mixer?",
-                )
+        val promptSession = state.sessionByMixer[prompt.mixerId]
+        SoundcheckPostRecordDialog(
+            prompt = prompt,
+            session = promptSession,
+            onDismiss = onDismissSoundcheckLoadPrompt,
+            onLoadSoundcheck = {
+                onLoadRecordingIntoSoundcheck(prompt.mixerId, prompt.sessionDir)
             },
-            confirmButton = {
-                Button(onClick = {
-                    onLoadRecordingIntoSoundcheck(prompt.mixerId, prompt.sessionDir)
-                }) {
-                    Text("Load")
-                }
+            onLoadSimplePlay = {
+                onLoadRecordingIntoSimplePlay(prompt.mixerId, prompt.sessionDir)
             },
-            dismissButton = {
-                TextButton(onClick = onDismissSoundcheckLoadPrompt) {
-                    Text("Not now")
-                }
+            onRename = { title ->
+                onRenameSoundcheckSession(prompt.mixerId, prompt.sessionDir, title)
             },
         )
+    }
+
+    if (sessionPickerOpen) {
+        val pickerSession = session
+        val pickerMixerId = activeId
+        if (pickerSession != null && pickerMixerId != null) {
+            SoundcheckSessionPickerSheet(
+                sessions = pickerSession.soundcheckSessions,
+                selectedDir = pickerSession.selectedSoundcheckDir,
+                onDismiss = { sessionPickerOpen = false },
+                onSelectSession = { dir ->
+                    onSelectSoundcheckSession(pickerMixerId, dir)
+                },
+                onRenameSession = { dir, title ->
+                    onRenameSoundcheckSession(pickerMixerId, dir, title)
+                },
+                onDeleteSession = { dir ->
+                    onDeleteSoundcheckSession(pickerMixerId, dir)
+                },
+            )
+        }
     }
 
     state.flow8PairingDialog?.let {
@@ -410,6 +443,8 @@ fun DawMainScreen(
                 stripNumberMode = state.stripNumberMode,
                 stripIconMode = state.stripIconMode,
                 promptLoadSoundcheckAfterRecord = state.promptLoadSoundcheckAfterRecord,
+                showRecordingStorageInfoButton = state.showRecordingStorageInfoButton,
+                autoShowRecordingStorageTooltip = state.autoShowRecordingStorageTooltip,
             ),
             monitorGain = monitorGain,
             onMonitorGainChange = onMonitorGainChange,
@@ -425,6 +460,8 @@ fun DawMainScreen(
             onStripNumberModeChange = onStripNumberModeChange,
             onStripIconModeChange = onStripIconModeChange,
             onPromptLoadSoundcheckAfterRecordChange = onPromptLoadSoundcheckAfterRecordChange,
+            onShowRecordingStorageInfoButtonChange = onShowRecordingStorageInfoButtonChange,
+            onAutoShowRecordingStorageTooltipChange = onAutoShowRecordingStorageTooltipChange,
         )
     }
 

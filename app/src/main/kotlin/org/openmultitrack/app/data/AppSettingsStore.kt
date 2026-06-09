@@ -59,6 +59,29 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_PROMPT_SOUNDCHECK_AFTER_RECORD, true)
         set(value) = prefs.edit().putBoolean(KEY_PROMPT_SOUNDCHECK_AFTER_RECORD, value).apply()
 
+    var showRecordingStorageInfoButton: Boolean
+        get() = prefs.getBoolean(KEY_SHOW_RECORDING_STORAGE_INFO, true)
+        set(value) = prefs.edit().putBoolean(KEY_SHOW_RECORDING_STORAGE_INFO, value).apply()
+
+    var autoShowRecordingStorageTooltip: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_SHOW_RECORDING_STORAGE_TOOLTIP, true)
+        set(value) = prefs.edit().putBoolean(KEY_AUTO_SHOW_RECORDING_STORAGE_TOOLTIP, value).apply()
+
+    fun lastSelectedSoundcheckSession(mixerId: String): String? {
+        val json = prefs.getString(KEY_LAST_SELECTED_SOUNDCHECK_BY_MIXER, null) ?: return null
+        return runCatching {
+            JSONObject(json).optString(mixerId).takeIf { it.isNotBlank() }
+        }.getOrNull()
+    }
+
+    fun setLastSelectedSoundcheckSession(mixerId: String, sessionDir: String) {
+        val root = runCatching {
+            JSONObject(prefs.getString(KEY_LAST_SELECTED_SOUNDCHECK_BY_MIXER, "{}") ?: "{}")
+        }.getOrDefault(JSONObject())
+        root.put(mixerId, sessionDir)
+        prefs.edit().putString(KEY_LAST_SELECTED_SOUNDCHECK_BY_MIXER, root.toString()).apply()
+    }
+
     var showWaveforms: Boolean
         get() = prefs.getBoolean(KEY_SHOW_WAVEFORMS, true)
         set(value) = prefs.edit().putBoolean(KEY_SHOW_WAVEFORMS, value).apply()
@@ -213,6 +236,9 @@ class AppSettingsStore(context: Context) {
         private const val KEY_HIDE_SOLO = "hide_solo_button"
         private const val KEY_HIDE_ROUTING_BADGES = "hide_routing_badges"
         private const val KEY_PROMPT_SOUNDCHECK_AFTER_RECORD = "prompt_soundcheck_after_record"
+        private const val KEY_SHOW_RECORDING_STORAGE_INFO = "show_recording_storage_info_button"
+        private const val KEY_AUTO_SHOW_RECORDING_STORAGE_TOOLTIP = "auto_show_recording_storage_tooltip"
+        private const val KEY_LAST_SELECTED_SOUNDCHECK_BY_MIXER = "last_selected_soundcheck_by_mixer"
         private const val KEY_SHOW_WAVEFORMS = "show_waveforms"
         private const val KEY_SHOW_VU_METERS = "show_vu_meters"
         private const val KEY_STRIP_NUMBER_MODE = "strip_number_mode"

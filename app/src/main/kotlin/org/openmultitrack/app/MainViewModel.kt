@@ -25,6 +25,7 @@ import org.openmultitrack.app.data.MixerRoutingStore
 import org.openmultitrack.app.data.ScribbleStripCache
 import org.openmultitrack.app.service.AudioSessionClient
 import org.openmultitrack.app.service.MixerSessionUiState
+import org.openmultitrack.app.service.SoundcheckSessionItem
 import org.openmultitrack.app.util.AppLogBuffer
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
@@ -122,7 +123,22 @@ data class DawUiState(
     val remoteConnectedClientCount: Int = 0,
     val soundcheckLoadPrompt: SoundcheckLoadPromptState? = null,
     val promptLoadSoundcheckAfterRecord: Boolean = true,
+    val showRecordingStorageInfoButton: Boolean = true,
+    val autoShowRecordingStorageTooltip: Boolean = true,
 )
+
+fun hasNewerRecordingThanSelected(
+    sessions: List<SoundcheckSessionItem>,
+    lastSelectedDir: String?,
+): Boolean {
+    if (sessions.isEmpty()) return false
+    val newest = sessions.maxByOrNull { it.startedAtEpochMs } ?: return false
+    val lastSelected = lastSelectedDir?.let { dir -> sessions.firstOrNull { it.sessionDir == dir } }
+    return when {
+        lastSelected == null -> newest.startedAtEpochMs > 0L
+        else -> newest.startedAtEpochMs > lastSelected.startedAtEpochMs
+    }
+}
 
 class MainViewModel(
     private val appContext: Context,
@@ -148,6 +164,8 @@ class MainViewModel(
             stripNumberMode = settings.stripNumberMode,
             stripIconMode = settings.stripIconMode,
             promptLoadSoundcheckAfterRecord = settings.promptLoadSoundcheckAfterRecord,
+            showRecordingStorageInfoButton = settings.showRecordingStorageInfoButton,
+            autoShowRecordingStorageTooltip = settings.autoShowRecordingStorageTooltip,
         ),
     )
     val uiState: StateFlow<DawUiState> = _uiState.asStateFlow()
@@ -683,8 +701,28 @@ class MainViewModel(
         loadRecordingIntoSoundcheckLocal(mixerId, sessionDir)
     }
 
+    fun loadRecordingIntoSimplePlay(mixerId: String, sessionDir: String) {
+        dismissSoundcheckLoadPrompt()
+        if (isRemoteClient()) {
+            remoteCommand(
+                "load_into_simple_play",
+                JSONObject()
+                    .put("mixerId", mixerId)
+                    .put("sessionDir", sessionDir),
+            )
+            return
+        }
+        loadRecordingIntoSimplePlayLocal(mixerId, sessionDir)
+    }
+
     private fun loadRecordingIntoSoundcheckLocal(mixerId: String, sessionDir: String) {
         setAppMode(mixerId, AppMode.VIRTUAL_SOUNDCHECK)
+        selectSoundcheckSession(mixerId, sessionDir)
+        refreshSoundcheckLibrary(mixerId)
+    }
+
+    private fun loadRecordingIntoSimplePlayLocal(mixerId: String, sessionDir: String) {
+        setAppMode(mixerId, AppMode.SIMPLE_PLAY)
         selectSoundcheckSession(mixerId, sessionDir)
         refreshSoundcheckLibrary(mixerId)
     }
@@ -698,11 +736,52 @@ class MainViewModel(
         _uiState.update { it.copy(promptLoadSoundcheckAfterRecord = enabled) }
     }
 
+    fun setShowRecordingStorageInfoButton(enabled: Boolean) {
+        settings.showRecordingStorageInfoButton = enabled
+        _uiState.update { it.copy(showRecordingStorageInfoButton = enabled) }
+    }
+
+    fun setAutoShowRecordingStorageTooltip(enabled: Boolean) {
+        settings.autoShowRecordingStorageTooltip = enabled
+        _uiState.update { it.copy(autoShowRecordingStorageTooltip = enabled) }
+    }
+
+    fun renameSoundcheckSession(mixerId: String, sessionDir: String, newTitle: String) {
+        if (isRemoteClient()) {
+            remoteCommand(
+                "rename_soundcheck_session",
+                JSONObject()
+                    .put("mixerId", mixerId)
+                    .put("sessionDir", sessionDir)
+                    .put("title", newTitle),
+            )
+            return
+        }
+        sessionClient.withManager { it.getOrCreate(mixerId).renameSoundcheckSession(sessionDir, newTitle) }
+    }
+
+    fun deleteSoundcheckSession(mixerId: String, sessionDir: String) {
+        if (isRemoteClient()) {
+            remoteCommand(
+                "delete_soundcheck_session",
+                JSONObject()
+                    .put("mixerId", mixerId)
+                    .put("sessionDir", sessionDir),
+            )
+            return
+        }
+        sessionClient.withManager { it.getOrCreate(mixerId).deleteSoundcheckSession(sessionDir) }
+    }
+
+    fun lastSelectedSoundcheckSession(mixerId: String): String? =
+        settings.lastSelectedSoundcheckSession(mixerId)
+
     fun refreshSoundcheckLibrary(mixerId: String) {
         sessionClient.withManager { it.getOrCreate(mixerId).refreshSoundcheckLibrary() }
     }
 
     fun selectSoundcheckSession(mixerId: String, sessionDir: String) {
+        settings.setLastSelectedSoundcheckSession(mixerId, sessionDir)
         if (isRemoteClient()) {
             remoteCommand(
                 "select_soundcheck",

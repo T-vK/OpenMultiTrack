@@ -25,6 +25,23 @@ fun formatStorageBytes(bytes: Long): String {
     return "%.0f KB free".format(kb)
 }
 
+/**
+ * Recording clock that widens field width as elapsed time grows:
+ * M:SS (<10 min), MM:SS (<1 h), H:MM:SS (<10 h), HH:MM:SS (10+ h).
+ */
+fun formatAdaptiveTransportTime(sec: Float): String {
+    val total = sec.roundToInt().coerceAtLeast(0)
+    val hours = total / 3600
+    val minutes = (total % 3600) / 60
+    val seconds = total % 60
+    return when {
+        total >= 36_000 -> "%02d:%02d:%02d".format(hours, minutes, seconds)
+        total >= 3_600 -> "%d:%02d:%02d".format(hours, minutes, seconds)
+        total >= 600 -> "%02d:%02d".format(minutes, seconds)
+        else -> "%d:%02d".format(minutes, seconds)
+    }
+}
+
 fun formatRecordRemainingEstimate(sec: Float): String {
     if (sec <= 0f) return "estimate unavailable"
     val total = sec.roundToInt()

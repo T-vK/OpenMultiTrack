@@ -110,7 +110,31 @@ class RemoteCommandExecutor(
                 val ctrl = manager.getOrCreate(mixerId)
                 settings.setAppModeForMixer(mixerId, AppMode.VIRTUAL_SOUNDCHECK)
                 ctrl.setAppMode(AppMode.VIRTUAL_SOUNDCHECK)
+                settings.setLastSelectedSoundcheckSession(mixerId, sessionDir)
                 ctrl.selectSoundcheckSession(sessionDir)
+                null
+            }
+            "load_into_simple_play" -> {
+                val mixerId = payload.getString("mixerId")
+                val sessionDir = payload.getString("sessionDir")
+                val ctrl = manager.getOrCreate(mixerId)
+                settings.setAppModeForMixer(mixerId, AppMode.SIMPLE_PLAY)
+                ctrl.setAppMode(AppMode.SIMPLE_PLAY)
+                settings.setLastSelectedSoundcheckSession(mixerId, sessionDir)
+                ctrl.selectSoundcheckSession(sessionDir)
+                null
+            }
+            "rename_soundcheck_session" -> {
+                manager.getOrCreate(payload.getString("mixerId"))
+                    .renameSoundcheckSession(
+                        payload.getString("sessionDir"),
+                        payload.getString("title"),
+                    )
+                null
+            }
+            "delete_soundcheck_session" -> {
+                manager.getOrCreate(payload.getString("mixerId"))
+                    .deleteSoundcheckSession(payload.getString("sessionDir"))
                 null
             }
             "seek" -> {
@@ -120,8 +144,10 @@ class RemoteCommandExecutor(
                 null
             }
             "select_soundcheck" -> {
-                manager.getOrCreate(payload.getString("mixerId"))
-                    .selectSoundcheckSession(payload.getString("sessionDir"))
+                val mixerId = payload.getString("mixerId")
+                val sessionDir = payload.getString("sessionDir")
+                settings.setLastSelectedSoundcheckSession(mixerId, sessionDir)
+                manager.getOrCreate(mixerId).selectSoundcheckSession(sessionDir)
                 null
             }
             "set_soundcheck_view" -> {

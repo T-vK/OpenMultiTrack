@@ -266,6 +266,39 @@ class MixerSessionController(
         }
     }
 
+    fun renameSoundcheckSession(sessionDir: String, newTitle: String) {
+        val trimmed = newTitle.trim()
+        if (trimmed.isEmpty()) return
+        scope.launch {
+            val dir = File(sessionDir)
+            val updated = withContext(Dispatchers.IO) {
+                val metadata = SessionMetadata.read(dir) ?: return@withContext false
+                metadata.copy(customTitle = trimmed).writeTo(dir)
+                true
+            }
+            if (!updated) return@launch
+            refreshSoundcheckLibrary()
+            if (_state.value.selectedSoundcheckDir == sessionDir) {
+                selectSoundcheckSession(sessionDir)
+            }
+        }
+    }
+
+    fun deleteSoundcheckSession(sessionDir: String) {
+        scope.launch {
+            captureMutex.withLock {
+                if (_state.value.selectedSoundcheckDir == sessionDir) {
+                    stopSoundcheckLocked()
+                    soundcheckWaveformJob?.cancel()
+                }
+            }
+            withContext(Dispatchers.IO) {
+                File(sessionDir).deleteRecursively()
+            }
+            refreshSoundcheckLibrary()
+        }
+    }
+
     fun setSoundcheckView(viewStartSec: Float, viewWindowSec: Float) {
         val duration = _state.value.playbackDurationSec
         val window = viewWindowSec.coerceIn(30f, 600f)

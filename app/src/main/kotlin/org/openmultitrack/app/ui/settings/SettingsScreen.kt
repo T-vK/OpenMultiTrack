@@ -54,6 +54,8 @@ data class SettingsUiState(
     val stripNumberMode: StripNumberMode,
     val stripIconMode: StripIconMode,
     val promptLoadSoundcheckAfterRecord: Boolean = true,
+    val showRecordingStorageInfoButton: Boolean = true,
+    val autoShowRecordingStorageTooltip: Boolean = true,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -74,6 +76,8 @@ fun SettingsSheet(
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
     onPromptLoadSoundcheckAfterRecordChange: (Boolean) -> Unit = {},
+    onShowRecordingStorageInfoButtonChange: (Boolean) -> Unit = {},
+    onAutoShowRecordingStorageTooltipChange: (Boolean) -> Unit = {},
 ) {
     ExpandedBottomSheet(onDismissRequest = onDismiss) {
         SettingsContent(
@@ -92,6 +96,8 @@ fun SettingsSheet(
             onStripNumberModeChange = onStripNumberModeChange,
             onStripIconModeChange = onStripIconModeChange,
             onPromptLoadSoundcheckAfterRecordChange = onPromptLoadSoundcheckAfterRecordChange,
+            onShowRecordingStorageInfoButtonChange = onShowRecordingStorageInfoButtonChange,
+            onAutoShowRecordingStorageTooltipChange = onAutoShowRecordingStorageTooltipChange,
         )
     }
 }
@@ -113,6 +119,8 @@ private fun SettingsContent(
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
     onPromptLoadSoundcheckAfterRecordChange: (Boolean) -> Unit = {},
+    onShowRecordingStorageInfoButtonChange: (Boolean) -> Unit = {},
+    onAutoShowRecordingStorageTooltipChange: (Boolean) -> Unit = {},
 ) {
     var query by remember { mutableStateOf("") }
     val normalizedQuery = query.trim().lowercase()
@@ -133,6 +141,8 @@ private fun SettingsContent(
             onStripIconModeChange = onStripIconModeChange,
             onMonitorGainChange = onMonitorGainChange,
             onPromptLoadSoundcheckAfterRecordChange = onPromptLoadSoundcheckAfterRecordChange,
+            onShowRecordingStorageInfoButtonChange = onShowRecordingStorageInfoButtonChange,
+            onAutoShowRecordingStorageTooltipChange = onAutoShowRecordingStorageTooltipChange,
         )
     }
     val visibleRows = if (normalizedQuery.isEmpty()) {
@@ -386,14 +396,32 @@ private fun buildSettingsRows(
     onStripIconModeChange: (StripIconMode) -> Unit,
     onMonitorGainChange: (Float) -> Unit,
     onPromptLoadSoundcheckAfterRecordChange: (Boolean) -> Unit,
+    onShowRecordingStorageInfoButtonChange: (Boolean) -> Unit,
+    onAutoShowRecordingStorageTooltipChange: (Boolean) -> Unit,
 ): List<SettingsRowModel> = listOf(
     SettingsToggleRow(
         id = "prompt_soundcheck_after_record",
         section = "Recording",
-        title = "Prompt for Virtual Soundcheck after recording",
-        description = "When you stop a recording, ask whether to load it into Virtual Soundcheck mode.",
+        title = "Prompt after recording stops",
+        description = "When you stop a recording, ask what to do next (load, rename, or dismiss).",
         checked = state.promptLoadSoundcheckAfterRecord,
         onCheckedChange = onPromptLoadSoundcheckAfterRecordChange,
+    ),
+    SettingsToggleRow(
+        id = "show_recording_storage_info",
+        section = "Recording",
+        title = "Show storage info button while recording",
+        description = "Display the info button next to the record timer for free space and estimated recording time.",
+        checked = state.showRecordingStorageInfoButton,
+        onCheckedChange = onShowRecordingStorageInfoButtonChange,
+    ),
+    SettingsToggleRow(
+        id = "auto_show_recording_storage_tooltip",
+        section = "Recording",
+        title = "Show storage tooltip when recording starts",
+        description = "Automatically show free space and estimated recording time for five seconds when recording begins.",
+        checked = state.autoShowRecordingStorageTooltip,
+        onCheckedChange = onAutoShowRecordingStorageTooltipChange,
     ),
     SettingsSliderRow(
         id = "monitor_gain",

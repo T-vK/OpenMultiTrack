@@ -1,7 +1,6 @@
 package org.openmultitrack.app.ui.daw
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
@@ -25,12 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -55,14 +49,10 @@ import androidx.compose.ui.unit.dp
 import org.openmultitrack.app.data.StripIconMode
 import org.openmultitrack.app.data.StripNumberMode
 import org.openmultitrack.app.service.MixerSessionUiState
-import org.openmultitrack.app.service.SoundcheckSessionItem
 import org.openmultitrack.domain.channel.ChannelStripState
 import org.openmultitrack.domain.mixer.MixerRoutingConfig
 import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.sessionio.wav.SessionWaveformOverview
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -86,7 +76,6 @@ fun SoundcheckPanel(
     hideMonitor: Boolean,
     hideSolo: Boolean,
     hideRoutingBadges: Boolean,
-    onSelectSession: (String) -> Unit,
     onSeek: (Float) -> Unit,
     onPanView: (Float) -> Unit,
     onZoomView: (Float, Float) -> Unit,
@@ -101,11 +90,7 @@ fun SoundcheckPanel(
             .fillMaxSize()
             .padding(horizontal = 4.dp, vertical = 2.dp),
     ) {
-        SoundcheckSessionSelector(
-            sessions = session.soundcheckSessions,
-            selectedDir = session.selectedSoundcheckDir,
-            onSelectSession = onSelectSession,
-        )
+        SoundcheckSessionInfoBar(session = session)
         if (session.soundcheckWaveformsLoading) {
             LinearProgressIndicator(
                 progress = { session.soundcheckWaveformProgress.coerceIn(0f, 1f) },
@@ -128,7 +113,7 @@ fun SoundcheckPanel(
         }
         when {
             session.soundcheckSessions.isEmpty() -> SoundcheckEmptyState()
-            session.selectedSoundcheckDir == null -> SoundcheckEmptyState("Select a session to preview.")
+            session.selectedSoundcheckDir == null -> SoundcheckEmptyState("Open a recording from the top bar to preview.")
             session.channelStrips.isEmpty() -> SoundcheckEmptyState("Loading session channels…")
             else -> {
                 val overview = session.soundcheckWaveforms ?: SessionWaveformOverview(
@@ -168,79 +153,6 @@ fun SoundcheckPanel(
                     onOpenStripControls = onOpenStripControls,
                     onToggleMute = onToggleMute,
                     onToggleSolo = onToggleSolo,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SoundcheckSessionSelector(
-    sessions: List<SoundcheckSessionItem>,
-    selectedDir: String?,
-    onSelectSession: (String) -> Unit,
-) {
-    var menuOpen by remember { mutableStateOf(false) }
-    val selected = sessions.firstOrNull { it.sessionDir == selectedDir }
-    val dateFmt = remember { SimpleDateFormat("MMM d, yyyy · HH:mm", Locale.getDefault()) }
-    Box(modifier = Modifier.fillMaxWidth()) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(enabled = sessions.isNotEmpty()) { menuOpen = true },
-            shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        selected?.title ?: "Select multitrack recording",
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        when {
-                            selected == null -> "Tap to choose a completed session"
-                            else -> {
-                                val date = dateFmt.format(Date(selected.startedAtEpochMs))
-                                "$date · ${selected.channelCount} ch · ${formatDuration(selected.durationSec)}"
-                            }
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Icon(Icons.Default.ArrowDropDown, contentDescription = "Open session list")
-            }
-        }
-        DropdownMenu(
-            expanded = menuOpen,
-            onDismissRequest = { menuOpen = false },
-            modifier = Modifier.fillMaxWidth(0.92f),
-        ) {
-            sessions.forEach { item ->
-                val date = dateFmt.format(Date(item.startedAtEpochMs))
-                DropdownMenuItem(
-                    text = {
-                        Column {
-                            Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(
-                                "$date · ${item.channelCount} ch · ${formatDuration(item.durationSec)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    },
-                    onClick = {
-                        menuOpen = false
-                        onSelectSession(item.sessionDir)
-                    },
                 )
             }
         }
@@ -459,14 +371,6 @@ private fun SoundcheckWaveformStripList(
                             contentDurationSec = duration,
                         )
                     }
-                    Text(
-                        text = "${formatTransportTime(playheadSec)} / ${formatTransportTime(duration)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = 4.dp),
-                    )
                     SoundcheckPlayheadOverlay(
                         viewStartSec = viewStart,
                         viewWindowSec = viewWindow,
