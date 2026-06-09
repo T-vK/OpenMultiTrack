@@ -141,6 +141,7 @@ fun DawMainScreen(
     onHideArmChange: (Boolean) -> Unit,
     onHideMonitorChange: (Boolean) -> Unit,
     onHideSoloChange: (Boolean) -> Unit,
+    onHideRoutingBadgesChange: (Boolean) -> Unit,
     onShowWaveformsChange: (Boolean) -> Unit,
     onShowVuMetersChange: (Boolean) -> Unit,
     onStripNumberModeChange: (StripNumberMode) -> Unit,
@@ -257,6 +258,7 @@ fun DawMainScreen(
                                 hideArm = state.hideArmButton,
                                 hideMonitor = state.hideMonitorButton,
                                 hideSolo = state.hideSoloButton,
+                                hideRoutingBadges = state.hideRoutingBadges,
                                 onSelectSession = { onSelectSoundcheckSession(activeId!!, it) },
                                 onSeek = { onSeekSoundcheck(activeId!!, it) },
                                 onPanView = { onPanSoundcheckView(activeId!!, it) },
@@ -285,6 +287,7 @@ fun DawMainScreen(
                                 hideArm = state.hideArmButton,
                                 hideMonitor = state.hideMonitorButton,
                                 hideSolo = state.hideSoloButton,
+                                hideRoutingBadges = state.hideRoutingBadges,
                                 numberMode = state.stripNumberMode,
                                 iconMode = state.stripIconMode,
                                 onArm = { onToggleArm(s.mixerId, it) },
@@ -356,6 +359,7 @@ fun DawMainScreen(
                 hideArmIcon = state.hideArmButton,
                 hideMonitorIcon = state.hideMonitorButton,
                 hideSoloIcon = state.hideSoloButton,
+                hideRoutingBadges = state.hideRoutingBadges,
                 showWaveforms = state.showWaveforms,
                 showVuMeters = state.showVuMeters,
                 recordWaveformWindowSec = recordWaveformWindowSec,
@@ -369,6 +373,7 @@ fun DawMainScreen(
             onHideArmChange = onHideArmChange,
             onHideMonitorChange = onHideMonitorChange,
             onHideSoloChange = onHideSoloChange,
+            onHideRoutingBadgesChange = onHideRoutingBadgesChange,
             onShowWaveformsChange = onShowWaveformsChange,
             onShowVuMetersChange = onShowVuMetersChange,
             onRecordWaveformWindowChange = onRecordWaveformWindowChange,
@@ -519,6 +524,7 @@ private fun ChannelStripList(
     hideArm: Boolean,
     hideMonitor: Boolean,
     hideSolo: Boolean,
+    hideRoutingBadges: Boolean,
     numberMode: StripNumberMode,
     iconMode: StripIconMode,
     onArm: (Int) -> Unit,
@@ -602,12 +608,13 @@ private fun ChannelStripList(
                         null
                     },
                     normalized = normalized,
-                    showWaveform = showWaveforms && isRecording,
+                    showWaveform = showWaveforms,
                     numberMode = numberMode,
                     iconMode = iconMode,
                     hideArm = hideArm,
                     hideMonitor = hideMonitor,
                     hideSolo = hideSolo,
+                    hideRoutingBadges = hideRoutingBadges,
                     onOpenControls = { overlayIndex = strip.index },
                 )
             }
@@ -653,6 +660,7 @@ private fun ChannelStripRow(
     hideArm: Boolean,
     hideMonitor: Boolean,
     hideSolo: Boolean,
+    hideRoutingBadges: Boolean,
     onOpenControls: () -> Unit,
 ) {
     val colorBarHeight = stripHeight - innerPad * 2
@@ -677,6 +685,7 @@ private fun ChannelStripRow(
             hideSolo = hideSolo,
             routing = routing,
             soundcheckMode = soundcheckMode,
+            hideRoutingBadges = hideRoutingBadges,
             onClick = onOpenControls,
         )
         StripVuMeter(
@@ -710,7 +719,13 @@ private fun WaveformView(
     val data = waveform?.peaks
     val capacity = waveform?.capacity ?: 0
     if (data == null || data.isEmpty() || capacity <= 0) {
-        Box(modifier = modifier)
+        Box(
+            modifier = modifier.border(
+                width = 0.5.dp,
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f),
+                shape = RoundedCornerShape(3.dp),
+            ),
+        )
         return
     }
     val displayPeaks = org.openmultitrack.app.ui.daw.scalePeaksForDisplay(data, normalized)

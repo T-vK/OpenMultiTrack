@@ -90,6 +90,7 @@ data class DawUiState(
     val hideArmButton: Boolean = false,
     val hideMonitorButton: Boolean = false,
     val hideSoloButton: Boolean = false,
+    val hideRoutingBadges: Boolean = false,
     val showWaveforms: Boolean = true,
     val showVuMeters: Boolean = true,
     val stripNumberMode: StripNumberMode = StripNumberMode.BOTH,
@@ -124,6 +125,7 @@ class MainViewModel(
             hideArmButton = settings.hideArmButton,
             hideMonitorButton = settings.hideMonitorButton,
             hideSoloButton = settings.hideSoloButton,
+            hideRoutingBadges = settings.hideRoutingBadges,
             showWaveforms = settings.showWaveforms,
             showVuMeters = settings.showVuMeters,
             stripNumberMode = settings.stripNumberMode,
@@ -218,6 +220,7 @@ class MainViewModel(
                     hideArmButton = settingsPatch?.hideArmButton ?: ui.hideArmButton,
                     hideMonitorButton = settingsPatch?.hideMonitorButton ?: ui.hideMonitorButton,
                     hideSoloButton = settingsPatch?.hideSoloButton ?: ui.hideSoloButton,
+                    hideRoutingBadges = ui.hideRoutingBadges,
                     showWaveforms = settingsPatch?.showWaveforms ?: ui.showWaveforms,
                     showVuMeters = settingsPatch?.showVuMeters ?: ui.showVuMeters,
                     stripNumberMode = settingsPatch?.stripNumberMode?.let {
@@ -897,6 +900,11 @@ class MainViewModel(
     fun setHideSoloButton(hide: Boolean) {
         settings.hideSoloButton = hide
         _uiState.update { it.copy(hideSoloButton = hide) }
+    }
+
+    fun setHideRoutingBadges(hide: Boolean) {
+        settings.hideRoutingBadges = hide
+        _uiState.update { it.copy(hideRoutingBadges = hide) }
     }
 
     fun setShowWaveforms(show: Boolean) {

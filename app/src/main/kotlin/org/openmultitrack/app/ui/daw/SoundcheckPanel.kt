@@ -82,6 +82,7 @@ fun SoundcheckPanel(
     hideArm: Boolean,
     hideMonitor: Boolean,
     hideSolo: Boolean,
+    hideRoutingBadges: Boolean,
     onSelectSession: (String) -> Unit,
     onSeek: (Float) -> Unit,
     onPanView: (Float) -> Unit,
@@ -152,6 +153,7 @@ fun SoundcheckPanel(
                     hideArm = hideArm,
                     hideMonitor = hideMonitor,
                     hideSolo = hideSolo,
+                    hideRoutingBadges = hideRoutingBadges,
                     onSeek = onSeek,
                     onSetView = onSetView,
                     onSetLoopRegion = onSetLoopRegion,
@@ -268,6 +270,7 @@ private fun SoundcheckWaveformStripList(
     hideArm: Boolean,
     hideMonitor: Boolean,
     hideSolo: Boolean,
+    hideRoutingBadges: Boolean,
     onSeek: (Float) -> Unit,
     onSetView: (Float, Float) -> Unit,
     onSetLoopRegion: (Float, Float) -> Unit,
@@ -473,6 +476,7 @@ private fun SoundcheckWaveformStripList(
                             hideArm = hideArm,
                             hideMonitor = hideMonitor,
                             hideSolo = hideSolo,
+                            hideRoutingBadges = hideRoutingBadges,
                         )
                         }
                     }
@@ -621,6 +625,7 @@ private fun SoundcheckStripRow(
     hideArm: Boolean,
     hideMonitor: Boolean,
     hideSolo: Boolean,
+    hideRoutingBadges: Boolean,
 ) {
     val colorBarHeight = stripHeight - innerPad * 2
     val displayPeaks = rememberViewportPeaks(
@@ -651,6 +656,7 @@ private fun SoundcheckStripRow(
             hideSolo = hideSolo,
             routing = routing,
             soundcheckMode = true,
+            hideRoutingBadges = hideRoutingBadges,
             onClick = {},
         )
         StripVuMeter(

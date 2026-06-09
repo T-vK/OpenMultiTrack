@@ -197,6 +197,7 @@ class MainActivity : ComponentActivity() {
                         onHideArmChange = viewModel::setHideArmButton,
                         onHideMonitorChange = viewModel::setHideMonitorButton,
                         onHideSoloChange = viewModel::setHideSoloButton,
+                        onHideRoutingBadgesChange = viewModel::setHideRoutingBadges,
                         onShowWaveformsChange = viewModel::setShowWaveforms,
                         onShowVuMetersChange = viewModel::setShowVuMeters,
                         onStripNumberModeChange = viewModel::setStripNumberMode,

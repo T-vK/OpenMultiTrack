@@ -178,6 +178,7 @@ internal fun StripIdentityCell(
     hideSolo: Boolean,
     routing: MixerRoutingConfig,
     soundcheckMode: Boolean,
+    hideRoutingBadges: Boolean,
     onClick: () -> Unit,
 ) {
     val parsed = remember(strip.label, strip.displayName, strip.iconId) {
@@ -218,40 +219,43 @@ internal fun StripIdentityCell(
             modifier = Modifier.width(textAreaWidth),
             verticalArrangement = Arrangement.Center,
         ) {
-            if (!hideArm || !hideMonitor || !hideSolo) {
-                StripStatusGlyphs(
-                    strip = strip,
-                    iconSize = controlIconSize,
-                    hideArm = hideArm,
-                    hideMonitor = hideMonitor,
-                    hideSolo = hideSolo,
-                )
-            }
-            Spacer(Modifier.height(2.dp))
             Row(
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                if (lineText.isNotEmpty()) {
-                    Text(
-                        lineText,
-                        fontSize = labelFontSize.sp,
-                        fontWeight = FontWeight.Normal,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
+                if (!hideArm || !hideMonitor || !hideSolo) {
+                    StripStatusGlyphs(
+                        strip = strip,
+                        iconSize = controlIconSize,
+                        hideArm = hideArm,
+                        hideMonitor = hideMonitor,
+                        hideSolo = hideSolo,
                     )
                 }
-                val usbIndex = if (soundcheckMode) {
-                    routing.outputTarget(strip.index)
-                } else {
-                    routing.inputSource(strip.index)
+                Spacer(Modifier.weight(1f))
+                if (!hideRoutingBadges) {
+                    val usbIndex = if (soundcheckMode) {
+                        routing.outputTarget(strip.index)
+                    } else {
+                        routing.inputSource(strip.index)
+                    }
+                    RoutingBadge(
+                        usbIndex = usbIndex,
+                        isOutput = soundcheckMode,
+                        highlighted = usbIndex != strip.index,
+                    )
                 }
-                RoutingBadge(
-                    usbIndex = usbIndex,
-                    isOutput = soundcheckMode,
-                    highlighted = usbIndex != strip.index,
+            }
+            if (lineText.isNotEmpty()) {
+                Spacer(Modifier.height(1.dp))
+                Text(
+                    lineText,
+                    fontSize = labelFontSize.sp,
+                    fontWeight = FontWeight.Normal,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
@@ -357,20 +361,21 @@ private fun RoutingBadge(
         MaterialTheme.colorScheme.onSurfaceVariant
     }
     Surface(
-        shape = RoundedCornerShape(4.dp),
+        shape = RoundedCornerShape(3.dp),
         color = bg,
         border = BorderStroke(
             0.5.dp,
-            MaterialTheme.colorScheme.outline.copy(alpha = if (highlighted) 0.35f else 0.2f),
+            MaterialTheme.colorScheme.outline.copy(alpha = if (highlighted) 0.35f else 0.18f),
         ),
     ) {
         Text(
-            "$prefix ${usbIndex + 1}",
-            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-            fontSize = 9.sp,
+            "$prefix${usbIndex + 1}",
+            modifier = Modifier.padding(horizontal = 3.dp, vertical = 0.dp),
+            fontSize = 7.sp,
             fontWeight = if (highlighted) FontWeight.SemiBold else FontWeight.Normal,
             color = textColor,
             maxLines = 1,
+            lineHeight = 8.sp,
         )
     }
 }

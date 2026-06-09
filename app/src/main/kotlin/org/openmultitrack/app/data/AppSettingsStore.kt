@@ -51,6 +51,10 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_HIDE_SOLO, false)
         set(value) = prefs.edit().putBoolean(KEY_HIDE_SOLO, value).apply()
 
+    var hideRoutingBadges: Boolean
+        get() = prefs.getBoolean(KEY_HIDE_ROUTING_BADGES, false)
+        set(value) = prefs.edit().putBoolean(KEY_HIDE_ROUTING_BADGES, value).apply()
+
     var showWaveforms: Boolean
         get() = prefs.getBoolean(KEY_SHOW_WAVEFORMS, true)
         set(value) = prefs.edit().putBoolean(KEY_SHOW_WAVEFORMS, value).apply()
@@ -201,6 +205,7 @@ class AppSettingsStore(context: Context) {
         private const val KEY_HIDE_ARM = "hide_arm_button"
         private const val KEY_HIDE_MONITOR = "hide_monitor_button"
         private const val KEY_HIDE_SOLO = "hide_solo_button"
+        private const val KEY_HIDE_ROUTING_BADGES = "hide_routing_badges"
         private const val KEY_SHOW_WAVEFORMS = "show_waveforms"
         private const val KEY_SHOW_VU_METERS = "show_vu_meters"
         private const val KEY_STRIP_NUMBER_MODE = "strip_number_mode"
