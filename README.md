@@ -32,6 +32,7 @@ If you installed a build from before signing was pinned (≤0.2.1), uninstall on
 
 ```bash
 git submodule update --init --recursive
+./scripts/install-git-hooks.sh
 ./gradlew :app:assembleDebug
 ```
 

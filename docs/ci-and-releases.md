@@ -40,6 +40,24 @@ feat!: change session file layout
 
 `gradle/version.properties` is updated on release; `VERSION_CODE = major*10000 + minor*100 + patch`.
 
+Plain subjects such as `Fix crash when adding XR18` are also recognized (see `scripts/compute-semver.sh`).
+
+## Git hooks (local)
+
+After cloning, install the shared hooks once:
+
+```bash
+./scripts/install-git-hooks.sh
+```
+
+| Hook | Rule |
+|------|------|
+| `commit-msg` | Subject must start with `feat: ` or `fix: ` |
+| `pre-commit` | Reject commits on `cursor/*` branches |
+| `pre-push` | Reject pushing `cursor/*` branches |
+
+Commit directly to `main`; do not use `cursor/*` feature branches or pull requests.
+
 ## GitHub Pages F-Droid repository
 
 After each successful `main` publish:

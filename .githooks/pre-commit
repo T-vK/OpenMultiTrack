@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Block commits on cursor/* branches — commit directly to main instead.
+set -euo pipefail
+
+branch="$(git branch --show-current 2>/dev/null || true)"
+
+if [[ "$branch" == cursor/* ]]; then
+  cat >&2 <<'EOF'
+Rejected: branch names must not start with "cursor/".
+
+Please commit directly to main and do not create pull requests.
+EOF
+  exit 1
+fi
+
+exit 0

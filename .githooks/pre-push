@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Block pushing cursor/* branches to any remote.
+set -euo pipefail
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [[ "$local_ref" == refs/heads/* ]] || continue
+  branch="${local_ref#refs/heads/}"
+  if [[ "$branch" == cursor/* ]]; then
+    cat >&2 <<'EOF'
+Rejected: branch names must not start with "cursor/".
+
+Please commit directly to main and do not create pull requests.
+EOF
+    exit 1
+  fi
+done
+
+exit 0

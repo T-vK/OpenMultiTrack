@@ -167,7 +167,7 @@ Add tests in the **lowest layer possible** (`domain`, `session-io`, `mixer-behri
 
 **Versioning:** [Conventional Commits](https://www.conventionalcommits.org/) → [`scripts/compute-semver.sh`](../scripts/compute-semver.sh). `feat:` = minor, `fix:` = patch, `BREAKING CHANGE` / `!:` = major.
 
-**Commit style for this repo:** conventional commits; push to `main`; **no co-author trailers**.
+**Commit style for this repo:** `feat:` or `fix:` subjects (enforced by `.githooks/commit-msg` after `./scripts/install-git-hooks.sh`); push to `main`; **no `cursor/*` branches**; **no co-author trailers**.
 
 **F-Droid repo URL:** `https://T-vK.github.io/OpenMultiTrack/fdroid/repo`
 

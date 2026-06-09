@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Require conventional commit subjects: feat: … or fix: …
+set -euo pipefail
+
+commit_msg_file="${1:?commit message file required}"
+
+if [[ -f .git/MERGE_HEAD ]]; then
+  exit 0
+fi
+
+subject="$(sed -n '1p' "$commit_msg_file" | tr -d '\r')"
+
+if [[ "$subject" =~ ^(feat|fix):[[:space:]].+ ]]; then
+  exit 0
+fi
+
+cat >&2 <<EOF
+Rejected: commit subject must start with "feat: " or "fix: ".
+
+  Subject: $subject
+
+Examples:
+  feat: add XR18 scribble import
+  fix: prevent crash when adding a second mixer
+
+Merge commits are allowed automatically.
+EOF
+exit 1
