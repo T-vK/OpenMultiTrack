@@ -22,7 +22,13 @@ class MultiMixerSessionManager(
 
     fun getOrCreate(mixerId: String): MixerSessionController =
         controllers.getOrPut(mixerId) {
-            MixerSessionController(mixerId, appContext, enumerator, settings)
+            MixerSessionController(
+                mixerId = mixerId,
+                appContext = appContext,
+                enumerator = enumerator,
+                settings = settings,
+                isActiveMixer = { _activeMixerId.value == mixerId },
+            )
         }
 
     fun registerMixer(profile: MixerProfile) {
@@ -32,6 +38,7 @@ class MultiMixerSessionManager(
 
     fun setActiveMixer(id: String) {
         _activeMixerId.value = id
+        controllers.values.forEach { it.syncVuMeterCapture() }
     }
 
     fun unregisterMixer(id: String) {

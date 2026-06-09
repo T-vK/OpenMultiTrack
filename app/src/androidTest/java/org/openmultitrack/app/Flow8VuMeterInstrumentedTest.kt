@@ -128,6 +128,7 @@ class Flow8VuMeterInstrumentedTest {
             val profile = MixerDeviceStore(usbAppProcessRule.appContext).listMixers()
                 .first { it.id == mixerId }
             manager.registerMixer(profile)
+            manager.setActiveMixer(mixerId)
             manager.onProbeComplete(mixerId, descriptor, probe)
 
             val settings = AppSettingsStore(usbAppProcessRule.appContext)

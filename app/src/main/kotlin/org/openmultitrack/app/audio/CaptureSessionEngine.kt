@@ -21,6 +21,7 @@ import org.openmultitrack.sessionio.wav.WavWriter
 import org.openmultitrack.usb.AudioBackend
 import org.openmultitrack.usb.AudioEngineRouter
 import org.openmultitrack.usb.CaptureRoute
+import org.openmultitrack.usb.NativeAudioCaptureRegistry
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -101,6 +102,11 @@ class CaptureSessionEngine(
 
     val isUsbDegraded: Boolean
         get() = usbDegraded
+
+    fun isNativeCaptureOwner(): Boolean {
+        val backend = activeBackend ?: return false
+        return NativeAudioCaptureRegistry.holder(backend) == ownerId
+    }
 
     fun recordElapsedSec(): Float =
         if (sampleRate > 0) framesWritten.toFloat() / sampleRate else 0f

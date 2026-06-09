@@ -107,6 +107,7 @@ class MixerSessionController(
     private val appContext: Context,
     private val enumerator: UsbAudioEnumerator,
     private val settings: AppSettingsStore,
+    private val isActiveMixer: () -> Boolean = { true },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val captureEngine = CaptureSessionEngine(mixerId)
@@ -1031,7 +1032,8 @@ class MixerSessionController(
     }
 
     private fun vuCaptureDesired(): Boolean =
-        settings.showVuMeters &&
+        isActiveMixer() &&
+            settings.showVuMeters &&
             _state.value.appMode == AppMode.MULTITRACK_RECORD &&
             activeDescriptor != null &&
             activeProbe != null &&
@@ -1059,9 +1061,12 @@ class MixerSessionController(
         probe: FullUsbProbeResult,
     ): Result<Int> {
         updateWaveformConfig()
-        if (captureEngine.isCaptureActive && !captureEngine.isUsbDegraded) {
+        if (captureEngine.isCaptureActive && !captureEngine.isUsbDegraded && captureEngine.isNativeCaptureOwner()) {
             val count = channelCountFromProbe(probe)
             return Result.success(count)
+        }
+        if (captureEngine.isCaptureActive && !captureEngine.isNativeCaptureOwner()) {
+            withContext(Dispatchers.IO) { captureEngine.stopCapture() }
         }
         val requested = channelCountFromProbe(probe)
         val device = enumerator.getUsbDevice(descriptor.deviceName)
