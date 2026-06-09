@@ -1,6 +1,7 @@
 package org.openmultitrack.app.ui.daw
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -29,8 +31,10 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import org.openmultitrack.app.R
 import org.openmultitrack.domain.remote.RemoteConnectionState
 import org.openmultitrack.domain.remote.RemoteRole
 import org.openmultitrack.domain.session.AppMode
@@ -97,9 +101,13 @@ fun DawTopBar(
         }
         TopAppBar(
             navigationIcon = {
-                IconButton(onClick = onOpenMenu) {
-                    Icon(Icons.Default.Menu, contentDescription = "Menu")
-                }
+                Image(
+                    painter = painterResource(R.drawable.ic_app_logo),
+                    contentDescription = "OpenMultiTrack",
+                    modifier = Modifier
+                        .padding(start = 12.dp)
+                        .size(32.dp),
+                )
             },
             title = {
                 Row(
@@ -141,6 +149,9 @@ fun DawTopBar(
             actions = {
                 val remoteActive = isRemoteClient ||
                     remoteConnectionState == RemoteConnectionState.CONNECTED
+                IconButton(onClick = onOpenMenu) {
+                    Icon(Icons.Default.Menu, contentDescription = "Menu")
+                }
                 IconButton(onClick = onOpenRemoteControl) {
                     Icon(
                         Icons.Default.Cast,

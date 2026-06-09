@@ -24,7 +24,7 @@ The publish **pages** job skips Android SDK setup (APK is verified in the build 
 
 ## Icons
 
-Regenerate launcher, fastlane, and F-Droid repo icons from the vector artwork:
+Regenerate launcher, fastlane, and F-Droid repo icons from `iconv2.png`:
 
 ```bash
 python3 scripts/generate-branding-icons.py

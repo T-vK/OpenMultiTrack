@@ -19,7 +19,7 @@ object RemotePairing {
         (100_000..999_999).random().toString()
 
     fun buildPairingUri(hostId: String, pin: String, name: String, port: Int = RemoteProtocol.HTTP_PORT): String {
-        val encodedName = java.net.URLEncoder.encode(name, Charsets.UTF_8)
+        val encodedName = java.net.URLEncoder.encode(name, "UTF-8")
         return "omt://remote?hostId=$hostId&pin=$pin&name=$encodedName&port=$port"
     }
 
@@ -36,7 +36,7 @@ object RemotePairing {
         RemotePairingPayload(
             hostId = hostId,
             pin = pin,
-            name = params["name"]?.let { java.net.URLDecoder.decode(it, Charsets.UTF_8) } ?: "OpenMultiTrack",
+            name = params["name"]?.let { java.net.URLDecoder.decode(it, "UTF-8") } ?: "OpenMultiTrack",
             port = params["port"]?.toIntOrNull() ?: RemoteProtocol.HTTP_PORT,
             host = params["host"],
         )
