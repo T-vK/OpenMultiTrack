@@ -201,6 +201,24 @@ class MainViewModel(
     private fun isRemoteClient(): Boolean =
         sessionClient.getRemoteControl()?.isRemoteClientConnected() == true
 
+    /**
+     * Shows the post-record soundcheck prompt only after recording has fully stopped.
+     * The pending flag must not be cleared on intermediate session updates (e.g. waveform ticks
+     * while [MixerSessionUiState.isRecording] is still true right after the user taps Stop).
+     */
+    private fun maybeShowSoundcheckLoadPrompt(
+        mixerId: String,
+        session: MixerSessionUiState,
+    ): SoundcheckLoadPromptState? {
+        if (mixerId !in soundcheckPromptPending) return null
+        if (session.isRecording) return null
+        if (!settings.promptLoadSoundcheckAfterRecord) return null
+        val sessionDir = session.lastRecordingPath ?: return null
+        if (session.appMode != AppMode.MULTITRACK_RECORD) return null
+        soundcheckPromptPending.remove(mixerId)
+        return SoundcheckLoadPromptState(mixerId = mixerId, sessionDir = sessionDir)
+    }
+
     private fun remoteCommand(command: String, payload: JSONObject = JSONObject()) {
         sessionClient.withRemoteControl { remote ->
             if (remote.isRemoteClientConnected()) {
@@ -242,17 +260,8 @@ class MainViewModel(
             if (remoteState.role == RemoteRole.CLIENT && mirrorReady) {
                 remoteState.sessionByMixer.forEach { (mixerId, session) ->
                     wasRecordingByMixer[mixerId] = session.isRecording
-                    if (
-                        soundcheckPromptPending.remove(mixerId) &&
-                        !session.isRecording &&
-                        settings.promptLoadSoundcheckAfterRecord &&
-                        session.lastRecordingPath != null &&
-                        session.appMode == AppMode.MULTITRACK_RECORD
-                    ) {
-                        soundcheckPrompt = SoundcheckLoadPromptState(
-                            mixerId = mixerId,
-                            sessionDir = session.lastRecordingPath,
-                        )
+                    maybeShowSoundcheckLoadPrompt(mixerId, session)?.let { prompt ->
+                        soundcheckPrompt = prompt
                     }
                 }
             }
@@ -1448,21 +1457,8 @@ class MainViewModel(
                 _uiState.update { ui ->
                     ui.copy(sessionByMixer = ui.sessionByMixer + (mixerId to session))
                 }
-                if (
-                    soundcheckPromptPending.remove(mixerId) &&
-                    !session.isRecording &&
-                    settings.promptLoadSoundcheckAfterRecord &&
-                    session.lastRecordingPath != null &&
-                    session.appMode == AppMode.MULTITRACK_RECORD
-                ) {
-                    _uiState.update {
-                        it.copy(
-                            soundcheckLoadPrompt = SoundcheckLoadPromptState(
-                                mixerId = mixerId,
-                                sessionDir = session.lastRecordingPath,
-                            ),
-                        )
-                    }
+                maybeShowSoundcheckLoadPrompt(mixerId, session)?.let { prompt ->
+                    _uiState.update { it.copy(soundcheckLoadPrompt = prompt) }
                 }
                 val msg = session.statusMessage
                 val prev = lastSessionStatusByMixer[mixerId]
