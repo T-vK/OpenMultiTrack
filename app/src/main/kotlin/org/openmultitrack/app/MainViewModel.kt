@@ -93,6 +93,7 @@ data class DawUiState(
     val mixerRoutingById: Map<String, MixerRoutingConfig> = emptyMap(),
     val showSettings: Boolean = false,
     val showLogViewer: Boolean = false,
+    val showSessionPicker: Boolean = false,
     val flow8PairingDialog: Flow8PairingDialogState? = null,
     val statusToast: StatusToast? = null,
     val prerequisites: List<PrerequisiteItem> = emptyList(),
@@ -1337,6 +1338,10 @@ class MainViewModel(
 
     fun showLogViewer(show: Boolean) {
         _uiState.update { it.copy(showLogViewer = show) }
+    }
+
+    fun showSessionPicker(show: Boolean) {
+        _uiState.update { it.copy(showSessionPicker = show) }
     }
 
     fun setMonitorGain(gain: Float) {

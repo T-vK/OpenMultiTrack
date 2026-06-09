@@ -9,15 +9,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -32,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.openmultitrack.app.data.StorageVolumeOption
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsStorageSection(
     effectiveStorageRootPath: String,
@@ -123,28 +125,41 @@ fun SettingsStorageSection(
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
         )
-        if (storageVolumeOptions.isNotEmpty()) {
-            val selectedPath = storageRootPath ?: storageVolumeOptions.firstOrNull()?.path
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                storageVolumeOptions.take(4).forEachIndexed { index, option ->
-                    SegmentedButton(
-                        selected = selectedPath == option.path ||
-                            (storageRootPath == null && option.label == "App storage"),
-                        onClick = {
-                            onSetStorageRootPath(
-                                if (option.label == "App storage") null else option.path,
-                            )
-                        },
-                        shape = SegmentedButtonDefaults.itemShape(
-                            index,
-                            storageVolumeOptions.take(4).size,
-                        ),
-                    ) {
-                        Text(option.label, style = MaterialTheme.typography.labelSmall, maxLines = 2)
-                    }
+        storageVolumeOptions.forEach { option ->
+            val isSelected = if (option.label == "App storage") {
+                storageRootPath == null
+            } else {
+                storageRootPath == option.path
+            }
+            Surface(
+                onClick = {
+                    onSetStorageRootPath(
+                        if (option.label == "App storage") null else option.path,
+                    )
+                },
+                color = if (isSelected) {
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 3.dp),
+                shape = MaterialTheme.shapes.small,
+            ) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    Text(option.label, style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        option.path,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }
+        Spacer(Modifier.height(4.dp))
     }
     Row(
         modifier = Modifier

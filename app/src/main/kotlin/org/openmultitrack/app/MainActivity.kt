@@ -230,6 +230,8 @@ class MainActivity : ComponentActivity() {
                         onRenameSoundcheckSession = viewModel::renameSoundcheckSession,
                         onDeleteSoundcheckSession = viewModel::deleteSoundcheckSession,
                         lastSelectedSoundcheckSession = viewModel::lastSelectedSoundcheckSession,
+                        onOpenSessionPicker = { viewModel.showSessionPicker(true) },
+                        onCloseSessionPicker = { viewModel.showSessionPicker(false) },
                         onDiscoverRemoteHosts = viewModel::discoverRemoteHosts,
                         onConnectRemoteHost = viewModel::connectRemoteHost,
                         onDisconnectRemote = viewModel::disconnectRemote,

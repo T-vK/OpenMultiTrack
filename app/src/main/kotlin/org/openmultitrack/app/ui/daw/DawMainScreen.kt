@@ -74,7 +74,7 @@ import org.openmultitrack.app.scribble.Flow8BleScribbleImporter
 import org.openmultitrack.app.scribble.ScribbleImportSupport
 import org.openmultitrack.app.data.StripIconMode
 import org.openmultitrack.app.data.StripNumberMode
-import org.openmultitrack.app.ui.settings.SettingsSheet
+import org.openmultitrack.app.ui.settings.SettingsScreen
 import org.openmultitrack.app.ui.settings.SettingsUiState
 import org.openmultitrack.app.audio.LiveWaveformSnapshot
 import org.openmultitrack.app.service.MixerSessionUiState
@@ -139,6 +139,7 @@ fun DawMainScreen(
     onToggleSoundcheckLoop: (String) -> Unit,
     onSetSoundcheckLoopIn: (String) -> Unit,
     onSetSoundcheckLoopOut: (String) -> Unit,
+    onOpenSessionPicker: () -> Unit = {},
     onConfirmFlow8PairingImport: () -> Unit,
     onDismissFlow8PairingDialog: () -> Unit,
     onHideArmChange: (Boolean) -> Unit,
@@ -193,11 +194,11 @@ fun DawMainScreen(
     onRenameSoundcheckSession: (String, String, String) -> Unit = { _, _, _ -> },
     onDeleteSoundcheckSession: (String, String) -> Unit = { _, _ -> },
     lastSelectedSoundcheckSession: (String) -> String? = { null },
+    onCloseSessionPicker: () -> Unit = {},
 ) {
     val activeId = state.activeMixerId
     val session = activeId?.let { state.sessionByMixer[it] }
     var menuOpen by remember { mutableStateOf(false) }
-    var sessionPickerOpen by remember { mutableStateOf(false) }
     var playbackStripOverlay by remember { mutableStateOf<Int?>(null) }
     val isRemoteClient = state.remoteRole == RemoteRole.CLIENT &&
         state.remoteConnectionState == RemoteConnectionState.CONNECTED
@@ -209,6 +210,146 @@ fun DawMainScreen(
 
     val activeProfile = activeId?.let { id -> state.mixers.firstOrNull { it.id == id } }
     val activeRouting = activeId?.let { mixerRoutingById[it] } ?: MixerRoutingConfig()
+
+    if (state.showLogViewer) {
+        LogViewerScreen(onDismiss = onCloseLog)
+        return
+    }
+
+    if (state.showSettings) {
+        SettingsScreen(
+            state = SettingsUiState(
+                hideArmIcon = state.hideArmButton,
+                hideMonitorIcon = state.hideMonitorButton,
+                hideSoloIcon = state.hideSoloButton,
+                hideRoutingBadges = state.hideRoutingBadges,
+                showWaveforms = state.showWaveforms,
+                showVuMeters = state.showVuMeters,
+                recordWaveformWindowSec = recordWaveformWindowSec,
+                playbackWaveformWindowSec = playbackWaveformWindowSec,
+                stripNumberMode = state.stripNumberMode,
+                stripIconMode = state.stripIconMode,
+                promptLoadSoundcheckAfterRecord = state.promptLoadSoundcheckAfterRecord,
+                showRecordingStorageInfoButton = state.showRecordingStorageInfoButton,
+                autoShowRecordingStorageTooltip = state.autoShowRecordingStorageTooltip,
+                recordWaveformNormalized = state.recordWaveformNormalized,
+                playbackWaveformNormalized = state.playbackWaveformNormalized,
+                storageRootPath = state.storageRootPath,
+                effectiveStorageRootPath = state.effectiveStorageRootPath,
+                additionalLibraryRoots = state.additionalLibraryRoots,
+                autoScanRemovableMedia = state.autoScanRemovableMedia,
+                storageVolumeOptions = state.storageVolumeOptions,
+            ),
+            monitorGain = monitorGain,
+            onMonitorGainChange = onMonitorGainChange,
+            onDismiss = onCloseSettings,
+            onHideArmChange = onHideArmChange,
+            onHideMonitorChange = onHideMonitorChange,
+            onHideSoloChange = onHideSoloChange,
+            onHideRoutingBadgesChange = onHideRoutingBadgesChange,
+            onShowWaveformsChange = onShowWaveformsChange,
+            onShowVuMetersChange = onShowVuMetersChange,
+            onRecordWaveformWindowChange = onRecordWaveformWindowChange,
+            onPlaybackWaveformWindowChange = onPlaybackWaveformWindowChange,
+            onStripNumberModeChange = onStripNumberModeChange,
+            onStripIconModeChange = onStripIconModeChange,
+            onPromptLoadSoundcheckAfterRecordChange = onPromptLoadSoundcheckAfterRecordChange,
+            onShowRecordingStorageInfoButtonChange = onShowRecordingStorageInfoButtonChange,
+            onAutoShowRecordingStorageTooltipChange = onAutoShowRecordingStorageTooltipChange,
+            onRecordWaveformNormalizedChange = onRecordWaveformNormalizedChange,
+            onPlaybackWaveformNormalizedChange = onPlaybackWaveformNormalizedChange,
+            onSetStorageRootPath = onSetStorageRootPath,
+            onAddAdditionalLibraryRoot = onAddAdditionalLibraryRoot,
+            onRemoveAdditionalLibraryRoot = onRemoveAdditionalLibraryRoot,
+            onAutoScanRemovableMediaChange = onAutoScanRemovableMediaChange,
+        )
+        return
+    }
+
+    mixerSettingsMixerId?.let { settingsMixerId ->
+        val profile = state.mixers.firstOrNull { it.id == settingsMixerId }
+        val sessionForSettings = state.sessionByMixer[settingsMixerId]
+        if (profile != null) {
+            MixerSettingsScreen(
+                mixerName = profile.displayName,
+                channelCount = sessionForSettings?.channelStrips?.size
+                    ?: profile.channelStrips.size,
+                usbChannelCount = sessionForSettings?.captureChannelCount ?: 0,
+                usbPlaybackChannelCount = sessionForSettings?.playbackChannelCount ?: 0,
+                strips = sessionForSettings?.channelStrips ?: profile.channelStrips,
+                config = mixerRoutingById[settingsMixerId] ?: MixerRoutingConfig(),
+                appMode = sessionForSettings?.appMode,
+                isMonitoring = sessionForSettings?.isMonitoring == true,
+                monitorEnabled = sessionForSettings?.probe != null,
+                outputDevices = state.outputDevices,
+                onStartMonitor = { onStartMonitor(settingsMixerId) },
+                onStopMonitor = { onStopMonitor(settingsMixerId) },
+                onSetMonitorOutput = { onSetMonitorOutput(settingsMixerId, it) },
+                onDismiss = onCloseMixerSettings,
+                onSave = { onSaveMixerRouting(settingsMixerId, it) },
+            )
+            return
+        }
+    }
+
+    if (state.showSessionPicker) {
+        val pickerSession = session
+        val pickerMixerId = activeId
+        if (pickerSession != null && pickerMixerId != null) {
+            SoundcheckSessionPickerScreen(
+                sessions = pickerSession.soundcheckSessions,
+                selectedDir = pickerSession.selectedSoundcheckDir,
+                onDismiss = onCloseSessionPicker,
+                onSelectSession = { dir ->
+                    onSelectSoundcheckSession(pickerMixerId, dir)
+                },
+                onRenameSession = { dir, title ->
+                    onRenameSoundcheckSession(pickerMixerId, dir, title)
+                },
+                onDeleteSession = { dir ->
+                    onDeleteSoundcheckSession(pickerMixerId, dir)
+                },
+            )
+            return
+        }
+    }
+
+    if (showMixerPicker) {
+        MixerPickerScreen(
+            mixers = state.mixers,
+            activeMixerId = state.activeMixerId,
+            onDismiss = onCloseMixerPicker,
+            onSelectMixer = onSelectMixer,
+            onAddNewDevice = onAddMixer,
+            onLoadChannelNames = onLoadScribbleStrip,
+            onRemoveMixer = onRemoveMixer,
+        )
+        return
+    }
+
+    if (showRemoteControlSheet) {
+        RemoteControlScreen(
+            role = state.remoteRole,
+            connectionState = state.remoteConnectionState,
+            hostName = state.remoteHostName,
+            connectedHost = state.remoteConnectedHost,
+            localHostIp = state.remoteLocalIp,
+            pairingUri = remotePairingUri,
+            pairingPin = remotePairingPin,
+            discoveredHosts = state.remoteDiscoveredHosts,
+            errorMessage = state.remoteError,
+            onDismiss = onCloseRemoteControl,
+            onEnterRemoteMode = onEnterRemoteClientMode,
+            onDisconnect = onDisconnectRemote,
+            onScanLan = onDiscoverRemoteHosts,
+            onConnectHost = onConnectRemoteHost,
+            onConnectManual = onConnectRemoteManual,
+            onScanQr = onScanRemoteQr,
+            onEnableHosting = onEnableRemoteHosting,
+            connectedClientCount = state.remoteConnectedClientCount,
+        )
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -246,7 +387,7 @@ fun DawMainScreen(
                     onToggleSoundcheckLoop = { activeId?.let(onToggleSoundcheckLoop) },
                     onSetSoundcheckLoopIn = { activeId?.let(onSetSoundcheckLoopIn) },
                     onSetSoundcheckLoopOut = { activeId?.let(onSetSoundcheckLoopOut) },
-                    onOpenSessionPicker = { sessionPickerOpen = true },
+                    onOpenSessionPicker = onOpenSessionPicker,
                     onOpenSettings = onOpenSettings,
                     onOpenRemoteControl = onOpenRemoteControl,
                     onOpenMenu = { menuOpen = true },
@@ -384,27 +525,6 @@ fun DawMainScreen(
         )
     }
 
-    if (sessionPickerOpen) {
-        val pickerSession = session
-        val pickerMixerId = activeId
-        if (pickerSession != null && pickerMixerId != null) {
-            SoundcheckSessionPickerSheet(
-                sessions = pickerSession.soundcheckSessions,
-                selectedDir = pickerSession.selectedSoundcheckDir,
-                onDismiss = { sessionPickerOpen = false },
-                onSelectSession = { dir ->
-                    onSelectSoundcheckSession(pickerMixerId, dir)
-                },
-                onRenameSession = { dir, title ->
-                    onRenameSoundcheckSession(pickerMixerId, dir, title)
-                },
-                onDeleteSession = { dir ->
-                    onDeleteSoundcheckSession(pickerMixerId, dir)
-                },
-            )
-        }
-    }
-
     state.flow8PairingDialog?.let {
         AlertDialog(
             onDismissRequest = onDismissFlow8PairingDialog,
@@ -434,119 +554,6 @@ fun DawMainScreen(
             },
             confirmButton = { TextButton(onClick = { menuOpen = false }) { Text("Close") } },
         )
-    }
-
-    if (state.showSettings) {
-        SettingsSheet(
-            state = SettingsUiState(
-                hideArmIcon = state.hideArmButton,
-                hideMonitorIcon = state.hideMonitorButton,
-                hideSoloIcon = state.hideSoloButton,
-                hideRoutingBadges = state.hideRoutingBadges,
-                showWaveforms = state.showWaveforms,
-                showVuMeters = state.showVuMeters,
-                recordWaveformWindowSec = recordWaveformWindowSec,
-                playbackWaveformWindowSec = playbackWaveformWindowSec,
-                stripNumberMode = state.stripNumberMode,
-                stripIconMode = state.stripIconMode,
-                promptLoadSoundcheckAfterRecord = state.promptLoadSoundcheckAfterRecord,
-                showRecordingStorageInfoButton = state.showRecordingStorageInfoButton,
-                autoShowRecordingStorageTooltip = state.autoShowRecordingStorageTooltip,
-                recordWaveformNormalized = state.recordWaveformNormalized,
-                playbackWaveformNormalized = state.playbackWaveformNormalized,
-                storageRootPath = state.storageRootPath,
-                effectiveStorageRootPath = state.effectiveStorageRootPath,
-                additionalLibraryRoots = state.additionalLibraryRoots,
-                autoScanRemovableMedia = state.autoScanRemovableMedia,
-                storageVolumeOptions = state.storageVolumeOptions,
-            ),
-            monitorGain = monitorGain,
-            onMonitorGainChange = onMonitorGainChange,
-            onDismiss = onCloseSettings,
-            onHideArmChange = onHideArmChange,
-            onHideMonitorChange = onHideMonitorChange,
-            onHideSoloChange = onHideSoloChange,
-            onHideRoutingBadgesChange = onHideRoutingBadgesChange,
-            onShowWaveformsChange = onShowWaveformsChange,
-            onShowVuMetersChange = onShowVuMetersChange,
-            onRecordWaveformWindowChange = onRecordWaveformWindowChange,
-            onPlaybackWaveformWindowChange = onPlaybackWaveformWindowChange,
-            onStripNumberModeChange = onStripNumberModeChange,
-            onStripIconModeChange = onStripIconModeChange,
-            onPromptLoadSoundcheckAfterRecordChange = onPromptLoadSoundcheckAfterRecordChange,
-            onShowRecordingStorageInfoButtonChange = onShowRecordingStorageInfoButtonChange,
-            onAutoShowRecordingStorageTooltipChange = onAutoShowRecordingStorageTooltipChange,
-            onRecordWaveformNormalizedChange = onRecordWaveformNormalizedChange,
-            onPlaybackWaveformNormalizedChange = onPlaybackWaveformNormalizedChange,
-            onSetStorageRootPath = onSetStorageRootPath,
-            onAddAdditionalLibraryRoot = onAddAdditionalLibraryRoot,
-            onRemoveAdditionalLibraryRoot = onRemoveAdditionalLibraryRoot,
-            onAutoScanRemovableMediaChange = onAutoScanRemovableMediaChange,
-        )
-    }
-
-    if (showMixerPicker) {
-        MixerPickerSheet(
-            mixers = state.mixers,
-            activeMixerId = state.activeMixerId,
-            onDismiss = onCloseMixerPicker,
-            onSelectMixer = onSelectMixer,
-            onAddNewDevice = onAddMixer,
-            onLoadChannelNames = onLoadScribbleStrip,
-            onRemoveMixer = onRemoveMixer,
-        )
-    }
-
-    mixerSettingsMixerId?.let { settingsMixerId ->
-        val profile = state.mixers.firstOrNull { it.id == settingsMixerId }
-        val sessionForSettings = state.sessionByMixer[settingsMixerId]
-        if (profile != null) {
-            MixerSettingsSheet(
-                mixerName = profile.displayName,
-                channelCount = sessionForSettings?.channelStrips?.size
-                    ?: profile.channelStrips.size,
-                usbChannelCount = sessionForSettings?.captureChannelCount ?: 0,
-                usbPlaybackChannelCount = sessionForSettings?.playbackChannelCount ?: 0,
-                strips = sessionForSettings?.channelStrips ?: profile.channelStrips,
-                config = mixerRoutingById[settingsMixerId] ?: MixerRoutingConfig(),
-                appMode = sessionForSettings?.appMode,
-                isMonitoring = sessionForSettings?.isMonitoring == true,
-                monitorEnabled = sessionForSettings?.probe != null,
-                outputDevices = state.outputDevices,
-                onStartMonitor = { onStartMonitor(settingsMixerId) },
-                onStopMonitor = { onStopMonitor(settingsMixerId) },
-                onSetMonitorOutput = { onSetMonitorOutput(settingsMixerId, it) },
-                onDismiss = onCloseMixerSettings,
-                onSave = { onSaveMixerRouting(settingsMixerId, it) },
-            )
-        }
-    }
-
-    if (showRemoteControlSheet) {
-        RemoteControlSheet(
-            role = state.remoteRole,
-            connectionState = state.remoteConnectionState,
-            hostName = state.remoteHostName,
-            connectedHost = state.remoteConnectedHost,
-            localHostIp = state.remoteLocalIp,
-            pairingUri = remotePairingUri,
-            pairingPin = remotePairingPin,
-            discoveredHosts = state.remoteDiscoveredHosts,
-            errorMessage = state.remoteError,
-            onDismiss = onCloseRemoteControl,
-            onEnterRemoteMode = onEnterRemoteClientMode,
-            onDisconnect = onDisconnectRemote,
-            onScanLan = onDiscoverRemoteHosts,
-            onConnectHost = onConnectRemoteHost,
-            onConnectManual = onConnectRemoteManual,
-            onScanQr = onScanRemoteQr,
-            onEnableHosting = onEnableRemoteHosting,
-            connectedClientCount = state.remoteConnectedClientCount,
-        )
-    }
-
-    if (state.showLogViewer) {
-        LogViewerScreen(onDismiss = onCloseLog)
     }
 
     playbackStripOverlay?.let { index ->

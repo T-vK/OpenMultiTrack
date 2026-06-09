@@ -3,32 +3,29 @@ package org.openmultitrack.app.ui.settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,7 +37,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.openmultitrack.app.data.StripIconMode
 import org.openmultitrack.app.data.StripNumberMode
-import org.openmultitrack.app.ui.daw.ExpandedBottomSheet
 
 data class SettingsUiState(
     val hideArmIcon: Boolean,
@@ -67,7 +63,7 @@ data class SettingsUiState(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsSheet(
+fun SettingsScreen(
     state: SettingsUiState,
     monitorGain: Float,
     onMonitorGainChange: (Float) -> Unit,
@@ -92,12 +88,25 @@ fun SettingsSheet(
     onRemoveAdditionalLibraryRoot: (String) -> Unit = {},
     onAutoScanRemovableMediaChange: (Boolean) -> Unit = {},
 ) {
-    ExpandedBottomSheet(onDismissRequest = onDismiss) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Settings") },
+                navigationIcon = {
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+            )
+        },
+    ) { padding ->
         SettingsContent(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
             state = state,
             monitorGain = monitorGain,
             onMonitorGainChange = onMonitorGainChange,
-            onDismiss = onDismiss,
             onHideArmChange = onHideArmChange,
             onHideMonitorChange = onHideMonitorChange,
             onHideSoloChange = onHideSoloChange,
@@ -123,10 +132,10 @@ fun SettingsSheet(
 
 @Composable
 private fun SettingsContent(
+    modifier: Modifier = Modifier,
     state: SettingsUiState,
     monitorGain: Float,
     onMonitorGainChange: (Float) -> Unit,
-    onDismiss: () -> Unit,
     onHideArmChange: (Boolean) -> Unit,
     onHideMonitorChange: (Boolean) -> Unit,
     onHideSoloChange: (Boolean) -> Unit,
@@ -180,26 +189,11 @@ private fun SettingsContent(
                 row.section.lowercase().contains(normalizedQuery)
         }
     }
+    val showStorageSection = normalizedQuery.isEmpty() ||
+        "storage".contains(normalizedQuery) ||
+        "recording".contains(normalizedQuery)
 
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .fillMaxHeight(0.92f)
-            .padding(bottom = 24.dp),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text("Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            IconButton(onClick = onDismiss) {
-                Icon(Icons.Default.Close, contentDescription = "Close settings")
-            }
-        }
-
+    Column(modifier = modifier) {
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
@@ -211,7 +205,7 @@ private fun SettingsContent(
             singleLine = true,
         )
 
-        if (visibleRows.isEmpty()) {
+        if (visibleRows.isEmpty() && !showStorageSection) {
             Text(
                 "No settings match \"$query\"",
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 24.dp),
@@ -233,7 +227,7 @@ private fun SettingsContent(
                 }
             }
             LazyColumn(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 items(
@@ -241,12 +235,13 @@ private fun SettingsContent(
                     key = { index ->
                         when (val item = listItems[index]) {
                             is SettingsListItem.Divider -> "divider-$index"
-                            is SettingsListItem.Header -> "header-${item.section}"
+                            is SettingsListItem.Header -> "header-${item.section}-$index"
                             is SettingsListItem.Entry -> item.row.id
                         }
                     },
                 ) { index ->
-                    when (val item = listItems[index]) {
+                    val item = listItems[index]
+                    when (item) {
                         SettingsListItem.Divider -> HorizontalDivider(Modifier.padding(vertical = 8.dp))
                         is SettingsListItem.Header -> Text(
                             item.section,
@@ -258,25 +253,23 @@ private fun SettingsContent(
                         is SettingsListItem.Entry -> SettingsRow(item.row)
                     }
                 }
-            }
-            if (normalizedQuery.isEmpty() ||
-                "storage".contains(normalizedQuery) ||
-                "recording".contains(normalizedQuery)
-            ) {
-                SettingsStorageSection(
-                    effectiveStorageRootPath = state.effectiveStorageRootPath,
-                    storageRootPath = state.storageRootPath,
-                    additionalLibraryRoots = state.additionalLibraryRoots,
-                    autoScanRemovableMedia = state.autoScanRemovableMedia,
-                    storageVolumeOptions = state.storageVolumeOptions,
-                    onSetStorageRootPath = onSetStorageRootPath,
-                    onAddAdditionalLibraryRoot = onAddAdditionalLibraryRoot,
-                    onRemoveAdditionalLibraryRoot = onRemoveAdditionalLibraryRoot,
-                    onAutoScanRemovableMediaChange = onAutoScanRemovableMediaChange,
-                )
+                if (showStorageSection) {
+                    item(key = "storage-section") {
+                        SettingsStorageSection(
+                            effectiveStorageRootPath = state.effectiveStorageRootPath,
+                            storageRootPath = state.storageRootPath,
+                            additionalLibraryRoots = state.additionalLibraryRoots,
+                            autoScanRemovableMedia = state.autoScanRemovableMedia,
+                            storageVolumeOptions = state.storageVolumeOptions,
+                            onSetStorageRootPath = onSetStorageRootPath,
+                            onAddAdditionalLibraryRoot = onAddAdditionalLibraryRoot,
+                            onRemoveAdditionalLibraryRoot = onRemoveAdditionalLibraryRoot,
+                            onAutoScanRemovableMediaChange = onAutoScanRemovableMediaChange,
+                        )
+                    }
+                }
             }
         }
-
     }
 }
 

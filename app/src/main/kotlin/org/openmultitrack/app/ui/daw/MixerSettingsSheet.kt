@@ -31,10 +31,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -71,7 +73,7 @@ private val MonitorBlue = Color(0xFF1E88E5)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MixerSettingsSheet(
+fun MixerSettingsScreen(
     mixerName: String,
     channelCount: Int,
     usbChannelCount: Int,
@@ -109,36 +111,43 @@ fun MixerSettingsSheet(
 
     val stripByIndex = strips.associateBy { it.index }
 
-    ExpandedBottomSheet(onDismissRequest = onDismiss) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(mixerName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            pageTitle(page),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(
+                        onClick = {
+                            if (page == MixerSettingsPage.Menu) {
+                                onDismiss()
+                            } else {
+                                page = MixerSettingsPage.Menu
+                            }
+                        },
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+            )
+        },
+    ) { padding ->
         Column(
             Modifier
-                .fillMaxHeight(0.92f)
+                .fillMaxSize()
+                .padding(padding)
                 .padding(horizontal = 16.dp, vertical = 8.dp)
                 .verticalScroll(rememberScrollState()),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (page != MixerSettingsPage.Menu) {
-                    IconButton(onClick = { page = MixerSettingsPage.Menu }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        mixerName,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        pageTitle(page),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
             when (page) {
                 MixerSettingsPage.Menu -> SettingsMenu(
                     onMonitor = { page = MixerSettingsPage.Monitor },
