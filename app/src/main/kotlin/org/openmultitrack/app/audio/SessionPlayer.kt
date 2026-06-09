@@ -239,7 +239,7 @@ class SessionPlayer {
                     continue
                 }
                 submitted += written
-                updateMeterLevels(chunkScratch, written, outputChannels, frameOffset = submitted)
+                updateMeterLevels(chunkScratch, written, outputChannels, frameOffset = 0)
                 status = status.copy(positionFrames = status.positionFrames + written)
                 maybeLoopRewind()
             }
@@ -275,7 +275,7 @@ class SessionPlayer {
                     continue
                 }
                 submitted += written
-                updateMeterLevels(scratch, written, channels, frameOffset = submitted)
+                updateMeterLevels(chunkScratch, written, channels, frameOffset = 0)
                 status = status.copy(positionFrames = status.positionFrames + written)
                 maybeLoopRewind()
             }

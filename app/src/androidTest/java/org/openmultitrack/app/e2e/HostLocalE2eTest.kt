@@ -51,8 +51,7 @@ class HostLocalE2eTest {
 
         ctrl.setAppMode(AppMode.SIMPLE_PLAY)
         ctrl.playSoundcheckPlayback()
-        E2eWait.untilPlaying(ctrl)
-        delay(1_500)
+        E2eWait.untilPlaybackAdvances(ctrl, minAdvanceSec = 1.0f, observeMs = 3_000)
         assertThat(ctrl.state.value.appMode).isEqualTo(AppMode.SIMPLE_PLAY)
         assertThat(ctrl.state.value.isPlaying).isTrue()
 
@@ -77,10 +76,24 @@ class HostLocalE2eTest {
 
         val startFrame = (seekTarget * ctrl.state.value.soundcheckSampleRate).toLong()
         ctrl.playSoundcheck(startFrame)
-        E2eWait.untilPlaying(ctrl)
-        E2eWait.untilMixerState(ctrl, 30_000) {
-            it.isPlaying && it.playbackPositionSec >= seekTarget - 1f
-        }
+        E2eWait.untilPlaybackAdvances(ctrl, minAdvanceSec = 0.75f, observeMs = 2_500)
+        assertThat(ctrl.state.value.playbackPositionSec).isAtLeast(seekTarget - 0.5f)
+
+        ctrl.stopSoundcheck()
+        E2eWait.untilNotPlaying(ctrl)
+    }
+
+    @Test
+    fun virtualSoundcheckPlayheadAdvancesWhilePlaying() = runBlocking {
+        val h = E2eMixerHarness(appRule).also { harness = it }
+        val ctrl = h.bindAndRegisterXr18()
+        val sessionDir = h.recordShortSession(ctrl)
+        h.prepareSoundcheck(ctrl, sessionDir)
+
+        val startPos = ctrl.state.value.playbackPositionSec
+        ctrl.playSoundcheckPlayback()
+        E2eWait.untilPlaybackAdvances(ctrl, minAdvanceSec = 1.5f, observeMs = 3_500)
+        assertThat(ctrl.state.value.playbackPositionSec).isGreaterThan(startPos + 1.4f)
 
         ctrl.stopSoundcheck()
         E2eWait.untilNotPlaying(ctrl)

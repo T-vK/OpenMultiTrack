@@ -15,11 +15,33 @@ class ToolbarLayoutTest {
         )
         assertThat(layout.showMixerSettingsInBar).isTrue()
         assertThat(layout.showModeInBar).isTrue()
-        assertThat(layout.showStorageInBar).isTrue()
+        assertThat(layout.showStorageInBar).isFalse()
         assertThat(layout.showOpenInBar).isTrue()
         assertThat(layout.showRemoteInBar).isTrue()
         assertThat(layout.showSettingsInBar).isTrue()
         assertThat(layout.showModeInDrawer).isFalse()
+    }
+
+    @Test
+    fun recordingModeDoesNotExposePlaybackTransportFlags() {
+        val layout = computeToolbarLayout(
+            barWidth = 1000.dp,
+            appMode = AppMode.MULTITRACK_RECORD,
+            showRecordingStorageInfoButton = true,
+        )
+        assertThat(layout.showOpenInBar).isFalse()
+        assertThat(layout.showStorageInBar).isTrue()
+    }
+
+    @Test
+    fun playbackModeDoesNotExposeRecordingStorageInBar() {
+        val layout = computeToolbarLayout(
+            barWidth = 1000.dp,
+            appMode = AppMode.VIRTUAL_SOUNDCHECK,
+            showRecordingStorageInfoButton = true,
+        )
+        assertThat(layout.showStorageInBar).isFalse()
+        assertThat(layout.showOpenInBar).isTrue()
     }
 
     @Test

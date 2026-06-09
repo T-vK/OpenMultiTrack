@@ -102,7 +102,6 @@ private fun AppMode.toolbarLabel(density: AppModeLabelDensity): String? = when (
 /** Which toolbar items stay in the top bar vs overflow into the navigation drawer. */
 internal data class ToolbarLayout(
     val mixerNameMaxWidth: Dp,
-    val showBothTransports: Boolean,
     val showMixerSettingsInBar: Boolean,
     val showModeInBar: Boolean,
     val modeLabelDensity: AppModeLabelDensity,
@@ -125,10 +124,7 @@ internal fun computeToolbarLayout(
     showRecordingStorageInfoButton: Boolean,
 ): ToolbarLayout {
     val isPlaybackMode = appMode?.isPlaybackMode == true
-    val showRecordTransport = barWidth >= 380.dp || appMode == AppMode.MULTITRACK_RECORD
-    val showPlaybackTransport = barWidth >= 380.dp || isPlaybackMode
-    val showBothTransports = showRecordTransport && showPlaybackTransport &&
-        (barWidth >= 420.dp || appMode == null)
+    val isRecordingMode = appMode == AppMode.MULTITRACK_RECORD
 
     return ToolbarLayout(
         mixerNameMaxWidth = when {
@@ -136,7 +132,6 @@ internal fun computeToolbarLayout(
             barWidth >= 520.dp -> MixerNameMediumMaxWidth
             else -> MixerNameNarrowMaxWidth
         },
-        showBothTransports = showBothTransports,
         showMixerSettingsInBar = barWidth >= 580.dp,
         showModeInBar = barWidth >= 500.dp,
         modeLabelDensity = when {
@@ -146,7 +141,7 @@ internal fun computeToolbarLayout(
             else -> AppModeLabelDensity.ICON_ONLY
         },
         showStorageInBar = showRecordingStorageInfoButton &&
-            showRecordTransport &&
+            isRecordingMode &&
             barWidth >= 460.dp,
         showOpenInBar = isPlaybackMode && barWidth >= 640.dp,
         showRemoteInBar = barWidth >= 600.dp,
@@ -667,10 +662,8 @@ internal fun DawTopBar(
         remoteConnectionState == RemoteConnectionState.CONNECTING
     val openSessionEnabled = appMode?.isPlaybackMode == true &&
         session?.soundcheckSessions?.isNotEmpty() == true
-    val showRecordTransport = layout.showBothTransports ||
-        appMode == AppMode.MULTITRACK_RECORD
-    val showPlaybackTransport = layout.showBothTransports ||
-        appMode?.isPlaybackMode == true
+    val showRecordTransport = appMode == AppMode.MULTITRACK_RECORD
+    val showPlaybackTransport = appMode?.isPlaybackMode == true
     Column {
         if (isRemoteClient && remoteHostLabel != null) {
             Surface(

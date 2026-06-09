@@ -67,6 +67,38 @@ object E2eWait {
         }
     }
 
+    /**
+     * Fails if transport reports playing but the playhead does not move — catches silent USB stalls.
+     */
+    suspend fun untilPlaybackAdvances(
+        ctrl: MixerSessionController,
+        minAdvanceSec: Float = 1.0f,
+        observeMs: Long = 3_000,
+        timeoutMs: Long = 30_000,
+    ) {
+        untilPlaying(ctrl, timeoutMs)
+        val startPos = ctrl.state.value.playbackPositionSec
+        val deadline = System.currentTimeMillis() + observeMs
+        withTimeout(timeoutMs) {
+            while (System.currentTimeMillis() < deadline) {
+                val state = ctrl.state.value
+                check(state.isPlaying) {
+                    "Playback stopped before advancing (pos=${state.playbackPositionSec}s, " +
+                        "warning=${state.warningMessage})"
+                }
+                if (state.playbackPositionSec >= startPos + minAdvanceSec) {
+                    return@withTimeout
+                }
+                delay(100)
+            }
+        }
+        val end = ctrl.state.value
+        check(end.playbackPositionSec >= startPos + minAdvanceSec) {
+            "Playhead did not advance by ${minAdvanceSec}s while playing " +
+                "(start=${startPos}s, end=${end.playbackPositionSec}s, warning=${end.warningMessage})"
+        }
+    }
+
     suspend fun untilRemoteConnected(
         stateFlow: kotlinx.coroutines.flow.StateFlow<RemoteControlUiState>,
         timeoutMs: Long = 60_000,

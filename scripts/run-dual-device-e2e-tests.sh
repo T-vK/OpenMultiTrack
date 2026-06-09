@@ -78,13 +78,25 @@ adb_client() {
 }
 
 detect_host_with_xr18() {
+  local fallback=""
   while IFS= read -r serial; do
     [[ -z "$serial" ]] && continue
-    if "$ADB" -s "$serial" shell dumpsys usb 2>/dev/null | grep -qi 'X18/XR18\|XR18'; then
+    local usb_dump
+    usb_dump="$("$ADB" -s "$serial" shell dumpsys usb 2>/dev/null | strings)"
+    if ! grep -qi 'X18/XR18\|XR18' <<<"$usb_dump"; then
+      continue
+    fi
+    # Prefer tablets where Android exposes the mixer as a full UAC device (visible to UsbManager).
+    if grep -q 'X18/XR18 Audio In' <<<"$usb_dump" && grep -q 'X18/XR18 Audio Out' <<<"$usb_dump"; then
       echo "$serial"
       return 0
     fi
+    [[ -z "$fallback" ]] && fallback="$serial"
   done < <("$ADB" devices 2>/dev/null | awk '/\tdevice$/{print $1}')
+  if [[ -n "$fallback" ]]; then
+    echo "$fallback"
+    return 0
+  fi
   return 1
 }
 

@@ -403,7 +403,15 @@ class MixerSessionController(
                     startSoundcheckPlaybackLocked(startFrame)
                 } catch (e: Exception) {
                     OmtLog.e("MixerSession", "playSoundcheck failed", e)
-                    _state.update { it.copy(statusMessage = e.message) }
+                    withContext(Dispatchers.IO) { player.stopAndAwait() }
+                    stopPlaybackStatusUpdates()
+                    _state.update {
+                        it.copy(
+                            isPlaying = false,
+                            transportState = TransportState.IDLE,
+                            statusMessage = e.message,
+                        )
+                    }
                 }
             }
         }
@@ -448,7 +456,15 @@ class MixerSessionController(
                         startSoundcheckPlaybackLockedFromCurrentPosition()
                     } catch (e: Exception) {
                         OmtLog.e("MixerSession", "toggleSoundcheckPlayback failed", e)
-                        _state.update { it.copy(statusMessage = e.message) }
+                        withContext(Dispatchers.IO) { player.stopAndAwait() }
+                        stopPlaybackStatusUpdates()
+                        _state.update {
+                            it.copy(
+                                isPlaying = false,
+                                transportState = TransportState.IDLE,
+                                statusMessage = e.message,
+                            )
+                        }
                     }
                 }
             }
@@ -472,7 +488,15 @@ class MixerSessionController(
                     startSoundcheckPlaybackLockedFromCurrentPosition()
                 } catch (e: Exception) {
                     OmtLog.e("MixerSession", "playSoundcheckPlayback failed", e)
-                    _state.update { it.copy(statusMessage = e.message) }
+                    withContext(Dispatchers.IO) { player.stopAndAwait() }
+                    stopPlaybackStatusUpdates()
+                    _state.update {
+                        it.copy(
+                            isPlaying = false,
+                            transportState = TransportState.IDLE,
+                            statusMessage = e.message,
+                        )
+                    }
                 }
             }
         }
@@ -492,6 +516,8 @@ class MixerSessionController(
             captureEngine.updateMonitor(MonitorMixConfig(enabled = false))
             _state.update { it.copy(isMonitoring = false) }
         }
+        captureEngine.updateVuMetering(false)
+        _state.update { it.copy(isVuMetering = false) }
         if (captureEngine.isCaptureActive && !_state.value.isRecording) {
             withContext(Dispatchers.IO) { captureEngine.stopCapture() }
         }
@@ -972,6 +998,7 @@ class MixerSessionController(
         playbackStatusJob = scope.launch {
             var lastPosSec = -1f
             var idleChecks = 0
+            var lastAdvanceMs = System.currentTimeMillis()
             while (isActive) {
                 val st = player.status
                 val activelyPlaying = st.state == TransportState.PLAYING || player.isPlaying
@@ -999,8 +1026,23 @@ class MixerSessionController(
                 idleChecks = 0
                 val posSec = if (sampleRate > 0) st.positionFrames.toFloat() / sampleRate else 0f
                 val durSec = if (sampleRate > 0) st.durationFrames.toFloat() / sampleRate else 0f
-                if (abs(posSec - lastPosSec) >= 0.08f) {
+                if (posSec > lastPosSec + 0.02f) {
                     lastPosSec = posSec
+                    lastAdvanceMs = System.currentTimeMillis()
+                } else if (
+                    lastPosSec >= 0f &&
+                    System.currentTimeMillis() - lastAdvanceMs > 2_500L
+                ) {
+                    OmtLog.w("MixerSession", "playback stalled at ${posSec}s — stopping")
+                    captureMutex.withLock {
+                        stopSoundcheckLocked()
+                        _state.update {
+                            it.copy(
+                                warningMessage = "Playback stalled — USB audio may be busy. Try again.",
+                            )
+                        }
+                    }
+                    break
                 }
                 _state.update { s ->
                     s.copy(
