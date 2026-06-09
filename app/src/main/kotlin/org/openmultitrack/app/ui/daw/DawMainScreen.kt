@@ -185,7 +185,11 @@ fun DawMainScreen(
     var menuOpen by remember { mutableStateOf(false) }
     var playbackStripOverlay by remember { mutableStateOf<Int?>(null) }
     val isRemoteClient = state.remoteRole == RemoteRole.CLIENT &&
-        state.remoteConnectionState == RemoteConnectionState.CONNECTED
+        (state.remoteConnectionState == RemoteConnectionState.CONNECTED ||
+            state.remoteConnectionState == RemoteConnectionState.CONNECTING)
+    val isRemoteSyncing = isRemoteClient &&
+        state.mixers.isEmpty() &&
+        state.remoteConnectionState != RemoteConnectionState.DISCONNECTED
 
     val activeProfile = activeId?.let { id -> state.mixers.firstOrNull { it.id == id } }
     val activeRouting = activeId?.let { mixerRoutingById[it] } ?: MixerRoutingConfig()
@@ -226,14 +230,19 @@ fun DawMainScreen(
                 .padding(padding),
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                if (state.prerequisites.isNotEmpty()) {
+                if (state.prerequisites.isNotEmpty() && !isRemoteClient) {
                     PrerequisiteBanners(
                         items = state.prerequisites,
                         onAction = onPrerequisiteAction,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                     )
                 }
-                if (state.mixers.isEmpty()) {
+                if (isRemoteSyncing) {
+                    RemoteSyncingPrompt(
+                        hostLabel = state.remoteHostName ?: state.remoteConnectedHost,
+                        errorMessage = state.remoteError,
+                    )
+                } else if (state.mixers.isEmpty()) {
                     EmptyMixersPrompt(onAddMixer = onAddMixer)
                 } else {
                     activeId?.let { id ->
@@ -501,6 +510,32 @@ fun DawMainScreen(
                 onSetChannelHidden(s.mixerId, strip.index, true, hidden)
             },
         )
+    }
+}
+
+@Composable
+private fun RemoteSyncingPrompt(hostLabel: String?, errorMessage: String?) {
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("Syncing from host…", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            hostLabel?.let { "Loading mixer state from $it" }
+                ?: "Waiting for the host to send mixer state",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        errorMessage?.let { error ->
+            Spacer(Modifier.height(8.dp))
+            Text(
+                error,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
     }
 }
 

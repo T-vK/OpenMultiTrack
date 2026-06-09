@@ -1,5 +1,6 @@
 package org.openmultitrack.remote
 
+import android.util.Log
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoWSD
 import org.json.JSONObject
@@ -29,6 +30,7 @@ class RemoteHostServer(
                 put("protocolVersion", RemoteProtocol.VERSION)
                 hostId?.let { put("hostId", it) }
                 hostName?.let { put("name", it) }
+                put("clients", sockets.size)
             }.toString()
             return NanoHTTPD.newFixedLengthResponse(
                 NanoHTTPD.Response.Status.OK,
@@ -85,6 +87,7 @@ class RemoteHostServer(
 
     private inner class RemoteSocket(handshake: NanoHTTPD.IHTTPSession) : NanoWSD.WebSocket(handshake) {
         override fun onOpen() {
+            Log.i(TAG, "WebSocket client connected (total=${sockets.size + 1})")
             sockets.add(this)
             listener.onClientConnected { msg -> send(msg) }
         }
@@ -113,6 +116,8 @@ class RemoteHostServer(
     }
 
     companion object {
+        private const val TAG = "OMT-Remote"
+
         fun encodeAck(command: String, ok: Boolean, error: String? = null): String =
             JSONObject().apply {
                 put("type", "command_ack")

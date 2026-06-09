@@ -74,6 +74,10 @@ class RemoteControlManager(
     private val clientLivePeaks = mutableMapOf<String, MutableMap<Int, LiveWaveformSnapshot>>()
     private val clientSoundcheckPeaks = mutableMapOf<String, MutableMap<Int, FloatArray>>()
     private var lastSoundcheckWaveformRequestKey: String? = null
+    private var snapshotWaitJob: Job? = null
+    private var lastConnectHostId: String? = null
+    @Volatile
+    private var clientSocketOpen = false
 
     fun applyRole(role: RemoteRole) {
         if (_state.value.role == role) return
@@ -99,31 +103,43 @@ class RemoteControlManager(
 
     fun enterRemoteClientMode() {
         if (_state.value.role == RemoteRole.CLIENT && isRemoteClientConnected()) return
-        applyRole(RemoteRole.CLIENT)
-        refreshPairingState()
-        discoverHosts()
+        if (_state.value.role != RemoteRole.CLIENT) {
+            applyRole(RemoteRole.CLIENT)
+        } else {
+            refreshPairingState()
+            discoverHosts()
+        }
     }
 
     fun discoverHosts() {
         if (_state.value.role != RemoteRole.CLIENT) return
+        if (isRemoteClientConnected()) return
         scope.launch {
             _state.update { it.copy(connectionState = RemoteConnectionState.DISCOVERING, errorMessage = null) }
             val pairedIds = settings.listPairedRemoteHosts().map { it.hostId }.toSet()
             val hosts = RemoteDiscovery.discoverHosts(appContext, pairedHostIds = pairedIds)
                 .sortedWith(compareByDescending<RemoteDiscoveredHost> { it.isPaired }.thenBy { it.name })
             OmtLog.i("Remote", "Discovered ${hosts.size} host(s), paired ids=${pairedIds.size}")
+            if (isRemoteClientConnected()) return@launch
+            val target = hosts.firstOrNull { it.isPaired } ?: hosts.firstOrNull()
+            val pin = target?.hostId?.let { settings.pinForPairedHost(it) }
+                ?: settings.listPairedRemoteHosts().firstOrNull()?.pin
             _state.update {
                 it.copy(
                     discoveredHosts = hosts,
                     pairedHosts = settings.listPairedRemoteHosts(),
                     connectionState = RemoteConnectionState.DISCONNECTED,
-                    errorMessage = if (hosts.isEmpty()) "No hosts found on LAN" else null,
+                    errorMessage = when {
+                        hosts.isEmpty() -> "No hosts found on LAN"
+                        target != null && pin.isNullOrBlank() ->
+                            "Pair with QR or enter the host PIN to connect to ${target.name}"
+                        else -> null
+                    },
                 )
             }
-            val target = hosts.firstOrNull { it.isPaired } ?: hosts.firstOrNull()
-            target?.let {
-                OmtLog.i("Remote", "Connecting to ${it.name} at ${it.host}:${it.port} paired=${it.isPaired}")
-                connectToHost(it)
+            if (target != null && !pin.isNullOrBlank()) {
+                OmtLog.i("Remote", "Connecting to ${target.name} at ${target.host}:${target.port} paired=${target.isPaired}")
+                connectToHost(target)
             }
         }
     }
@@ -131,11 +147,23 @@ class RemoteControlManager(
     fun connectToHost(host: RemoteDiscoveredHost) {
         if (_state.value.role != RemoteRole.CLIENT) return
         val pin = host.hostId?.let { settings.pinForPairedHost(it) }
+            ?: settings.listPairedRemoteHosts().firstOrNull()?.pin
+        if (pin.isNullOrBlank()) {
+            _state.update {
+                it.copy(
+                    errorMessage = "Enter the host pairing PIN to connect to ${host.name}",
+                    connectionState = RemoteConnectionState.DISCONNECTED,
+                )
+            }
+            return
+        }
         connectToAddress(host.host, host.port, host.name, host.hostId, pin)
     }
 
     fun connectManual(host: String, pin: String, port: Int = RemoteProtocol.HTTP_PORT) {
-        if (_state.value.role != RemoteRole.CLIENT) enterRemoteClientMode()
+        if (_state.value.role != RemoteRole.CLIENT) {
+            applyRole(RemoteRole.CLIENT)
+        }
         connectToAddress(host.trim(), port, host.trim(), hostId = null, pin = pin.trim())
     }
 
@@ -182,6 +210,7 @@ class RemoteControlManager(
         pin: String?,
     ) {
         stopClient()
+        lastConnectHostId = hostId
         _state.update {
             it.copy(
                 connectionState = RemoteConnectionState.CONNECTING,
@@ -192,9 +221,6 @@ class RemoteControlManager(
         }
         client = RemoteClient(listener = clientListener).also {
             it.connect(host, port, pin)
-        }
-        if (hostId != null && !pin.isNullOrBlank()) {
-            settings.savePairedRemoteHost(RemotePairedHost(hostId, name, pin))
         }
     }
 
@@ -216,8 +242,7 @@ class RemoteControlManager(
     }
 
     fun isRemoteClientConnected(): Boolean =
-        _state.value.role == RemoteRole.CLIENT &&
-            _state.value.connectionState == RemoteConnectionState.CONNECTED
+        _state.value.role == RemoteRole.CLIENT && clientSocketOpen && clientMirror != null
 
     fun sendCommand(command: String, payload: JSONObject = JSONObject()) {
         if (!isRemoteClientConnected()) return
@@ -331,7 +356,10 @@ class RemoteControlManager(
 
     private val hostListener = object : RemoteHostServer.Listener {
         override fun onClientConnected(sendToClient: (String) -> Unit) {
-            val manager = getManager() ?: return
+            val manager = getManager() ?: run {
+                OmtLog.e("Remote", "Client connected but session manager unavailable")
+                return
+            }
             val sessions = manager.mixerIds().associateWith { id -> manager.getOrCreate(id).state.value }
             val snapshot = RemoteSnapshotMapper.buildSnapshot(
                 hostName = _state.value.hostName ?: "OpenMultiTrack",
@@ -341,13 +369,32 @@ class RemoteControlManager(
                 sessions = sessions,
             )
             lastHostSnapshot = snapshot
-            sendToClient(RemoteJsonCodec.encodeSnapshot(snapshot))
+            val payload = RemoteJsonCodec.encodeSnapshot(snapshot)
+            OmtLog.i(
+                "Remote",
+                "Sending snapshot to client: mixers=${snapshot.mixers.size} sessions=${snapshot.sessions.size}",
+            )
+            sendToClient(payload)
         }
 
         override fun onClientMessage(json: String, sendToClient: (String) -> Unit) {
             val manager = getManager() ?: return
             val (command, payload) = runCatching { RemoteJsonCodec.decodeCommand(json) }.getOrElse {
                 sendToClient(RemoteHostServer.encodeAck("unknown", false, it.message))
+                return
+            }
+            if (command == "request_snapshot") {
+                val sessions = manager.mixerIds().associateWith { id -> manager.getOrCreate(id).state.value }
+                val snapshot = RemoteSnapshotMapper.buildSnapshot(
+                    hostName = _state.value.hostName ?: "OpenMultiTrack",
+                    settings = settings,
+                    mixers = mixerStore.listMixers(),
+                    activeMixerId = manager.activeMixerId.value,
+                    sessions = sessions,
+                )
+                lastHostSnapshot = snapshot
+                sendToClient(RemoteJsonCodec.encodeSnapshot(snapshot))
+                sendToClient(RemoteHostServer.encodeAck(command, true))
                 return
             }
             val executor = RemoteCommandExecutor(manager, settings, promoteForeground)
@@ -368,14 +415,36 @@ class RemoteControlManager(
 
     private val clientListener = object : RemoteClient.Listener {
         override fun onConnected() {
-            OmtLog.i("Remote", "Client connected to host")
-            _state.update { it.copy(connectionState = RemoteConnectionState.CONNECTED, errorMessage = null) }
+            OmtLog.i("Remote", "WebSocket open, awaiting host snapshot")
+            _state.update { it.copy(connectionState = RemoteConnectionState.CONNECTING, errorMessage = null) }
+            snapshotWaitJob?.cancel()
+            snapshotWaitJob = scope.launch {
+                delay(300)
+                if (clientMirror == null) {
+                    OmtLog.i("Remote", "Requesting snapshot from host")
+                    client?.send(RemoteJsonCodec.encodeCommand("request_snapshot"))
+                }
+                delay(4000)
+                if (clientMirror == null) {
+                    OmtLog.e("Remote", "No snapshot received — check PIN or host state")
+                    failClientConnection("Could not sync with host. Check the PIN and try again.")
+                }
+            }
         }
 
         override fun onMessage(json: String) {
             val root = runCatching { JSONObject(json) }.getOrNull() ?: return
-            when (root.optString("type")) {
-                "snapshot" -> applyClientSnapshot(RemoteJsonCodec.decodeSnapshot(json))
+            val type = root.optString("type")
+            OmtLog.d("Remote", "Client message type=$type bytes=${json.length}")
+            when (type) {
+                "snapshot" -> {
+                    val snapshot = runCatching { RemoteJsonCodec.decodeSnapshot(json) }.getOrElse { e ->
+                        OmtLog.e("Remote", "Snapshot decode failed", e)
+                        _state.update { it.copy(errorMessage = "Host state sync failed: ${e.message}") }
+                        return
+                    }
+                    applyClientSnapshot(snapshot)
+                }
                 "delta" -> {
                     val delta = RemoteJsonCodec.decodeDelta(json)
                     val base = clientMirror ?: return
@@ -403,11 +472,15 @@ class RemoteControlManager(
         }
 
         override fun onDisconnected(reason: String?) {
+            clientSocketOpen = false
             _state.update {
                 it.copy(
                     connectionState = RemoteConnectionState.DISCONNECTED,
                     errorMessage = reason,
                     sessionByMixer = emptyMap(),
+                    mixers = emptyList(),
+                    activeMixerId = null,
+                    uiSettings = null,
                 )
             }
             clientMirror = null
@@ -415,17 +488,40 @@ class RemoteControlManager(
         }
 
         override fun onFailure(error: String) {
-            OmtLog.e("Remote", "Client connection failed: $error")
-            _state.update {
-                it.copy(
-                    connectionState = RemoteConnectionState.ERROR,
-                    errorMessage = error,
-                )
-            }
+            failClientConnection(error)
+        }
+    }
+
+    private fun failClientConnection(error: String) {
+        snapshotWaitJob?.cancel()
+        snapshotWaitJob = null
+        clientSocketOpen = false
+        stopClient()
+        OmtLog.e("Remote", "Client connection failed: $error")
+        _state.update {
+            it.copy(
+                connectionState = RemoteConnectionState.ERROR,
+                errorMessage = error,
+                sessionByMixer = emptyMap(),
+                mixers = emptyList(),
+                activeMixerId = null,
+                uiSettings = null,
+            )
         }
     }
 
     private fun applyClientSnapshot(snapshot: RemoteMirrorSnapshot) {
+        snapshotWaitJob?.cancel()
+        snapshotWaitJob = null
+        clientSocketOpen = true
+        val hostName = _state.value.hostName ?: snapshot.hostName
+        val pin = lastConnectHostId?.let { settings.pinForPairedHost(it) }
+            ?: settings.listPairedRemoteHosts().firstOrNull()?.pin
+        lastConnectHostId?.let { hostId ->
+            if (!pin.isNullOrBlank()) {
+                settings.savePairedRemoteHost(RemotePairedHost(hostId, hostName, pin))
+            }
+        }
         val previousDir = clientMirror?.sessions?.get(snapshot.activeMixerId ?: "")?.selectedSoundcheckDir
         clientMirror = snapshot
         val newDir = snapshot.sessions[snapshot.activeMixerId ?: ""]?.selectedSoundcheckDir
@@ -504,12 +600,20 @@ class RemoteControlManager(
                 displayName = profile.displayName,
             )
         }
+        val activeMixerId = mirror.activeMixerId
+            ?: mixers.firstOrNull()?.id
+            ?: _state.value.activeMixerId
+        OmtLog.i(
+            "Remote",
+            "Mirror updated: mixers=${mixers.size} sessions=${sessions.size} active=$activeMixerId",
+        )
         _state.update {
             it.copy(
                 mixers = mixers,
-                activeMixerId = mirror.activeMixerId,
+                activeMixerId = activeMixerId,
                 sessionByMixer = sessions,
                 uiSettings = uiSettings,
+                connectionState = RemoteConnectionState.CONNECTED,
             )
         }
     }
@@ -527,6 +631,9 @@ class RemoteControlManager(
     }
 
     private fun stopClient() {
+        snapshotWaitJob?.cancel()
+        snapshotWaitJob = null
+        clientSocketOpen = false
         client?.disconnect()
         client = null
         clientMirror = null

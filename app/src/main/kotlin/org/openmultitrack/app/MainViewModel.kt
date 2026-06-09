@@ -172,7 +172,9 @@ class MainViewModel(
             OmtLog.w("ViewModel", "session service lost — will re-attach on reconnect")
         }
         sessionClient.bind()
-        loadMixers()
+        if (settings.remoteRole != RemoteRole.CLIENT) {
+            loadMixers()
+        }
         sessionClient.whenReady { manager ->
             if (!sessionAttached) {
                 attachToSessionManager(manager)
@@ -203,8 +205,10 @@ class MainViewModel(
 
     private fun attachRemoteControl() {
         val remote = sessionClient.getRemoteControl() ?: return
-        remote.applyRole(settings.remoteRole)
         remote.refreshPairingState()
+        if (remote.state.value.role != settings.remoteRole && !remote.isRemoteClientConnected()) {
+            remote.applyRole(settings.remoteRole)
+        }
         viewModelScope.launch {
             remote.state.collect { remoteState -> applyRemoteState(remoteState) }
         }
@@ -225,32 +229,44 @@ class MainViewModel(
                 remoteHostDeviceId = remoteState.hostDeviceId,
                 remoteError = remoteState.errorMessage,
             )
-            if (remoteState.role == RemoteRole.CLIENT &&
-                remoteState.connectionState == RemoteConnectionState.CONNECTED
-            ) {
-                val settingsPatch = remoteState.uiSettings
-                base.copy(
-                    mixers = remoteState.mixers,
-                    activeMixerId = remoteState.activeMixerId,
-                    sessionByMixer = remoteState.sessionByMixer,
-                    hideArmButton = settingsPatch?.hideArmButton ?: ui.hideArmButton,
-                    hideMonitorButton = settingsPatch?.hideMonitorButton ?: ui.hideMonitorButton,
-                    hideSoloButton = settingsPatch?.hideSoloButton ?: ui.hideSoloButton,
-                    hideRoutingBadges = ui.hideRoutingBadges,
-                    showWaveforms = settingsPatch?.showWaveforms ?: ui.showWaveforms,
-                    showVuMeters = settingsPatch?.showVuMeters ?: ui.showVuMeters,
-                    monitorGainLinear = settingsPatch?.monitorGainLinear ?: ui.monitorGainLinear,
-                    recordWaveformWindowSec = settingsPatch?.recordWaveformWindowSec ?: ui.recordWaveformWindowSec,
-                    playbackWaveformWindowSec = settingsPatch?.playbackWaveformWindowSec ?: ui.playbackWaveformWindowSec,
-                    stripNumberMode = settingsPatch?.stripNumberMode?.let {
-                        StripNumberMode.entries.getOrElse(it) { StripNumberMode.HIDE_WHEN_LABELED }
-                    } ?: ui.stripNumberMode,
-                    stripIconMode = settingsPatch?.stripIconMode?.let {
-                        StripIconMode.entries.getOrElse(it) { StripIconMode.SHOW }
-                    } ?: ui.stripIconMode,
-                )
-            } else {
-                base
+            val mirrorReady = remoteState.mixers.isNotEmpty() || remoteState.sessionByMixer.isNotEmpty()
+            when {
+                remoteState.role == RemoteRole.CLIENT && mirrorReady -> {
+                    val settingsPatch = remoteState.uiSettings
+                    base.copy(
+                        mixers = remoteState.mixers,
+                        activeMixerId = remoteState.activeMixerId
+                            ?: remoteState.mixers.firstOrNull()?.id,
+                        sessionByMixer = remoteState.sessionByMixer,
+                        hideArmButton = settingsPatch?.hideArmButton ?: ui.hideArmButton,
+                        hideMonitorButton = settingsPatch?.hideMonitorButton ?: ui.hideMonitorButton,
+                        hideSoloButton = settingsPatch?.hideSoloButton ?: ui.hideSoloButton,
+                        hideRoutingBadges = ui.hideRoutingBadges,
+                        showWaveforms = settingsPatch?.showWaveforms ?: ui.showWaveforms,
+                        showVuMeters = settingsPatch?.showVuMeters ?: ui.showVuMeters,
+                        monitorGainLinear = settingsPatch?.monitorGainLinear ?: ui.monitorGainLinear,
+                        recordWaveformWindowSec = settingsPatch?.recordWaveformWindowSec
+                            ?: ui.recordWaveformWindowSec,
+                        playbackWaveformWindowSec = settingsPatch?.playbackWaveformWindowSec
+                            ?: ui.playbackWaveformWindowSec,
+                        stripNumberMode = settingsPatch?.stripNumberMode?.let {
+                            StripNumberMode.entries.getOrElse(it) { StripNumberMode.HIDE_WHEN_LABELED }
+                        } ?: ui.stripNumberMode,
+                        stripIconMode = settingsPatch?.stripIconMode?.let {
+                            StripIconMode.entries.getOrElse(it) { StripIconMode.SHOW }
+                        } ?: ui.stripIconMode,
+                    )
+                }
+                remoteState.role == RemoteRole.CLIENT &&
+                    remoteState.connectionState == RemoteConnectionState.DISCONNECTED &&
+                    !mirrorReady -> {
+                    base.copy(
+                        mixers = emptyList(),
+                        activeMixerId = null,
+                        sessionByMixer = emptyMap(),
+                    )
+                }
+                else -> base
             }
         }
     }
@@ -273,6 +289,7 @@ class MainViewModel(
 
     fun disconnectRemote() {
         sessionClient.withRemoteControl { it.disconnect() }
+        loadMixers()
     }
 
     fun showMixerPicker(show: Boolean) {
