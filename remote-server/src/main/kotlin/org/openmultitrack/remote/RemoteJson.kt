@@ -119,7 +119,7 @@ internal object RemoteJson {
             mixerId = root.optString("mixerId", ""),
             sessionDir = root.optString("sessionDir", ""),
             channel = root.getInt("channel"),
-            startSec = root.getFloat("startSec"),
+            startSec = root.getDouble("startSec").toFloat(),
             peaks = peaks,
         )
     }

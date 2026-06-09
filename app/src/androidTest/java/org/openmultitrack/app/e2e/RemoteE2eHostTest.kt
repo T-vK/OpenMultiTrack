@@ -40,7 +40,7 @@ class RemoteE2eHostTest {
     fun hostPreparesSessionAndServesRemoteClient() = runBlocking {
         val mixer = E2eMixerHarness(appRule).also { mixerHarness = it }
         val ctrl = mixer.bindAndRegisterXr18()
-        val sessionDir = mixer.recordShortSession(ctrl)
+        val sessionDir = mixer.recordShortSession(ctrl, seconds = 15)
         mixer.prepareSoundcheck(ctrl, sessionDir)
 
         val remote = E2eRemoteHarness(appRule).also { remoteHarness = it }

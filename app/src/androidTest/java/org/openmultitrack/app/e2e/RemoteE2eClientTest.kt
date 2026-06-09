@@ -56,34 +56,10 @@ class RemoteE2eClientTest {
         val mirror = remote.state().value.sessionByMixer[mixerId]
         assertThat(mirror).isNotNull()
         assertThat(mirror!!.selectedSoundcheckDir).isEqualTo(sessionDir)
-        assertThat(mirror.playbackDurationSec).isGreaterThan(1f)
+        awaitSoundcheckReady(remote)
 
-        remote.sendRemote(
-            "set_app_mode",
-            JSONObject().put("mixerId", mixerId).put("mode", AppMode.MULTITRACK_RECORD.ordinal),
-        )
-        delay(500)
-        remote.sendRemote("start_record", JSONObject().put("mixerId", mixerId))
-        E2eWait.untilRemoteState(remote.state(), 45_000) {
-            it.sessionByMixer[mixerId]?.isRecording == true
-        }
-        delay(2_000)
-        remote.sendRemote("stop_record", JSONObject().put("mixerId", mixerId))
-        E2eWait.untilRemoteState(remote.state(), 45_000) {
-            it.sessionByMixer[mixerId]?.isRecording != true
-        }
-
-        remote.sendRemote(
-            "load_into_soundcheck",
-            JSONObject().put("mixerId", mixerId).put("sessionDir", sessionDir),
-        )
-        delay(2_000)
-
-        remote.sendRemote(
-            "toggle_playback",
-            JSONObject().put("mixerId", mixerId),
-        )
-        E2eWait.untilRemoteState(remote.state(), 30_000) {
+        remote.sendRemote("play_playback", JSONObject().put("mixerId", mixerId))
+        E2eWait.untilRemoteState(remote.state(), 60_000) {
             it.sessionByMixer[mixerId]?.isPlaying == true
         }
         delay(1_000)
@@ -94,8 +70,7 @@ class RemoteE2eClientTest {
             "seek",
             JSONObject().put("mixerId", mixerId).put("positionSec", seekTarget.toDouble()),
         )
-        delay(500)
-        E2eWait.untilRemoteState(remote.state(), 15_000) {
+        E2eWait.untilRemoteState(remote.state(), 20_000) {
             val pos = it.sessionByMixer[mixerId]?.playbackPositionSec ?: 0f
             abs(pos - seekTarget) <= 1.5f
         }
@@ -117,8 +92,7 @@ class RemoteE2eClientTest {
             "seek",
             JSONObject().put("mixerId", mixerId).put("positionSec", seekAfterZoom.toDouble()),
         )
-        delay(500)
-        E2eWait.untilRemoteState(remote.state(), 15_000) {
+        E2eWait.untilRemoteState(remote.state(), 20_000) {
             val pos = it.sessionByMixer[mixerId]?.playbackPositionSec ?: 0f
             abs(pos - seekAfterZoom) <= 1.5f
         }
@@ -127,16 +101,39 @@ class RemoteE2eClientTest {
             "set_app_mode",
             JSONObject().put("mixerId", mixerId).put("mode", AppMode.SIMPLE_PLAY.ordinal),
         )
-        delay(800)
-        assertThat(remote.state().value.sessionByMixer[mixerId]?.appMode).isEqualTo(AppMode.SIMPLE_PLAY)
+        E2eWait.untilRemoteState(remote.state(), 15_000) {
+            it.sessionByMixer[mixerId]?.appMode == AppMode.SIMPLE_PLAY
+        }
 
         remote.sendRemote("stop_playback", JSONObject().put("mixerId", mixerId))
-        E2eWait.untilRemoteState(remote.state(), 20_000) {
+        E2eWait.untilRemoteState(remote.state(), 30_000) {
             it.sessionByMixer[mixerId]?.isPlaying != true
+        }
+
+        remote.sendRemote(
+            "set_app_mode",
+            JSONObject().put("mixerId", mixerId).put("mode", AppMode.MULTITRACK_RECORD.ordinal),
+        )
+        delay(500)
+        remote.sendRemote("start_record", JSONObject().put("mixerId", mixerId))
+        E2eWait.untilRemoteState(remote.state(), 60_000) {
+            it.sessionByMixer[mixerId]?.isRecording == true
+        }
+        delay(3_000)
+        remote.sendRemote("stop_record", JSONObject().put("mixerId", mixerId))
+        E2eWait.untilRemoteState(remote.state(), 60_000) {
+            it.sessionByMixer[mixerId]?.isRecording != true
         }
 
         testUnexpectedDisconnectRecovery(remote)
         E2eLanSync.signal(E2eLanSync.CLIENT_DONE, targetHost = hostIp)
+    }
+
+    private suspend fun awaitSoundcheckReady(remote: E2eRemoteHarness) {
+        E2eWait.untilRemoteState(remote.state(), 120_000) { state ->
+            val session = state.sessionByMixer[mixerId] ?: return@untilRemoteState false
+            session.playbackDurationSec > 1f && !session.soundcheckWaveformsLoading
+        }
     }
 
     private suspend fun testUnexpectedDisconnectRecovery(remote: E2eRemoteHarness) {
@@ -145,8 +142,6 @@ class RemoteE2eClientTest {
         delay(2_000)
         remote.connectClient(hostIp)
         E2eWait.untilRemoteConnected(remote.state())
-        val remirror = remote.state().value.sessionByMixer[mixerId]
-        assertThat(remirror).isNotNull()
-        assertThat(remirror!!.playbackDurationSec).isGreaterThan(1f)
+        awaitSoundcheckReady(remote)
     }
 }

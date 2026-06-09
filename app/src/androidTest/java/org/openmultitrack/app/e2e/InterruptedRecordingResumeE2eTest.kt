@@ -2,7 +2,6 @@ package org.openmultitrack.app.e2e
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Rule
@@ -48,7 +47,10 @@ class InterruptedRecordingResumeE2eTest {
         val metaBeforeResume = SessionMetadata.read(sessionDir)
         assertThat(metaBeforeResume).isNotNull()
         assertThat(metaBeforeResume!!.incomplete).isTrue()
-        val framesBefore = metaBeforeResume.timelineFramesWritten
+        val wavBytesBefore = sessionDir.listFiles()
+            ?.filter { it.isFile && it.extension.equals("wav", ignoreCase = true) }
+            ?.sumOf { it.length() }
+            ?: 0L
 
         val h = E2eMixerHarness(appRule).also { harness = it }
         val ctrl = h.bindAndRegisterXr18(preserveActiveRecording = true)
@@ -63,10 +65,18 @@ class InterruptedRecordingResumeE2eTest {
             E2eWait.untilRecording(ctrl, timeoutMs = 60_000)
         }
         assertThat(ctrl.state.value.lastRecordingPath).isEqualTo(sessionDir.absolutePath)
-        delay(2_000)
-
-        val framesAfter = SessionMetadata.read(sessionDir)?.timelineFramesWritten ?: 0L
-        assertThat(framesAfter).isGreaterThan(framesBefore)
+        val elapsedWhenResumed = ctrl.state.value.recordElapsedSec
+        E2eWait.untilMixerState(ctrl, 30_000) {
+            it.isRecording && it.recordElapsedSec >= elapsedWhenResumed + 1f
+        }
+        val wavGrew = E2eWait.pollUntil(timeoutMs = 30_000) {
+            val wavBytes = sessionDir.listFiles()
+                ?.filter { it.isFile && it.extension.equals("wav", ignoreCase = true) }
+                ?.sumOf { it.length() }
+                ?: 0L
+            wavBytes > wavBytesBefore
+        }
+        assertThat(wavGrew).isTrue()
 
         ctrl.stopRecording()
         E2eWait.untilNotRecording(ctrl)
