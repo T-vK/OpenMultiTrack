@@ -31,6 +31,7 @@ import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 import org.openmultitrack.domain.channel.ChannelStripState
 import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.domain.session.AppMode
+import org.openmultitrack.domain.session.isPlaybackMode
 import org.openmultitrack.domain.session.TransportState
 import org.openmultitrack.usb.AudioOutputDeviceLabel
 import org.openmultitrack.usb.LabeledAudioDevice
@@ -70,6 +71,11 @@ private sealed class PendingAudioAction {
     data class Resume(val mixerId: String, val sessionDir: java.io.File) : PendingAudioAction()
 }
 
+data class SoundcheckLoadPromptState(
+    val mixerId: String,
+    val sessionDir: String,
+)
+
 data class DawUiState(
     val mixers: List<MixerProfile> = emptyList(),
     val activeMixerId: String? = null,
@@ -108,6 +114,8 @@ data class DawUiState(
     val remotePairingPin: String? = null,
     val remoteHostDeviceId: String? = null,
     val remoteError: String? = null,
+    val soundcheckLoadPrompt: SoundcheckLoadPromptState? = null,
+    val promptLoadSoundcheckAfterRecord: Boolean = true,
 )
 
 class MainViewModel(
@@ -130,6 +138,7 @@ class MainViewModel(
             showVuMeters = settings.showVuMeters,
             stripNumberMode = settings.stripNumberMode,
             stripIconMode = settings.stripIconMode,
+            promptLoadSoundcheckAfterRecord = settings.promptLoadSoundcheckAfterRecord,
         ),
     )
     val uiState: StateFlow<DawUiState> = _uiState.asStateFlow()
@@ -148,6 +157,7 @@ class MainViewModel(
     private var pendingFlow8Action: PendingFlow8Action? = null
     private var pendingAudioAction: PendingAudioAction? = null
     private val lastSessionStatusByMixer = mutableMapOf<String, String?>()
+    private val wasRecordingByMixer = mutableMapOf<String, Boolean>()
 
     init {
         sessionClient.onManagerLost {
@@ -294,6 +304,7 @@ class MainViewModel(
     fun saveMixerRouting(mixerId: String, config: MixerRoutingConfig) {
         routingStore.save(mixerId, config)
         _uiState.update { it.copy(mixerRoutingById = routingStore.loadAll()) }
+        sessionClient.withManager { it.getOrCreate(mixerId).setRouting(config) }
     }
 
     fun updateChannelInputSource(mixerId: String, logicalIndex: Int, usbIndex: Int) {
@@ -542,7 +553,30 @@ class MainViewModel(
             return
         }
         settings.setAppModeForMixer(mixerId, mode)
-        sessionClient.withManager { it.getOrCreate(mixerId).setAppMode(mode) }
+        sessionClient.withManager { mgr ->
+            val ctrl = mgr.getOrCreate(mixerId)
+            ctrl.setRouting(routingStore.get(mixerId))
+            ctrl.setAppMode(mode)
+            if (mode.isPlaybackMode) {
+                ctrl.refreshSoundcheckLibrary()
+            }
+        }
+    }
+
+    fun loadRecordingIntoSoundcheck(mixerId: String, sessionDir: String) {
+        dismissSoundcheckLoadPrompt()
+        setAppMode(mixerId, AppMode.VIRTUAL_SOUNDCHECK)
+        selectSoundcheckSession(mixerId, sessionDir)
+        refreshSoundcheckLibrary(mixerId)
+    }
+
+    fun dismissSoundcheckLoadPrompt() {
+        _uiState.update { it.copy(soundcheckLoadPrompt = null) }
+    }
+
+    fun setPromptLoadSoundcheckAfterRecord(enabled: Boolean) {
+        settings.promptLoadSoundcheckAfterRecord = enabled
+        _uiState.update { it.copy(promptLoadSoundcheckAfterRecord = enabled) }
     }
 
     fun refreshSoundcheckLibrary(mixerId: String) {
@@ -724,6 +758,19 @@ class MainViewModel(
                     it.copy(solo = if (strip.index == index) !wasSolo else false)
                 }
             }
+        }
+    }
+
+    fun toggleMute(mixerId: String, index: Int) {
+        if (isRemoteClient()) {
+            remoteCommand(
+                "toggle_mute",
+                JSONObject().put("mixerId", mixerId).put("index", index),
+            )
+            return
+        }
+        sessionClient.withManager { mgr ->
+            mgr.getOrCreate(mixerId).updateChannelStrip(index) { it.copy(muted = !it.muted) }
         }
     }
 
@@ -1142,8 +1189,9 @@ class MainViewModel(
             manager.registerMixer(profile)
             val ctrl = manager.getOrCreate(profile.id)
             val mode = settings.appModeForMixer(profile.id)
+            ctrl.setRouting(routingStore.get(profile.id))
             ctrl.setAppMode(mode)
-            if (mode == AppMode.VIRTUAL_SOUNDCHECK) {
+            if (mode.isPlaybackMode) {
                 ctrl.refreshSoundcheckLibrary()
             }
             observeMixerSession(profile.id, manager)
@@ -1160,8 +1208,26 @@ class MainViewModel(
         viewModelScope.launch {
             manager.getOrCreate(mixerId).state.collect { session ->
                 if (isRemoteClient()) return@collect
+                val wasRecording = wasRecordingByMixer[mixerId] == true
+                wasRecordingByMixer[mixerId] = session.isRecording
                 _uiState.update { ui ->
                     ui.copy(sessionByMixer = ui.sessionByMixer + (mixerId to session))
+                }
+                if (
+                    wasRecording &&
+                    !session.isRecording &&
+                    settings.promptLoadSoundcheckAfterRecord &&
+                    session.lastRecordingPath != null &&
+                    session.appMode == AppMode.MULTITRACK_RECORD
+                ) {
+                    _uiState.update {
+                        it.copy(
+                            soundcheckLoadPrompt = SoundcheckLoadPromptState(
+                                mixerId = mixerId,
+                                sessionDir = session.lastRecordingPath,
+                            ),
+                        )
+                    }
                 }
                 val msg = session.statusMessage
                 val prev = lastSessionStatusByMixer[mixerId]
@@ -1363,7 +1429,7 @@ class MainViewModel(
         ) {
             return false
         }
-        if (session.appMode == AppMode.VIRTUAL_SOUNDCHECK) {
+        if (session.appMode.isPlaybackMode) {
             if (session.isPlaying || session.transportState == TransportState.PLAYING) return false
         }
         return true

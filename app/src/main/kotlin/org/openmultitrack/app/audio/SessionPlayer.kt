@@ -90,15 +90,17 @@ class SessionPlayer {
         loopStartFrame: Long? = null,
         loopEndFrame: Long? = null,
         loopEnabled: Boolean = false,
+        mixContext: PlaybackMixContext? = null,
     ): Result<Unit> {
         val reader = PerChannelWavReader.open(sessionDir, metadata)
-        val channels = reader.channelCount.coerceAtMost(32)
+        val inputChannels = reader.channelCount.coerceAtMost(32)
+        val outputChannels = mixContext?.usbOutputCount?.coerceAtLeast(1) ?: inputChannels
         return startPlayback(
             scope = scope,
             route = route,
             usbDevice = usbDevice,
             startFrame = startFrame,
-            channels = channels,
+            channels = outputChannels,
             sampleRate = reader.sampleRate,
             duration = reader.frameCount,
             label = sessionDir.absolutePath,
@@ -109,7 +111,11 @@ class SessionPlayer {
         ) {
             reader.use { wav ->
                 if (startFrame > 0) wav.seekFrame(startFrame)
-                readLoop(wav, channels, it)
+                if (mixContext != null) {
+                    readLoopMixed(wav, inputChannels, outputChannels, it, mixContext)
+                } else {
+                    readLoop(wav, inputChannels, it)
+                }
             }
         }
     }
@@ -195,6 +201,46 @@ class SessionPlayer {
             }
         }
         return Result.success(Unit)
+    }
+
+    private fun readLoopMixed(
+        wav: Any,
+        inputChannels: Int,
+        outputChannels: Int,
+        scratch: FloatArray,
+        mixContext: PlaybackMixContext,
+    ) {
+        val backend = activeBackend ?: return
+        val outScratch = FloatArray(2048 * outputChannels)
+        val chunkScratch = FloatArray(2048 * outputChannels)
+        while (playbackJob?.isActive == true) {
+            val frames = synchronized(readerLock) {
+                when (wav) {
+                    is WavReader -> wav.readInterleavedFloat(scratch, 2048)
+                    is PerChannelWavReader -> wav.readInterleavedFloat(scratch, 2048)
+                    else -> 0
+                }
+            }
+            if (frames <= 0) break
+            mixContext.mixInterleaved(scratch, frames, inputChannels, outScratch)
+            var submitted = 0
+            while (submitted < frames && playbackJob?.isActive == true) {
+                maybeLoopRewind()
+                val framesLeft = frames - submitted
+                val sampleStart = submitted * outputChannels
+                val sampleCount = framesLeft * outputChannels
+                System.arraycopy(outScratch, sampleStart, chunkScratch, 0, sampleCount)
+                val written = AudioEngineRouter.writePlaybackFrames(chunkScratch, framesLeft, backend)
+                if (written <= 0) {
+                    Thread.sleep(2)
+                    continue
+                }
+                submitted += written
+                updateMeterLevels(chunkScratch, written, outputChannels, frameOffset = submitted)
+                status = status.copy(positionFrames = status.positionFrames + written)
+                maybeLoopRewind()
+            }
+        }
     }
 
     private fun readLoop(

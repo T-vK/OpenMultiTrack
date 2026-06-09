@@ -20,6 +20,14 @@ object AppLogBuffer {
         while (lines.size > MAX_LINES) lines.removeAt(0)
     }
 
+    fun appendThrowable(level: String, tag: String, throwable: Throwable, maxStackLines: Int = 80) {
+        append(level, tag, "${throwable.javaClass.name}: ${throwable.message}")
+        throwable.stackTraceToString()
+            .lineSequence()
+            .take(maxStackLines)
+            .forEach { line -> append(level, tag, line) }
+    }
+
     fun currentSessionText(): String = lines.joinToString("\n")
 
     fun clearCurrentSession() {

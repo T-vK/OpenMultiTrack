@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 import org.openmultitrack.app.audio.CaptureSessionEngine
 import org.openmultitrack.app.audio.LiveWaveformSnapshot
 import org.openmultitrack.app.audio.MonitorMixConfig
+import org.openmultitrack.app.audio.PlaybackMixContext
 import org.openmultitrack.app.audio.SessionPlayer
 import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.root.LoopbackSetup
@@ -29,7 +30,9 @@ import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 import org.openmultitrack.domain.channel.ChannelStripState
 import org.openmultitrack.domain.mixer.MixerProfile
+import org.openmultitrack.domain.mixer.MixerRoutingConfig
 import org.openmultitrack.domain.session.AppMode
+import org.openmultitrack.domain.session.isPlaybackMode
 import org.openmultitrack.domain.session.TransportState
 import org.openmultitrack.sessionio.session.SessionLibrary
 import org.openmultitrack.sessionio.session.SessionMetadata
@@ -77,6 +80,7 @@ data class MixerSessionUiState(
     val lastRecordingPath: String? = null,
     val monitorOutputDeviceId: Int = -1,
     val captureChannelCount: Int = 0,
+    val playbackChannelCount: Int = 0,
     val recordElapsedSec: Float = 0f,
     val waveformPeaks: Map<Int, LiveWaveformSnapshot> = emptyMap(),
     val captureMeterLevels: Map<Int, Float> = emptyMap(),
@@ -123,6 +127,7 @@ class MixerSessionController(
     private var profile: MixerProfile? = null
     private var lastVuLogNs = 0L
     private var recordingWakeLock: PowerManager.WakeLock? = null
+    private var routingConfig: MixerRoutingConfig = MixerRoutingConfig()
 
     private val storageRoot: File
         get() = settings.storageRootPath?.let { File(it) }
@@ -136,15 +141,29 @@ class MixerSessionController(
         _state.update { it.copy(mixerProfile = mixer) }
     }
 
+    fun setRouting(config: MixerRoutingConfig) {
+        routingConfig = config
+        val s = _state.value
+        if (s.isPlaying && s.appMode.isPlaybackMode) {
+            scope.launch {
+                captureMutex.withLock {
+                    if (_state.value.isPlaying) restartSoundcheckPlaybackLocked()
+                }
+            }
+        }
+    }
+
     fun setProbeResult(descriptor: UsbAudioDeviceDescriptor, probe: FullUsbProbeResult) {
         activeDescriptor = descriptor
         activeProbe = probe
+        val playbackCh = maxPlaybackChannelsFromProbe(probe)
         if (_state.value.isRecording) {
             _state.update {
                 it.copy(
                     usbDescriptor = descriptor,
                     probe = probe,
                     probing = false,
+                    playbackChannelCount = playbackCh,
                 )
             }
             return
@@ -163,6 +182,7 @@ class MixerSessionController(
                 probe = probe,
                 probing = false,
                 captureChannelCount = chCount,
+                playbackChannelCount = playbackCh,
                 channelStrips = strips,
                 statusMessage = "Ready — $chCount channels",
             )
@@ -175,14 +195,14 @@ class MixerSessionController(
     }
 
     fun setAppMode(mode: AppMode) {
-        if (mode == AppMode.VIRTUAL_SOUNDCHECK && _state.value.isRecording) {
+        if (mode.isPlaybackMode && _state.value.isRecording) {
             scope.launch { stopRecording() }
         }
         if (mode == AppMode.MULTITRACK_RECORD) {
             stopSoundcheck()
         }
         _state.update { it.copy(appMode = mode) }
-        if (mode == AppMode.VIRTUAL_SOUNDCHECK) {
+        if (mode.isPlaybackMode) {
             captureEngine.updateVuMetering(false)
             _state.update { it.copy(isVuMetering = false) }
             refreshSoundcheckLibrary()
@@ -398,15 +418,16 @@ class MixerSessionController(
         } ?: return
         withContext(Dispatchers.IO) {
             player.stopAndAwait()
-            val playbackChannels = minOf(
-                metadata.channels.size,
-                maxPlaybackChannelsFromProbe(probe),
-            ).coerceAtLeast(1)
-            val playbackMetadata = metadata.copy(
-                channels = metadata.channels.sortedBy { it.index }.take(playbackChannels),
-            )
-            val route = ensurePlaybackLocked(descriptor, probe, playbackChannels).getOrThrow()
             val ui = _state.value
+            val usbOutputs = maxPlaybackChannelsFromProbe(probe).coerceAtLeast(1)
+            val route = ensurePlaybackLocked(descriptor, probe, usbOutputs).getOrThrow()
+            val mixContext = PlaybackMixContext(
+                appMode = ui.appMode,
+                sessionChannelCount = metadata.channels.size,
+                usbOutputCount = usbOutputs,
+                routing = routingConfig,
+                strips = ui.channelStrips,
+            )
             val loopStart = ui.soundcheckLoopStartSec?.takeIf { ui.soundcheckLoopEnabled }
                 ?.let { (it * metadata.sampleRate).toLong() }
             val loopEnd = ui.soundcheckLoopEndSec?.takeIf { ui.soundcheckLoopEnabled }
@@ -414,22 +435,28 @@ class MixerSessionController(
             player.playSession(
                 scope = scope,
                 sessionDir = dir,
-                metadata = playbackMetadata,
+                metadata = metadata,
                 route = route,
                 usbDevice = activeUsbDevice,
                 startFrame = startFrame,
                 loopStartFrame = loopStart,
                 loopEndFrame = loopEnd,
                 loopEnabled = ui.soundcheckLoopEnabled,
+                mixContext = mixContext,
             ).getOrThrow()
         }
         startPlaybackStatusUpdates(metadata.sampleRate)
+        val statusMessage = when (_state.value.appMode) {
+            AppMode.SIMPLE_PLAY -> "Playing stereo mix to USB 1+2"
+            else -> "Playing to USB returns"
+        }
         _state.update {
             it.copy(
                 isPlaying = true,
                 transportState = TransportState.PLAYING,
-                statusMessage = "Playing to USB returns",
+                statusMessage = statusMessage,
                 warningMessage = null,
+                playbackChannelCount = maxPlaybackChannelsFromProbe(probe),
             )
         }
     }
@@ -488,6 +515,14 @@ class MixerSessionController(
             )
         }
         applyMonitorRouting()
+        val s = _state.value
+        if (s.isPlaying && s.appMode.isPlaybackMode) {
+            scope.launch {
+                captureMutex.withLock {
+                    if (_state.value.isPlaying) restartSoundcheckPlaybackLocked()
+                }
+            }
+        }
     }
 
     fun setMonitorOutputDevice(deviceId: Int) {
@@ -664,7 +699,7 @@ class MixerSessionController(
                 )
             }
             syncVuMeterCapture()
-            if (_state.value.appMode == AppMode.VIRTUAL_SOUNDCHECK) {
+            if (_state.value.appMode.isPlaybackMode) {
                 refreshSoundcheckLibrary()
             }
         }

@@ -53,6 +53,12 @@ class RemoteCommandExecutor(
                 }
                 null
             }
+            "toggle_mute" -> {
+                val mixerId = payload.getString("mixerId")
+                val index = payload.getInt("index")
+                manager.getOrCreate(mixerId).updateChannelStrip(index) { it.copy(muted = !it.muted) }
+                null
+            }
             "start_record" -> {
                 val mixerId = payload.getString("mixerId")
                 check(promoteForeground("Recording")) { "Could not start foreground service" }

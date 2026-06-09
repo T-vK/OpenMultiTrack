@@ -3,17 +3,22 @@ package org.openmultitrack.app.ui.daw
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,7 +35,7 @@ import org.openmultitrack.app.util.AppLogBuffer
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LogViewerSheet(
+fun LogViewerScreen(
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -42,9 +47,24 @@ fun LogViewerSheet(
     }
     val scrollState = rememberScrollState()
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text("Debug log", style = MaterialTheme.typography.titleLarge)
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Debug log") },
+                navigationIcon = {
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close")
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 16.dp),
+        ) {
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -90,9 +110,9 @@ fun LogViewerSheet(
                 logText,
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 480.dp)
-                    .verticalScroll(scrollState),
+                    .fillMaxSize()
+                    .verticalScroll(scrollState)
+                    .padding(bottom = 16.dp),
             )
         }
     }

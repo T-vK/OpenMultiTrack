@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -49,6 +51,8 @@ import androidx.compose.ui.unit.dp
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.domain.remote.RemoteConnectionState
 import org.openmultitrack.domain.session.AppMode
+import org.openmultitrack.domain.session.displayLabel
+import org.openmultitrack.domain.session.isPlaybackMode
 
 private val ToolbarShape = RoundedCornerShape(8.dp)
 private val ToolbarControlHeight = 40.dp
@@ -92,7 +96,7 @@ private fun MixerControlCluster(
     session: MixerSessionUiState?,
     onOpenMixerPicker: () -> Unit,
     onOpenMixerSettings: () -> Unit,
-    onToggleAppMode: () -> Unit,
+    onSetAppMode: (AppMode) -> Unit,
     onStartRecord: () -> Unit,
     onStopRecord: () -> Unit,
     onToggleSoundcheckPlayback: () -> Unit,
@@ -104,7 +108,10 @@ private fun MixerControlCluster(
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
         modifier = Modifier.height(ToolbarControlHeight),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier.fillMaxHeight(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Surface(
                 onClick = onOpenMixerPicker,
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
@@ -138,42 +145,83 @@ private fun MixerControlCluster(
             }
             if (appMode != null) {
                 clusterDivider()
-                val recording = appMode == AppMode.MULTITRACK_RECORD
-                val modeLabel = if (recording) "Recording Mode" else "Virtual Soundcheck"
-                Surface(
-                    onClick = onToggleAppMode,
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-                    modifier = Modifier.height(ToolbarControlHeight),
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Icon(
-                            if (recording) Icons.Default.Mic else Icons.AutoMirrored.Filled.VolumeUp,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Text(
-                            modeLabel,
-                            maxLines = 1,
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    }
-                }
+                AppModeDropdown(
+                    appMode = appMode,
+                    onSetAppMode = onSetAppMode,
+                )
                 clusterDivider()
-                when (appMode) {
-                    AppMode.MULTITRACK_RECORD -> RecordClusterButton(
+                when {
+                    appMode == AppMode.MULTITRACK_RECORD -> RecordClusterButton(
                         session = session,
                         onStartRecord = onStartRecord,
                         onStopRecord = onStopRecord,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
                     )
-                    AppMode.VIRTUAL_SOUNDCHECK -> PlaybackClusterButton(
+                    appMode.isPlaybackMode -> PlaybackClusterButton(
                         session = session,
                         onTogglePlayback = onToggleSoundcheckPlayback,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppModeDropdown(
+    appMode: AppMode,
+    onSetAppMode: (AppMode) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val modeIcon = when (appMode) {
+        AppMode.MULTITRACK_RECORD -> Icons.Default.Mic
+        AppMode.SIMPLE_PLAY -> Icons.Default.PlayArrow
+        AppMode.VIRTUAL_SOUNDCHECK -> Icons.AutoMirrored.Filled.VolumeUp
+    }
+    Box {
+        Surface(
+            onClick = { expanded = true },
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+            modifier = Modifier.height(ToolbarControlHeight),
+        ) {
+            Row(
+                Modifier.padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(
+                    modeIcon,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+                Text(
+                    appMode.displayLabel,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.widthIn(max = 120.dp),
+                )
+                Icon(
+                    Icons.Default.ArrowDropDown,
+                    contentDescription = "Change mode",
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            AppMode.entries.forEach { mode ->
+                DropdownMenuItem(
+                    text = { Text(mode.displayLabel) },
+                    onClick = {
+                        expanded = false
+                        if (mode != appMode) onSetAppMode(mode)
+                    },
+                )
             }
         }
     }
@@ -192,6 +240,7 @@ private fun RecordClusterButton(
     session: MixerSessionUiState?,
     onStartRecord: () -> Unit,
     onStopRecord: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val isRecording = session?.isRecording == true
     val enabled = session?.probe != null
@@ -199,11 +248,12 @@ private fun RecordClusterButton(
         onClick = { if (isRecording) onStopRecord() else onStartRecord() },
         enabled = enabled || isRecording,
         color = if (isRecording) RecordRed else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-        modifier = Modifier
-            .height(ToolbarControlHeight)
-            .widthIn(min = ToolbarControlHeight),
+        modifier = modifier,
     ) {
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 10.dp)) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.fillMaxSize(),
+        ) {
             Icon(
                 imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
                 contentDescription = if (isRecording) "Stop recording" else "Record",
@@ -218,6 +268,7 @@ private fun RecordClusterButton(
 private fun PlaybackClusterButton(
     session: MixerSessionUiState?,
     onTogglePlayback: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val isPlaying = session?.isPlaying == true
     val enabled = session?.selectedSoundcheckDir != null && session.probe != null
@@ -229,11 +280,12 @@ private fun PlaybackClusterButton(
         } else {
             MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
         },
-        modifier = Modifier
-            .height(ToolbarControlHeight)
-            .widthIn(min = ToolbarControlHeight),
+        modifier = modifier,
     ) {
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 10.dp)) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.fillMaxSize(),
+        ) {
             Icon(
                 imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                 contentDescription = if (isPlaying) "Pause playback" else "Play",
@@ -320,7 +372,7 @@ fun DawTopBar(
     remoteConnectionState: RemoteConnectionState,
     onOpenMixerPicker: () -> Unit,
     onOpenMixerSettings: () -> Unit,
-    onToggleAppMode: () -> Unit,
+    onSetAppMode: (AppMode) -> Unit,
     onStartRecord: () -> Unit,
     onStopRecord: () -> Unit,
     onToggleSoundcheckPlayback: () -> Unit,
@@ -359,7 +411,7 @@ fun DawTopBar(
                         session = session,
                         onOpenMixerPicker = onOpenMixerPicker,
                         onOpenMixerSettings = onOpenMixerSettings,
-                        onToggleAppMode = onToggleAppMode,
+                        onSetAppMode = onSetAppMode,
                         onStartRecord = onStartRecord,
                         onStopRecord = onStopRecord,
                         onToggleSoundcheckPlayback = onToggleSoundcheckPlayback,
@@ -367,7 +419,7 @@ fun DawTopBar(
                 }
             },
             actions = {
-                if (appMode == AppMode.VIRTUAL_SOUNDCHECK && showMixerCluster) {
+                if (appMode?.isPlaybackMode == true && showMixerCluster) {
                     LoopMenuButton(
                         session = session,
                         onSetLoopIn = onSetSoundcheckLoopIn,

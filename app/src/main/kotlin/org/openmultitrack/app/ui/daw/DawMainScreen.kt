@@ -85,6 +85,7 @@ import org.openmultitrack.domain.remote.RemoteConnectionState
 import org.openmultitrack.domain.remote.RemoteRole
 import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.TransportState
+import org.openmultitrack.domain.session.isPlaybackMode
 import org.openmultitrack.remote.RemoteDiscoveredHost
 import org.openmultitrack.usb.LabeledAudioDevice
 
@@ -111,6 +112,7 @@ fun DawMainScreen(
     onToggleArm: (String, Int) -> Unit,
     onToggleMonitor: (String, Int) -> Unit,
     onToggleSolo: (String, Int) -> Unit,
+    onToggleMute: (String, Int) -> Unit = { _, _ -> },
     onSetMonitorOutput: (String, Int) -> Unit,
     onStartMonitor: (String) -> Unit,
     onStopMonitor: (String) -> Unit,
@@ -174,10 +176,14 @@ fun DawMainScreen(
     onUpdateChannelOutput: (String, Int, Int) -> Unit = { _, _, _ -> },
     onSetChannelHidden: (String, Int, Boolean, Boolean) -> Unit = { _, _, _, _ -> },
     onPrerequisiteAction: (PrerequisiteKind) -> Unit = {},
+    onLoadRecordingIntoSoundcheck: (String, String) -> Unit = { _, _ -> },
+    onDismissSoundcheckLoadPrompt: () -> Unit = {},
+    onPromptLoadSoundcheckAfterRecordChange: (Boolean) -> Unit = {},
 ) {
     val activeId = state.activeMixerId
     val session = activeId?.let { state.sessionByMixer[it] }
     var menuOpen by remember { mutableStateOf(false) }
+    var playbackStripOverlay by remember { mutableStateOf<Int?>(null) }
     val isRemoteClient = state.remoteRole == RemoteRole.CLIENT &&
         state.remoteConnectionState == RemoteConnectionState.CONNECTED
 
@@ -197,15 +203,8 @@ fun DawMainScreen(
                     remoteConnectionState = state.remoteConnectionState,
                     onOpenMixerPicker = onOpenMixerPicker,
                     onOpenMixerSettings = { activeId?.let(onOpenMixerSettings) },
-                    onToggleAppMode = {
-                        activeId?.let { id ->
-                            val next = if (session?.appMode == AppMode.MULTITRACK_RECORD) {
-                                AppMode.VIRTUAL_SOUNDCHECK
-                            } else {
-                                AppMode.MULTITRACK_RECORD
-                            }
-                            onSetAppMode(id, next)
-                        }
+                    onSetAppMode = { mode ->
+                        activeId?.let { id -> onSetAppMode(id, mode) }
                     },
                     onStartRecord = { activeId?.let(onStartRecord) },
                     onStopRecord = { activeId?.let(onStopRecord) },
@@ -248,8 +247,8 @@ fun DawMainScreen(
                         }
                     }
                     session?.warningMessage?.let { WarningBanner(it) }
-                    when (session?.appMode) {
-                        AppMode.VIRTUAL_SOUNDCHECK -> session?.let { s ->
+                    when {
+                        session?.appMode?.isPlaybackMode == true -> session?.let { s ->
                             SoundcheckPanel(
                                 session = s,
                                 routing = activeRouting,
@@ -269,6 +268,9 @@ fun DawMainScreen(
                                 onSetLoopRegion = { start, end ->
                                     onSetSoundcheckLoopRegion(activeId!!, start, end)
                                 },
+                                onOpenStripControls = { playbackStripOverlay = it },
+                                onToggleMute = { onToggleMute(s.mixerId, it) },
+                                onToggleSolo = { onToggleSolo(s.mixerId, it) },
                             )
                         }
                         else -> session?.let { s ->
@@ -324,6 +326,30 @@ fun DawMainScreen(
         )
     }
 
+    state.soundcheckLoadPrompt?.let { prompt ->
+        AlertDialog(
+            onDismissRequest = onDismissSoundcheckLoadPrompt,
+            title = { Text("Load into Virtual Soundcheck?") },
+            text = {
+                Text(
+                    "Your recording is saved. Open it in Virtual Soundcheck mode to audition and route channels back to the mixer?",
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    onLoadRecordingIntoSoundcheck(prompt.mixerId, prompt.sessionDir)
+                }) {
+                    Text("Load")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissSoundcheckLoadPrompt) {
+                    Text("Not now")
+                }
+            },
+        )
+    }
+
     state.flow8PairingDialog?.let {
         AlertDialog(
             onDismissRequest = onDismissFlow8PairingDialog,
@@ -368,6 +394,7 @@ fun DawMainScreen(
                 playbackWaveformWindowSec = playbackWaveformWindowSec,
                 stripNumberMode = state.stripNumberMode,
                 stripIconMode = state.stripIconMode,
+                promptLoadSoundcheckAfterRecord = state.promptLoadSoundcheckAfterRecord,
             ),
             monitorGain = monitorGain,
             onMonitorGainChange = onMonitorGainChange,
@@ -382,6 +409,7 @@ fun DawMainScreen(
             onPlaybackWaveformWindowChange = onPlaybackWaveformWindowChange,
             onStripNumberModeChange = onStripNumberModeChange,
             onStripIconModeChange = onStripIconModeChange,
+            onPromptLoadSoundcheckAfterRecordChange = onPromptLoadSoundcheckAfterRecordChange,
         )
     }
 
@@ -406,6 +434,7 @@ fun DawMainScreen(
                 channelCount = sessionForSettings?.channelStrips?.size
                     ?: profile.channelStrips.size,
                 usbChannelCount = sessionForSettings?.captureChannelCount ?: 0,
+                usbPlaybackChannelCount = sessionForSettings?.playbackChannelCount ?: 0,
                 strips = sessionForSettings?.channelStrips ?: profile.channelStrips,
                 config = mixerRoutingById[settingsMixerId] ?: MixerRoutingConfig(),
                 appMode = sessionForSettings?.appMode,
@@ -444,7 +473,33 @@ fun DawMainScreen(
     }
 
     if (state.showLogViewer) {
-        LogViewerSheet(onDismiss = onCloseLog)
+        LogViewerScreen(onDismiss = onCloseLog)
+    }
+
+    playbackStripOverlay?.let { index ->
+        val s = session ?: return@let
+        val strip = s.channelStrips.firstOrNull { it.index == index } ?: return@let
+        ChannelStripControlDialog(
+            strip = strip,
+            routing = activeRouting,
+            usbChannelCount = s.captureChannelCount.coerceAtLeast(s.channelStrips.size),
+            usbPlaybackChannelCount = s.playbackChannelCount.coerceAtLeast(1),
+            controlMode = StripControlMode.PLAYBACK,
+            hideArm = true,
+            hideMonitor = true,
+            hideSolo = state.hideSoloButton,
+            onDismiss = { playbackStripOverlay = null },
+            onSolo = { onToggleSolo(s.mixerId, strip.index) },
+            onMute = { onToggleMute(s.mixerId, strip.index) },
+            onInputSourceChange = { onUpdateChannelInput(s.mixerId, strip.index, it) },
+            onOutputTargetChange = { onUpdateChannelOutput(s.mixerId, strip.index, it) },
+            onHiddenRecordChange = { hidden ->
+                onSetChannelHidden(s.mixerId, strip.index, false, hidden)
+            },
+            onHiddenSoundcheckChange = { hidden ->
+                onSetChannelHidden(s.mixerId, strip.index, true, hidden)
+            },
+        )
     }
 }
 

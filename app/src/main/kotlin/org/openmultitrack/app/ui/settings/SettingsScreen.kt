@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -39,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.openmultitrack.app.data.StripIconMode
 import org.openmultitrack.app.data.StripNumberMode
+import org.openmultitrack.app.ui.daw.ExpandedBottomSheet
 
 data class SettingsUiState(
     val hideArmIcon: Boolean,
@@ -51,6 +53,7 @@ data class SettingsUiState(
     val playbackWaveformWindowSec: Float,
     val stripNumberMode: StripNumberMode,
     val stripIconMode: StripIconMode,
+    val promptLoadSoundcheckAfterRecord: Boolean = true,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -70,8 +73,9 @@ fun SettingsSheet(
     onPlaybackWaveformWindowChange: (Float) -> Unit,
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
+    onPromptLoadSoundcheckAfterRecordChange: (Boolean) -> Unit = {},
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ExpandedBottomSheet(onDismissRequest = onDismiss) {
         SettingsContent(
             state = state,
             monitorGain = monitorGain,
@@ -87,6 +91,7 @@ fun SettingsSheet(
             onPlaybackWaveformWindowChange = onPlaybackWaveformWindowChange,
             onStripNumberModeChange = onStripNumberModeChange,
             onStripIconModeChange = onStripIconModeChange,
+            onPromptLoadSoundcheckAfterRecordChange = onPromptLoadSoundcheckAfterRecordChange,
         )
     }
 }
@@ -107,6 +112,7 @@ private fun SettingsContent(
     onPlaybackWaveformWindowChange: (Float) -> Unit,
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
+    onPromptLoadSoundcheckAfterRecordChange: (Boolean) -> Unit = {},
 ) {
     var query by remember { mutableStateOf("") }
     val normalizedQuery = query.trim().lowercase()
@@ -126,6 +132,7 @@ private fun SettingsContent(
             onStripNumberModeChange = onStripNumberModeChange,
             onStripIconModeChange = onStripIconModeChange,
             onMonitorGainChange = onMonitorGainChange,
+            onPromptLoadSoundcheckAfterRecordChange = onPromptLoadSoundcheckAfterRecordChange,
         )
     }
     val visibleRows = if (normalizedQuery.isEmpty()) {
@@ -137,7 +144,12 @@ private fun SettingsContent(
         }
     }
 
-    Column(Modifier.padding(bottom = 24.dp)) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(0.92f)
+            .padding(bottom = 24.dp),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -184,7 +196,7 @@ private fun SettingsContent(
                 }
             }
             LazyColumn(
-                modifier = Modifier.height(480.dp),
+                modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 items(
@@ -373,7 +385,16 @@ private fun buildSettingsRows(
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
     onMonitorGainChange: (Float) -> Unit,
+    onPromptLoadSoundcheckAfterRecordChange: (Boolean) -> Unit,
 ): List<SettingsRowModel> = listOf(
+    SettingsToggleRow(
+        id = "prompt_soundcheck_after_record",
+        section = "Recording",
+        title = "Prompt for Virtual Soundcheck after recording",
+        description = "When you stop a recording, ask whether to load it into Virtual Soundcheck mode.",
+        checked = state.promptLoadSoundcheckAfterRecord,
+        onCheckedChange = onPromptLoadSoundcheckAfterRecordChange,
+    ),
     SettingsSliderRow(
         id = "monitor_gain",
         section = "Audio",

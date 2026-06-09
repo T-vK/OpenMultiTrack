@@ -57,7 +57,7 @@ fun RemoteControlSheet(
     val isRemoteClient = role == RemoteRole.CLIENT &&
         connectionState == RemoteConnectionState.CONNECTED
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ExpandedBottomSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier
                 .padding(horizontal = 16.dp, vertical = 8.dp)

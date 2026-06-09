@@ -11,6 +11,7 @@ data class ChannelStripState(
     val armed: Boolean = true,
     val monitoring: Boolean = true,
     val solo: Boolean = false,
+    val muted: Boolean = false,
 )
 
 object ChannelColors {

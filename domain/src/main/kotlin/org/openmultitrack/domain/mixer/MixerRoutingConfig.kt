@@ -17,4 +17,8 @@ data class MixerRoutingConfig(
 
     fun isHidden(logicalIndex: Int, soundcheckMode: Boolean): Boolean =
         if (soundcheckMode) logicalIndex in hiddenSoundcheck else logicalIndex in hiddenRecord
+
+    /** True when this strip can be sent to a physical USB playback channel. */
+    fun hasValidPlaybackRoute(logicalIndex: Int, usbPlaybackChannelCount: Int): Boolean =
+        usbPlaybackChannelCount > 0 && outputTarget(logicalIndex) < usbPlaybackChannelCount
 }

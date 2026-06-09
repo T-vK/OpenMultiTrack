@@ -25,7 +25,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
@@ -41,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -56,6 +56,7 @@ import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.app.service.SoundcheckSessionItem
 import org.openmultitrack.domain.channel.ChannelStripState
 import org.openmultitrack.domain.mixer.MixerRoutingConfig
+import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.sessionio.wav.SessionWaveformOverview
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -89,6 +90,9 @@ fun SoundcheckPanel(
     onZoomView: (Float, Float) -> Unit,
     onSetView: (Float, Float) -> Unit,
     onSetLoopRegion: (Float, Float) -> Unit,
+    onOpenStripControls: (Int) -> Unit = {},
+    onToggleMute: (Int) -> Unit = {},
+    onToggleSolo: (Int) -> Unit = {},
 ) {
     Column(
         modifier = Modifier
@@ -135,6 +139,8 @@ fun SoundcheckPanel(
                         !routing.isHidden(it.index, soundcheckMode = true)
                     },
                     routing = routing,
+                    appMode = session.appMode,
+                    playbackChannelCount = session.playbackChannelCount,
                     durationSec = session.playbackDurationSec,
                     viewStartSec = session.soundcheckViewStartSec,
                     viewWindowSec = session.soundcheckViewWindowSec,
@@ -157,6 +163,9 @@ fun SoundcheckPanel(
                     onSeek = onSeek,
                     onSetView = onSetView,
                     onSetLoopRegion = onSetLoopRegion,
+                    onOpenStripControls = onOpenStripControls,
+                    onToggleMute = onToggleMute,
+                    onToggleSolo = onToggleSolo,
                 )
             }
         }
@@ -184,8 +193,7 @@ private fun SoundcheckSessionSelector(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         selected?.title ?: "Select multitrack recording",
                         style = MaterialTheme.typography.titleSmall,
@@ -252,6 +260,8 @@ private fun SoundcheckEmptyState(message: String = "No completed sessions yet. R
 private fun SoundcheckWaveformStripList(
     strips: List<ChannelStripState>,
     routing: MixerRoutingConfig,
+    appMode: AppMode,
+    playbackChannelCount: Int,
     durationSec: Float,
     viewStartSec: Float,
     viewWindowSec: Float,
@@ -274,6 +284,9 @@ private fun SoundcheckWaveformStripList(
     onSeek: (Float) -> Unit,
     onSetView: (Float, Float) -> Unit,
     onSetLoopRegion: (Float, Float) -> Unit,
+    onOpenStripControls: (Int) -> Unit,
+    onToggleMute: (Int) -> Unit,
+    onToggleSolo: (Int) -> Unit,
 ) {
     if (strips.isEmpty()) {
         SoundcheckEmptyState("No channel data in this session.")
@@ -333,6 +346,8 @@ private fun SoundcheckWaveformStripList(
             hideArm,
             hideMonitor,
             hideSolo,
+            controlMode = StripControlMode.PLAYBACK,
+            hideRoutingBadges = hideRoutingBadges,
         )
         val labelGap = innerPad / 2
         val waveformAreaStart = innerPad + labelColumnWidth + labelGap + StripVuMeterWidth + labelGap
@@ -456,6 +471,8 @@ private fun SoundcheckWaveformStripList(
                         SoundcheckStripRow(
                             strip = strip,
                             routing = routing,
+                            appMode = appMode,
+                            playbackChannelCount = playbackChannelCount,
                             stripHeight = stripHeight,
                             innerPad = innerPad,
                             labelFontSize = labelFontSize,
@@ -477,6 +494,9 @@ private fun SoundcheckWaveformStripList(
                             hideMonitor = hideMonitor,
                             hideSolo = hideSolo,
                             hideRoutingBadges = hideRoutingBadges,
+                            onOpenControls = { onOpenStripControls(strip.index) },
+                            onToggleMute = { onToggleMute(strip.index) },
+                            onToggleSolo = { onToggleSolo(strip.index) },
                         )
                         }
                     }
@@ -609,6 +629,8 @@ private enum class LoopHandle { START, END }
 private fun SoundcheckStripRow(
     strip: ChannelStripState,
     routing: MixerRoutingConfig,
+    appMode: AppMode,
+    playbackChannelCount: Int,
     stripHeight: androidx.compose.ui.unit.Dp,
     innerPad: androidx.compose.ui.unit.Dp,
     labelFontSize: Float,
@@ -626,7 +648,12 @@ private fun SoundcheckStripRow(
     hideMonitor: Boolean,
     hideSolo: Boolean,
     hideRoutingBadges: Boolean,
+    onOpenControls: () -> Unit,
+    onToggleMute: () -> Unit,
+    onToggleSolo: () -> Unit,
 ) {
+    val unrouted = appMode == AppMode.VIRTUAL_SOUNDCHECK &&
+        !routing.hasValidPlaybackRoute(strip.index, playbackChannelCount)
     val colorBarHeight = stripHeight - innerPad * 2
     val displayPeaks = rememberViewportPeaks(
         overview = overview,
@@ -657,8 +684,16 @@ private fun SoundcheckStripRow(
             routing = routing,
             soundcheckMode = true,
             hideRoutingBadges = hideRoutingBadges,
-            onClick = {},
+            controlMode = StripControlMode.PLAYBACK,
+            onClick = onOpenControls,
         )
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .then(if (unrouted) Modifier.alpha(0.42f) else Modifier),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(labelGap),
+        ) {
         StripVuMeter(
             level = meterLevel,
             height = colorBarHeight,
@@ -680,6 +715,7 @@ private fun SoundcheckStripRow(
             }
         } else {
             Spacer(Modifier.weight(1f))
+        }
         }
     }
 }

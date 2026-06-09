@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -74,6 +75,7 @@ fun MixerSettingsSheet(
     mixerName: String,
     channelCount: Int,
     usbChannelCount: Int,
+    usbPlaybackChannelCount: Int = usbChannelCount,
     strips: List<ChannelStripState>,
     config: MixerRoutingConfig,
     appMode: AppMode?,
@@ -95,18 +97,22 @@ fun MixerSettingsSheet(
     }
 
     val logicalCount = channelCount.coerceAtLeast(strips.size).coerceAtLeast(1)
-    val usbCount = maxOf(
+    val usbInputCount = maxOf(
         usbChannelCount,
         logicalCount,
         (draft.inputMap.values.maxOrNull() ?: 0) + 1,
+    ).coerceAtLeast(1)
+    val usbOutputCount = maxOf(
+        usbPlaybackChannelCount,
         (draft.outputMap.values.maxOrNull() ?: 0) + 1,
     ).coerceAtLeast(1)
 
     val stripByIndex = strips.associateBy { it.index }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ExpandedBottomSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier
+                .fillMaxHeight(0.92f)
                 .padding(horizontal = 16.dp, vertical = 8.dp)
                 .verticalScroll(rememberScrollState()),
         ) {
@@ -153,7 +159,7 @@ fun MixerSettingsSheet(
                 MixerSettingsPage.InputMatrix -> RoutingMatrix(
                     title = "Tap a cell to route each strip to a USB input.",
                     logicalCount = logicalCount,
-                    usbCount = usbCount,
+                    usbCount = usbInputCount,
                     stripByIndex = stripByIndex,
                     selectedUsb = { logical -> draft.inputSource(logical) },
                     onSelect = { logical, usb ->
@@ -161,9 +167,9 @@ fun MixerSettingsSheet(
                     },
                 )
                 MixerSettingsPage.OutputMatrix -> RoutingMatrix(
-                    title = "Tap a cell to route each strip to a USB output.",
+                    title = "Tap a cell to route playback to USB outputs. Some mixers expose fewer playback channels than inputs (e.g. Flow 8: 10 in, 4 out).",
                     logicalCount = logicalCount,
-                    usbCount = usbCount,
+                    usbCount = usbOutputCount,
                     stripByIndex = stripByIndex,
                     selectedUsb = { logical -> draft.outputTarget(logical) },
                     onSelect = { logical, usb ->

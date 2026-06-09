@@ -74,7 +74,7 @@ fun MixerPickerSheet(
         )
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ExpandedBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(bottom = 24.dp)) {
             Text(
                 "Mixers",

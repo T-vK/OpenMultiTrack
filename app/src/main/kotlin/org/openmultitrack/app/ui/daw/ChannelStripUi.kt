@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -69,6 +70,11 @@ private val VuYellow = Color(0xFFFFB300)
 private val VuRed = Color(0xFFE53935)
 
 val StripVuMeterWidth = 5.dp
+
+enum class StripControlMode {
+    RECORD,
+    PLAYBACK,
+}
 
 @Composable
 internal fun StripVuMeter(
@@ -133,6 +139,8 @@ internal fun stripLabelColumnWidth(
     hideArm: Boolean,
     hideMonitor: Boolean,
     hideSolo: Boolean,
+    controlMode: StripControlMode = StripControlMode.RECORD,
+    hideRoutingBadges: Boolean = false,
 ): Dp {
     if (numberMode == StripNumberMode.NUMBERS_ONLY) return 28.dp
     val hasLabels = strips.any { it.displayName.isNotBlank() || it.label.isNotBlank() }
@@ -152,16 +160,26 @@ internal fun stripLabelColumnWidth(
     val colorBarHeight = stripHeight - innerPad * 2
     val iconGap = 8.dp
     val bigIconWidth = if (showsIcon) iconContainerSize(colorBarHeight) else 0.dp
-    val showsGlyphs = !hideArm || !hideMonitor || !hideSolo
+    val showsGlyphs = when (controlMode) {
+        StripControlMode.RECORD -> !hideArm || !hideMonitor || !hideSolo
+        StripControlMode.PLAYBACK -> !hideSolo
+    }
     val glyphWidth = if (showsGlyphs) {
-        with(density) { (labelFontSize * 3.6f).sp.toDp() }
+        with(density) {
+            when (controlMode) {
+                StripControlMode.RECORD -> (labelFontSize * 3.6f).sp.toDp()
+                StripControlMode.PLAYBACK -> (labelFontSize * 2.4f).sp.toDp()
+            }
+        }
     } else {
         0.dp
     }
+    val badgeWidth = if (!hideRoutingBadges) 30.dp else 0.dp
     val labelWidth = with(density) { maxTextPx.toDp() }
 
     val colorBarGap = if (showsIcon) ColorBarIconGap else 0.dp
-    return (3.dp + colorBarGap + bigIconWidth + iconGap + maxOf(labelWidth, glyphWidth) + 14.dp)
+    return (3.dp + colorBarGap + bigIconWidth + iconGap +
+        maxOf(labelWidth, glyphWidth + badgeWidth) + 14.dp)
         .coerceAtLeast(36.dp)
 }
 
@@ -179,6 +197,7 @@ internal fun StripIdentityCell(
     routing: MixerRoutingConfig,
     soundcheckMode: Boolean,
     hideRoutingBadges: Boolean,
+    controlMode: StripControlMode = StripControlMode.RECORD,
     onClick: () -> Unit,
 ) {
     val parsed = remember(strip.label, strip.displayName, strip.iconId, numberMode, iconMode) {
@@ -222,17 +241,24 @@ internal fun StripIdentityCell(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                if (!hideArm || !hideMonitor || !hideSolo) {
+                val showGlyphs = when (controlMode) {
+                    StripControlMode.RECORD -> !hideArm || !hideMonitor || !hideSolo
+                    StripControlMode.PLAYBACK -> !hideSolo
+                }
+                if (showGlyphs) {
                     StripStatusGlyphs(
                         strip = strip,
                         iconSize = controlIconSize,
                         hideArm = hideArm,
                         hideMonitor = hideMonitor,
                         hideSolo = hideSolo,
+                        controlMode = controlMode,
                     )
+                } else {
+                    Spacer(Modifier.width(1.dp))
                 }
-                Spacer(Modifier.weight(1f))
                 if (!hideRoutingBadges) {
                     val usbIndex = if (soundcheckMode) {
                         routing.outputTarget(strip.index)
@@ -291,37 +317,62 @@ private fun StripStatusGlyphs(
     hideArm: Boolean,
     hideMonitor: Boolean,
     hideSolo: Boolean,
+    controlMode: StripControlMode,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (!hideArm) {
-            StripStatusIcon(
-                icon = Icons.Filled.FiberManualRecord,
-                active = strip.armed,
-                activeColor = RecordRed,
-                inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
-                iconSize = iconSize,
-                contentDescription = "Arm",
-            )
-        }
-        if (!hideMonitor) {
-            StripStatusIcon(
-                icon = Icons.Filled.Headphones,
-                active = strip.monitoring,
-                activeColor = MonitorBlue,
-                inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
-                iconSize = iconSize,
-                contentDescription = "Monitor",
-            )
-        }
-        if (!hideSolo) {
-            StripStatusIcon(
-                icon = Icons.Filled.VolumeUp,
-                active = strip.solo,
-                activeColor = SoloAmber,
-                inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
-                iconSize = iconSize,
-                contentDescription = "Solo",
-            )
+        when (controlMode) {
+            StripControlMode.RECORD -> {
+                if (!hideArm) {
+                    StripStatusIcon(
+                        icon = Icons.Filled.FiberManualRecord,
+                        active = strip.armed,
+                        activeColor = RecordRed,
+                        inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+                        iconSize = iconSize,
+                        contentDescription = "Arm",
+                    )
+                }
+                if (!hideMonitor) {
+                    StripStatusIcon(
+                        icon = Icons.Filled.Headphones,
+                        active = strip.monitoring,
+                        activeColor = MonitorBlue,
+                        inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+                        iconSize = iconSize,
+                        contentDescription = "Monitor",
+                    )
+                }
+                if (!hideSolo) {
+                    StripStatusIcon(
+                        icon = Icons.Filled.VolumeUp,
+                        active = strip.solo,
+                        activeColor = SoloAmber,
+                        inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+                        iconSize = iconSize,
+                        contentDescription = "Solo",
+                    )
+                }
+            }
+            StripControlMode.PLAYBACK -> {
+                StripStatusIcon(
+                    icon = Icons.Filled.VolumeOff,
+                    active = strip.muted,
+                    activeColor = MaterialTheme.colorScheme.error,
+                    inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+                    iconSize = iconSize,
+                    contentDescription = "Mute",
+                )
+                if (!hideSolo) {
+                    StripStatusIcon(
+                        icon = Icons.Filled.VolumeUp,
+                        active = strip.solo,
+                        activeColor = SoloAmber,
+                        inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+                        iconSize = iconSize,
+                        contentDescription = "Solo",
+                    )
+                }
+            }
         }
     }
 }
@@ -428,13 +479,16 @@ internal fun ChannelStripControlDialog(
     strip: ChannelStripState,
     routing: MixerRoutingConfig,
     usbChannelCount: Int,
+    usbPlaybackChannelCount: Int = usbChannelCount,
+    controlMode: StripControlMode = StripControlMode.RECORD,
     hideArm: Boolean,
     hideMonitor: Boolean,
     hideSolo: Boolean,
     onDismiss: () -> Unit,
-    onArm: () -> Unit,
-    onMonitor: () -> Unit,
-    onSolo: () -> Unit,
+    onArm: () -> Unit = {},
+    onMonitor: () -> Unit = {},
+    onSolo: () -> Unit = {},
+    onMute: () -> Unit = {},
     onInputSourceChange: (Int) -> Unit,
     onOutputTargetChange: (Int) -> Unit,
     onHiddenRecordChange: (Boolean) -> Unit,
@@ -478,54 +532,87 @@ internal fun ChannelStripControlDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (!hideArm) {
-                        OverlayChannelToggle(
-                            checked = strip.armed,
-                            icon = Icons.Filled.FiberManualRecord,
-                            activeColor = RecordRed,
-                            iconTintWhenOff = RecordRed,
-                            label = "Arm",
-                            onClick = onArm,
-                        )
-                    }
-                    if (!hideMonitor) {
-                        OverlayChannelToggle(
-                            checked = strip.monitoring,
-                            icon = Icons.Filled.Headphones,
-                            activeColor = MonitorBlue,
-                            iconTintWhenOff = MaterialTheme.colorScheme.onSurfaceVariant,
-                            label = "Monitor",
-                            onClick = onMonitor,
-                        )
-                    }
-                    if (!hideSolo) {
-                        OverlayChannelToggle(
-                            checked = strip.solo,
-                            icon = Icons.Filled.VolumeUp,
-                            activeColor = SoloAmber,
-                            iconTintWhenOff = MaterialTheme.colorScheme.onSurfaceVariant,
-                            label = "Solo",
-                            onClick = onSolo,
-                        )
+                    when (controlMode) {
+                        StripControlMode.RECORD -> {
+                            if (!hideArm) {
+                                OverlayChannelToggle(
+                                    checked = strip.armed,
+                                    icon = Icons.Filled.FiberManualRecord,
+                                    activeColor = RecordRed,
+                                    iconTintWhenOff = RecordRed,
+                                    label = "Arm",
+                                    onClick = onArm,
+                                )
+                            }
+                            if (!hideMonitor) {
+                                OverlayChannelToggle(
+                                    checked = strip.monitoring,
+                                    icon = Icons.Filled.Headphones,
+                                    activeColor = MonitorBlue,
+                                    iconTintWhenOff = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    label = "Monitor",
+                                    onClick = onMonitor,
+                                )
+                            }
+                            if (!hideSolo) {
+                                OverlayChannelToggle(
+                                    checked = strip.solo,
+                                    icon = Icons.Filled.VolumeUp,
+                                    activeColor = SoloAmber,
+                                    iconTintWhenOff = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    label = "Solo",
+                                    onClick = onSolo,
+                                )
+                            }
+                        }
+                        StripControlMode.PLAYBACK -> {
+                            OverlayChannelToggle(
+                                checked = strip.muted,
+                                icon = Icons.Filled.VolumeOff,
+                                activeColor = MaterialTheme.colorScheme.error,
+                                iconTintWhenOff = MaterialTheme.colorScheme.onSurfaceVariant,
+                                label = "Mute",
+                                onClick = onMute,
+                            )
+                            if (!hideSolo) {
+                                OverlayChannelToggle(
+                                    checked = strip.solo,
+                                    icon = Icons.Filled.VolumeUp,
+                                    activeColor = SoloAmber,
+                                    iconTintWhenOff = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    label = "Solo",
+                                    onClick = onSolo,
+                                )
+                            }
+                        }
                     }
                 }
-                Text(
-                    "Routing",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                UsbChannelDropdown(
-                    label = "USB input (recording mode)",
-                    selectedUsbIndex = routing.inputSource(strip.index),
-                    usbChannelCount = usbChannelCount,
-                    onSelect = onInputSourceChange,
-                )
-                UsbChannelDropdown(
-                    label = "USB output (virtual soundcheck)",
-                    selectedUsbIndex = routing.outputTarget(strip.index),
-                    usbChannelCount = usbChannelCount,
-                    onSelect = onOutputTargetChange,
-                )
+                if (controlMode == StripControlMode.RECORD) {
+                    Text(
+                        "Routing",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    UsbChannelDropdown(
+                        label = "USB input (recording mode)",
+                        selectedUsbIndex = routing.inputSource(strip.index),
+                        usbChannelCount = usbChannelCount,
+                        onSelect = onInputSourceChange,
+                    )
+                }
+                if (controlMode == StripControlMode.PLAYBACK) {
+                    Text(
+                        "Routing",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    UsbChannelDropdown(
+                        label = "USB output (playback)",
+                        selectedUsbIndex = routing.outputTarget(strip.index),
+                        usbChannelCount = usbPlaybackChannelCount.coerceAtLeast(1),
+                        onSelect = onOutputTargetChange,
+                    )
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = hiddenRecord, onCheckedChange = onHiddenRecordChange)
                     Text("Hide in recording mode")
