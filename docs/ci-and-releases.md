@@ -13,12 +13,14 @@ The composite action `.github/actions/android-setup` caches:
 
 | Cache | Key inputs | Saves |
 |-------|------------|-------|
-| Gradle | `*.gradle*`, wrapper, version catalog | Dependencies + wrapper |
-| Android SDK | API 35, NDK r26d, build-tools 35 | NDK, CMake, platforms (~minutes) |
-| Native CXX | `audio-engine` sources, Oboe headers | `audio-engine/.cxx` only (not full intermediates) |
+| Gradle | `gradle/actions/setup-gradle` — dependencies, wrapper, build cache | Restored/saved automatically per job |
+| Android SDK | API 35, NDK r26d, build-tools 35 | NDK, CMake, platforms (~minutes on miss) |
+| Native CXX | `audio-engine` sources, Oboe headers | `audio-engine/.cxx` + `intermediates/cxx` |
 | pip | `scripts/requirements-fdroid.txt` | fdroidserver (publish only) |
+| F-Droid repo | prior `fdroid/repo` contents | publish workflow only |
 
 Gradle build cache is enabled via `org.gradle.caching=true` and `--build-cache` on CI invocations.
+The publish **pages** job skips Android SDK setup (APK is verified in the build job).
 
 ## Semantic versioning (commit messages)
 

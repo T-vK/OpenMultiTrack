@@ -1,6 +1,10 @@
 name: Android SDK setup
-description: JDK 17, cached Android SDK/NDK, Gradle, and native build caches
+description: JDK 17, cached Android SDK/NDK, Gradle build cache, and native build caches
 inputs:
+  init-submodules:
+    description: Run git submodule update (skip when checkout already used submodules recursive)
+    required: false
+    default: "false"
   cache-native:
     description: Restore/save CMake/.cxx build cache
     required: false
@@ -9,6 +13,7 @@ runs:
   using: composite
   steps:
     - name: Init submodules
+      if: inputs.init-submodules == 'true'
       shell: bash
       run: git submodule update --init --recursive
 
@@ -17,7 +22,13 @@ runs:
       with:
         distribution: temurin
         java-version: "17"
-        cache: gradle
+
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@v4
+      with:
+        cache-read-only: false
+        gradle-home-cache-cleanup: true
+        add-job-summary: never
 
     - name: Set up Android SDK
       uses: android-actions/setup-android@v3
@@ -32,8 +43,9 @@ runs:
           /usr/local/lib/android/sdk/platforms
           /usr/local/lib/android/sdk/build-tools
           /usr/local/lib/android/sdk/platform-tools
-        key: android-sdk-${{ runner.os }}-api35-ndk26.3-bt35
+        key: android-sdk-${{ runner.os }}-api35-ndk26.3-bt35-v2
         restore-keys: |
+          android-sdk-${{ runner.os }}-api35-ndk26.3-bt35-v2
           android-sdk-${{ runner.os }}-
 
     - name: Accept SDK licenses
@@ -59,10 +71,12 @@ runs:
       if: inputs.cache-native == 'true'
       uses: actions/cache@v4
       with:
-        path: audio-engine/.cxx
-        key: cxx-${{ runner.os }}-${{ hashFiles('audio-engine/src/main/cpp/**', 'third_party/oboe/include/**', 'gradle/libs.versions.toml') }}
+        path: |
+          audio-engine/.cxx
+          audio-engine/build/intermediates/cxx
+        key: native-${{ runner.os }}-${{ hashFiles('audio-engine/src/main/cpp/**', 'audio-engine/build.gradle.kts', 'third_party/oboe/include/**', 'gradle/libs.versions.toml') }}
         restore-keys: |
-          cxx-${{ runner.os }}-
+          native-${{ runner.os }}-
 
     - name: Verify pinned debug signing keystore
       shell: bash

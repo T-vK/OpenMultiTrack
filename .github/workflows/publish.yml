@@ -18,6 +18,7 @@ permissions:
 jobs:
   build:
     name: Build APK
+    if: github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[skip ci]')
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.semver.outputs.version }}
@@ -28,6 +29,7 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 0
+          fetch-tags: true
 
       - uses: ./.github/actions/android-setup
 
@@ -53,7 +55,7 @@ jobs:
             :usb-audio:testDebugUnitTest \
             :app:assembleDebug \
             --build-cache \
-            --no-daemon
+            --parallel
 
       - name: Stage debug APK artifact
         run: |
@@ -100,19 +102,11 @@ jobs:
           cache: pip
           cache-dependency-path: scripts/requirements-fdroid.txt
 
-      - uses: android-actions/setup-android@v3
-
       - name: Download APK
         uses: actions/download-artifact@v4
         with:
           name: release-apk
           path: dist/
-
-      - name: Verify F-Droid APK matches pinned debug signer
-        run: |
-          chmod +x scripts/*.sh
-          export PATH="$ANDROID_HOME/build-tools/35.0.0:$PATH"
-          ./scripts/verify-apk-signature.sh dist/*.apk
 
       - name: Install fdroidserver
         run: pip install -r scripts/requirements-fdroid.txt
@@ -153,7 +147,7 @@ jobs:
           mkdir -p site/fdroid/repo fdroid/repo
           touch site/.nojekyll
           cp dist/*.apk "fdroid/repo/org.openmultitrack_${VERSION}-debug.apk"
-          export PATH="$ANDROID_HOME/build-tools/35.0.0:$ANDROID_HOME/platform-tools:$HOME/.local/bin:$PATH"
+          export PATH="$HOME/.local/bin:$PATH"
           ./scripts/prepare-fdroid-config.sh
           ./scripts/prepare-fdroid-metadata.sh "$VERSION"
           cd fdroid
