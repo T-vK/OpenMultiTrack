@@ -4,7 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.key
@@ -315,7 +318,7 @@ private fun SoundcheckWaveformStripList(
     LaunchedEffect(isPlaying, playheadSec, viewStart, viewWindow, duration) {
         if (!isPlaying || duration <= 0f || viewWindow <= 0f) return@LaunchedEffect
         val viewEnd = viewStart + viewWindow
-        if (playheadSec > viewEnd - viewWindow * 0.12f || playheadSec < viewStart + viewWindow * 0.05f) {
+        if (playheadSec > viewEnd - viewWindow * 0.15f) {
             val maxStart = max(0f, duration - viewWindow)
             val targetStart = (playheadSec - viewWindow * 0.25f).coerceIn(0f, maxStart)
             if (abs(targetStart - viewStart) > 0.05f) {
@@ -373,56 +376,61 @@ private fun SoundcheckWaveformStripList(
             1f
         }
 
-        val timelineGestureModifier = Modifier.pointerInput(
-            loopSelectingState,
-            durationState,
-        ) {
-            detectTapGestures { offset ->
-                val widthPx = waveformWidthState
-                if (widthPx <= 0f) return@detectTapGestures
-                val sec = secFromX(offset.x, widthPx, viewStartState, viewWindowState)
-                if (loopSelectingState) {
-                    val pending = pendingLoopStartState.value
-                    if (pending == null) {
-                        pendingLoopStartState.value = sec
-                    } else {
-                        onSetLoopRegionState(pending, sec)
-                        pendingLoopStartState.value = null
-                    }
-                } else {
-                    onSeekState(sec)
-                }
+        val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+            if (waveformWidthPx <= 0f || loopSelectingState) return@rememberTransformableState
+            gestureActive = true
+            if (zoomChange != 1f) {
+                val focalSec = gestureViewStart + gestureViewWindow / 2f
+                val newWindow = (gestureViewWindow / zoomChange).coerceIn(30f, 600f)
+                gestureViewWindow = newWindow
+                val maxStart = max(0f, durationState - newWindow)
+                gestureViewStart = (focalSec - newWindow / 2f).coerceIn(0f, maxStart)
             }
-            if (!loopSelectingState) {
-                detectTransformGestures { centroid, pan, zoom, _ ->
-                    val widthPx = waveformWidthState
-                    if (widthPx <= 0f) return@detectTransformGestures
-                    gestureActive = true
-                    if (zoom != 1f) {
-                        val focalSec = gestureViewStart + (centroid.x / widthPx) * gestureViewWindow
-                        val newWindow = (gestureViewWindow / zoom).coerceIn(30f, 600f)
-                        val rel = if (gestureViewWindow > 0f) {
-                            (focalSec - gestureViewStart) / gestureViewWindow
-                        } else {
-                            0.5f
-                        }
-                        gestureViewWindow = newWindow
-                        val maxStart = max(0f, durationState - newWindow)
-                        gestureViewStart = (focalSec - rel * newWindow).coerceIn(0f, maxStart)
-                    }
-                    if (pan.x != 0f) {
-                        val deltaSec = -(pan.x / widthPx) * gestureViewWindow
-                        val maxStart = max(0f, durationState - gestureViewWindow)
-                        gestureViewStart = (gestureViewStart + deltaSec).coerceIn(0f, maxStart)
-                    }
-                }
+            if (panChange.x != 0f) {
+                val deltaSec = -(panChange.x / waveformWidthPx) * gestureViewWindow
+                val maxStart = max(0f, durationState - gestureViewWindow)
+                gestureViewStart = (gestureViewStart + deltaSec).coerceIn(0f, maxStart)
             }
         }
-        LaunchedEffect(gestureViewStart, gestureViewWindow, gestureActive) {
-            if (!gestureActive) return@LaunchedEffect
-            kotlinx.coroutines.delay(150)
-            gestureActive = false
-            onSetViewState(gestureViewStart, gestureViewWindow)
+        LaunchedEffect(transformState.isTransformInProgress) {
+            if (!transformState.isTransformInProgress && gestureActive) {
+                gestureActive = false
+                onSetViewState(gestureViewStart, gestureViewWindow)
+            }
+        }
+
+        fun timelineGestureModifier(allowTransform: Boolean): Modifier {
+            val tapModifier = Modifier.pointerInput(loopSelectingState, durationState) {
+                coroutineScope {
+                    launch {
+                        detectTapGestures { offset ->
+                            if (gestureActive || transformState.isTransformInProgress) return@detectTapGestures
+                            val widthPx = waveformWidthState
+                            if (widthPx <= 0f) return@detectTapGestures
+                            val sec = secFromX(offset.x, widthPx, viewStartState, viewWindowState)
+                            if (loopSelectingState) {
+                                val pending = pendingLoopStartState.value
+                                if (pending == null) {
+                                    pendingLoopStartState.value = sec
+                                } else {
+                                    onSetLoopRegionState(pending, sec)
+                                    pendingLoopStartState.value = null
+                                }
+                            } else {
+                                onSeekState(sec)
+                            }
+                        }
+                    }
+                }
+            }
+            return if (allowTransform) {
+                tapModifier.transformable(
+                    state = transformState,
+                    lockRotationOnZoomPan = true,
+                )
+            } else {
+                tapModifier
+            }
         }
 
         Column(modifier = Modifier.fillMaxSize()) {
@@ -442,7 +450,7 @@ private fun SoundcheckWaveformStripList(
                         .height(TimeRulerHeight)
                         .clip(RoundedCornerShape(3.dp))
                         .onSizeChanged { waveformWidthPx = it.width.toFloat() }
-                        .then(timelineGestureModifier),
+                        .then(timelineGestureModifier(allowTransform = !loopSelecting)),
                 ) {
                     androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
                         drawTimeRuler(
@@ -568,7 +576,7 @@ private fun SoundcheckWaveformStripList(
                                 Modifier
                             },
                         )
-                        .then(timelineGestureModifier),
+                        .then(timelineGestureModifier(allowTransform = !loopSelecting)),
                 ) {
                     SoundcheckPlayheadOverlay(
                         viewStartSec = viewStart,

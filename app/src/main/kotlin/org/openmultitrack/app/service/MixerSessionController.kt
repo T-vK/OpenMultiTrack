@@ -459,13 +459,24 @@ class MixerSessionController(
     }
 
     private suspend fun startSoundcheckPlaybackLocked(startFrame: Long) {
-        val descriptor = activeDescriptor ?: return
-        val probe = activeProbe ?: return
-        val sessionDir = _state.value.selectedSoundcheckDir ?: return
+        val descriptor = activeDescriptor
+            ?: throw IllegalStateException("Mixer not connected — reconnect USB")
+        val probe = activeProbe
+            ?: throw IllegalStateException("Mixer not ready — wait for probe to finish")
+        val sessionDir = _state.value.selectedSoundcheckDir
+            ?: throw IllegalStateException("No soundcheck session selected")
         val dir = File(sessionDir)
         val metadata = withContext(Dispatchers.IO) {
             SessionMetadata.read(dir)?.withResolvedChannels(dir)
-        } ?: return
+        } ?: throw IllegalStateException("Could not read session metadata")
+        val durationFrames = withContext(Dispatchers.IO) {
+            SessionPlaybackDuration.durationFrames(dir, metadata)
+        }
+        if (durationFrames <= 0L) {
+            throw IllegalStateException("Session has no playable audio on disk")
+        }
+        val clampedStart = startFrame.coerceIn(0L, (durationFrames - 1).coerceAtLeast(0L))
+        val durationSec = durationFrames.toFloat() / metadata.sampleRate.coerceAtLeast(1)
         withContext(Dispatchers.IO) {
             prepareUsbForPlaybackLocked()
             player.stopAndAwait()
@@ -489,7 +500,7 @@ class MixerSessionController(
                 metadata = metadata,
                 route = route,
                 usbDevice = activeUsbDevice,
-                startFrame = startFrame,
+                startFrame = clampedStart,
                 loopStartFrame = loopStart,
                 loopEndFrame = loopEnd,
                 loopEnabled = ui.soundcheckLoopEnabled,
@@ -507,6 +518,8 @@ class MixerSessionController(
                 statusMessage = statusMessage,
                 warningMessage = null,
                 playbackChannelCount = maxPlaybackChannelsFromProbe(probe),
+                playbackPositionSec = clampedStart.toFloat() / metadata.sampleRate,
+                playbackDurationSec = durationSec,
             )
         }
         startPlaybackStatusUpdates(metadata.sampleRate)
@@ -918,19 +931,15 @@ class MixerSessionController(
     private fun startPlaybackStatusUpdates(sampleRate: Int) {
         playbackStatusJob?.cancel()
         playbackStatusJob = scope.launch {
-            delay(120)
             var lastPosSec = -1f
             var idleChecks = 0
             while (isActive) {
                 val st = player.status
-                if (st.state != TransportState.PLAYING) {
-                    if (player.isPlaying) {
-                        delay(50)
-                        continue
-                    }
+                val activelyPlaying = st.state == TransportState.PLAYING || player.isPlaying
+                if (!activelyPlaying) {
                     idleChecks++
-                    if (idleChecks < 3) {
-                        delay(50)
+                    if (idleChecks < 5) {
+                        delay(40)
                         continue
                     }
                     val finalPos = if (sampleRate > 0) {
@@ -964,7 +973,7 @@ class MixerSessionController(
                         soundcheckMeterLevels = meters,
                     )
                 }
-                delay(80)
+                delay(50)
             }
         }
     }
@@ -977,10 +986,11 @@ class MixerSessionController(
         restoreSoundcheckStripsFromMetadata(metadata)
         val windowSec = settings.playbackWaveformWindowSec.coerceIn(30f, 600f)
         val channelTotal = metadata.channels.size
+        val keepTransport = _state.value.isPlaying && _state.value.selectedSoundcheckDir == sessionDir
         _state.update {
             it.copy(
                 selectedSoundcheckDir = sessionDir,
-                playbackPositionSec = 0f,
+                playbackPositionSec = if (keepTransport) it.playbackPositionSec else 0f,
                 playbackDurationSec = durationSec,
                 soundcheckSampleRate = metadata.sampleRate,
                 soundcheckWaveforms = SessionWaveformOverview(
