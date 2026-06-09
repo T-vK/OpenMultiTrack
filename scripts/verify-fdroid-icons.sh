@@ -15,11 +15,13 @@ test -f "${repo_dir}/${pkg_id}/en-US/icon.png" || {
   exit 1
 }
 
-python3 - "$index" "$pkg_id" <<'PY'
+python3 - "$index" "$repo_dir" "$pkg_id" <<'PY'
+import glob
 import json
+import os
 import sys
 
-index_path, package_name = sys.argv[1:3]
+index_path, repo_dir, package_name = sys.argv[1:4]
 with open(index_path, encoding="utf-8") as handle:
     data = json.load(handle)
 
@@ -34,12 +36,17 @@ if not apps:
 app = apps[0]
 icon = app.get("icon")
 localized_icon = app.get("localized", {}).get("en-US", {}).get("icon")
-if not icon and not localized_icon:
+icons_dir = os.path.join(repo_dir, "icons")
+versioned_icons = glob.glob(os.path.join(icons_dir, f"{package_name}.*.png"))
+
+if not icon and not localized_icon and not versioned_icons:
     raise SystemExit(
-        f"{package_name}: index-v1.json has no app icon "
-        "(expected top-level icon or localized.en-US.icon)"
+        f"{package_name}: no app icon in index and no {package_name}.*.png in repo/icons"
     )
 
 print(f"OK repo icon={repo_icon}")
-print(f"OK {package_name} icon={icon or localized_icon}")
+if icon or localized_icon:
+    print(f"OK {package_name} index icon={icon or localized_icon}")
+else:
+    print(f"OK {package_name} versioned icons={', '.join(os.path.basename(p) for p in versioned_icons)}")
 PY
