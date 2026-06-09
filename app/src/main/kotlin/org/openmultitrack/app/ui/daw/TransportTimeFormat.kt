@@ -42,6 +42,9 @@ fun formatAdaptiveTransportTime(sec: Float): String {
     }
 }
 
+fun formatRecordingStorageInfo(freeBytes: Long, estimateSec: Float): String =
+    "${formatStorageBytes(freeBytes)}\n${formatRecordRemainingEstimate(estimateSec)}"
+
 fun formatRecordRemainingEstimate(sec: Float): String {
     if (sec <= 0f) return "estimate unavailable"
     val total = sec.roundToInt()

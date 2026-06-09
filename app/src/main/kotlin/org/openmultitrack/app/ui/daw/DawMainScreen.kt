@@ -53,10 +53,12 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -199,6 +201,8 @@ fun DawMainScreen(
     val activeId = state.activeMixerId
     val session = activeId?.let { state.sessionByMixer[it] }
     var menuOpen by remember { mutableStateOf(false) }
+    var storageInfoDialogOpen by remember { mutableStateOf(false) }
+    var wasRecording by remember { mutableStateOf(false) }
     var playbackStripOverlay by remember { mutableStateOf<Int?>(null) }
     val isRemoteClient = state.remoteRole == RemoteRole.CLIENT &&
         state.remoteConnectionState == RemoteConnectionState.CONNECTED
@@ -210,6 +214,15 @@ fun DawMainScreen(
 
     val activeProfile = activeId?.let { id -> state.mixers.firstOrNull { it.id == id } }
     val activeRouting = activeId?.let { mixerRoutingById[it] } ?: MixerRoutingConfig()
+    val isRecording = session?.isRecording == true
+    LaunchedEffect(isRecording, state.autoShowRecordingStorageTooltip, state.showRecordingStorageInfoButton) {
+        if (isRecording && !wasRecording && state.autoShowRecordingStorageTooltip && state.showRecordingStorageInfoButton) {
+            storageInfoDialogOpen = true
+            delay(5_000)
+            storageInfoDialogOpen = false
+        }
+        wasRecording = isRecording
+    }
 
     if (state.showLogViewer) {
         LogViewerScreen(onDismiss = onCloseLog)
@@ -361,25 +374,10 @@ fun DawMainScreen(
                     showMixerCluster = state.mixers.isNotEmpty(),
                     isRemoteClient = isRemoteClient,
                     remoteHostLabel = state.remoteHostName ?: state.remoteConnectedHost,
-                    remoteConnectionState = state.remoteConnectionState,
                     remoteConnectedClientCount = state.remoteConnectedClientCount,
                     isRemoteHost = isRemoteHost,
-                    showRecordingStorageInfoButton = state.showRecordingStorageInfoButton,
-                    autoShowRecordingStorageTooltip = state.autoShowRecordingStorageTooltip,
-                    showOpenSessionHint = activeId?.let { mixerId ->
-                        session?.let { s ->
-                            hasNewerRecordingThanSelected(
-                                s.soundcheckSessions,
-                                lastSelectedSoundcheckSession(mixerId),
-                            )
-                        }
-                    } == true,
                     onExitRemoteMode = onExitRemoteMode,
                     onOpenMixerPicker = onOpenMixerPicker,
-                    onOpenMixerSettings = { activeId?.let(onOpenMixerSettings) },
-                    onSetAppMode = { mode ->
-                        activeId?.let { id -> onSetAppMode(id, mode) }
-                    },
                     onStartRecord = { activeId?.let(onStartRecord) },
                     onStopRecord = { activeId?.let(onStopRecord) },
                     onToggleSoundcheckPlayback = { activeId?.let(onToggleSoundcheckPlayback) },
@@ -387,9 +385,6 @@ fun DawMainScreen(
                     onToggleSoundcheckLoop = { activeId?.let(onToggleSoundcheckLoop) },
                     onSetSoundcheckLoopIn = { activeId?.let(onSetSoundcheckLoopIn) },
                     onSetSoundcheckLoopOut = { activeId?.let(onSetSoundcheckLoopOut) },
-                    onOpenSessionPicker = onOpenSessionPicker,
-                    onOpenSettings = onOpenSettings,
-                    onOpenRemoteControl = onOpenRemoteControl,
                     onOpenMenu = { menuOpen = true },
                 )
             }
@@ -543,18 +538,38 @@ fun DawMainScreen(
         )
     }
 
-    if (menuOpen) {
-        AlertDialog(
-            onDismissRequest = { menuOpen = false },
-            title = { Text("Menu") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(onClick = { menuOpen = false; onOpenLog() }) { Text("Log viewer") }
-                }
-            },
-            confirmButton = { TextButton(onClick = { menuOpen = false }) { Text("Close") } },
-        )
-    }
+    DawOverflowMenu(
+        open = menuOpen,
+        onDismiss = { menuOpen = false },
+        appMode = session?.appMode,
+        session = session,
+        isRemoteClient = isRemoteClient,
+        isRemoteHost = isRemoteHost,
+        remoteConnectedClientCount = state.remoteConnectedClientCount,
+        remoteConnectionState = state.remoteConnectionState,
+        showRecordingStorageInfoButton = state.showRecordingStorageInfoButton,
+        showOpenSessionHint = activeId?.let { mixerId ->
+            session?.let { s ->
+                hasNewerRecordingThanSelected(
+                    s.soundcheckSessions,
+                    lastSelectedSoundcheckSession(mixerId),
+                )
+            }
+        } == true,
+        mixerSettingsEnabled = activeId != null,
+        onOpenMixerSettings = { activeId?.let(onOpenMixerSettings) },
+        onSetAppMode = { mode -> activeId?.let { id -> onSetAppMode(id, mode) } },
+        onOpenSessionPicker = onOpenSessionPicker,
+        onOpenRemoteControl = onOpenRemoteControl,
+        onOpenSettings = onOpenSettings,
+        onOpenLog = onOpenLog,
+    )
+
+    RecordingStorageInfoDialog(
+        open = storageInfoDialogOpen,
+        session = session,
+        onDismiss = { storageInfoDialogOpen = false },
+    )
 
     playbackStripOverlay?.let { index ->
         val s = session ?: return@let

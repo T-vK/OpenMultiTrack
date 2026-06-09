@@ -14,9 +14,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.FiberManualRecord
@@ -31,57 +32,44 @@ import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TooltipBox
-import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
-import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.domain.remote.RemoteConnectionState
 import org.openmultitrack.domain.session.AppMode
-import org.openmultitrack.domain.session.abbrevLabel
 import org.openmultitrack.domain.session.displayLabel
-import org.openmultitrack.domain.session.shortLabel
 import org.openmultitrack.domain.session.isPlaybackMode
 
 private val ToolbarShape = RoundedCornerShape(8.dp)
 private val ToolbarControlHeight = 40.dp
-private val MixerNameMaxWidth = 160.dp
-private val ModeLabelFullMinWidth = 520.dp
-private val ModeLabelShortMinWidth = 400.dp
-private val ModeLabelAbbrevMinWidth = 320.dp
-
-private enum class AppModeLabelDensity {
-    FULL,
-    SHORT,
-    ABBREV,
-    ICON_ONLY,
-}
+private val BothTransportsMinWidth = 420.dp
+private val MixerNameWideMaxWidth = 160.dp
+private val MixerNameMediumMaxWidth = 112.dp
+private val MixerNameNarrowMaxWidth = 80.dp
 
 private fun AppMode.toolbarIcon(): ImageVector = when (this) {
     AppMode.MULTITRACK_RECORD -> Icons.Default.FiberManualRecord
@@ -89,12 +77,6 @@ private fun AppMode.toolbarIcon(): ImageVector = when (this) {
     AppMode.SIMPLE_PLAY -> Icons.Default.PlayCircle
 }
 
-private fun AppMode.toolbarLabel(density: AppModeLabelDensity): String? = when (density) {
-    AppModeLabelDensity.FULL -> displayLabel
-    AppModeLabelDensity.SHORT -> shortLabel
-    AppModeLabelDensity.ABBREV -> abbrevLabel
-    AppModeLabelDensity.ICON_ONLY -> null
-}
 private val RecordRed = Color(0xFFE53935)
 private val LoopAmber = Color(0xFFFFB300)
 
@@ -128,101 +110,37 @@ internal fun ToolbarChip(
 }
 
 @Composable
-private fun MixerControlCluster(
+private fun MixerPickerButton(
     activeMixerName: String?,
-    appMode: AppMode?,
-    modeLabelDensity: AppModeLabelDensity,
+    mixerNameMaxWidth: Dp,
     onOpenMixerPicker: () -> Unit,
-    onOpenMixerSettings: () -> Unit,
-    onSetAppMode: (AppMode) -> Unit,
 ) {
     val border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
     Surface(
+        onClick = onOpenMixerPicker,
         shape = ToolbarShape,
         border = border,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
         modifier = Modifier.height(ToolbarControlHeight),
     ) {
         Row(
-            modifier = Modifier.fillMaxHeight(),
+            Modifier.padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Surface(
-                onClick = onOpenMixerPicker,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-                modifier = Modifier.height(ToolbarControlHeight),
-            ) {
-                Row(
-                    Modifier.padding(horizontal = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text(
-                        activeMixerName ?: "Select mixer",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = MixerNameMaxWidth),
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                    Icon(
-                        Icons.Default.ArrowDropDown,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-            }
-            clusterDivider()
-            IconButton(
-                onClick = onOpenMixerSettings,
-                modifier = Modifier.size(ToolbarControlHeight),
-            ) {
-                Icon(Icons.Default.Tune, contentDescription = "Mixer settings")
-            }
-            if (appMode != null) {
-                clusterDivider()
-                AppModeDropdown(
-                    appMode = appMode,
-                    labelDensity = modeLabelDensity,
-                    onSetAppMode = onSetAppMode,
-                )
-            }
+            Text(
+                activeMixerName ?: "Select mixer",
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = mixerNameMaxWidth),
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Icon(
+                Icons.Default.ArrowDropDown,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+            )
         }
-    }
-}
-
-@Composable
-private fun TransportControlCluster(
-    appMode: AppMode,
-    session: MixerSessionUiState?,
-    isRemoteClient: Boolean,
-    showRecordingStorageInfoButton: Boolean,
-    autoShowRecordingStorageTooltip: Boolean,
-    onStartRecord: () -> Unit,
-    onStopRecord: () -> Unit,
-    onToggleSoundcheckPlayback: () -> Unit,
-    onStopSoundcheck: () -> Unit,
-    onToggleSoundcheckLoop: () -> Unit,
-    onSetSoundcheckLoopIn: () -> Unit,
-    onSetSoundcheckLoopOut: () -> Unit,
-) {
-    when {
-        appMode == AppMode.MULTITRACK_RECORD -> RecordTransportCluster(
-            session = session,
-            isRemoteClient = isRemoteClient,
-            showStorageInfoButton = showRecordingStorageInfoButton,
-            autoShowStorageTooltip = autoShowRecordingStorageTooltip,
-            onStartRecord = onStartRecord,
-            onStopRecord = onStopRecord,
-        )
-        appMode.isPlaybackMode -> PlaybackTransportCluster(
-            session = session,
-            isRemoteClient = isRemoteClient,
-            onTogglePlayback = onToggleSoundcheckPlayback,
-            onStopPlayback = onStopSoundcheck,
-            onToggleLoop = onToggleSoundcheckLoop,
-            onSetLoopIn = onSetSoundcheckLoopIn,
-            onSetLoopOut = onSetSoundcheckLoopOut,
-        )
     }
 }
 
@@ -270,13 +188,10 @@ private fun TransportIconButton(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RecordTransportCluster(
     session: MixerSessionUiState?,
     isRemoteClient: Boolean,
-    showStorageInfoButton: Boolean,
-    autoShowStorageTooltip: Boolean,
     onStartRecord: () -> Unit,
     onStopRecord: () -> Unit,
 ) {
@@ -284,22 +199,6 @@ private fun RecordTransportCluster(
     val hostReady = session?.probe != null || (isRemoteClient && session?.captureChannelCount?.let { it > 0 } == true)
     val canRecord = hostReady && !isRecording
     val elapsed = session?.recordElapsedSec ?: 0f
-    val storageTooltipText = remember(session?.storageFreeBytes, session?.storageRecordEstimateSec) {
-        val freeLabel = formatStorageBytes(session?.storageFreeBytes ?: 0L)
-        val remainingLabel = formatRecordRemainingEstimate(session?.storageRecordEstimateSec ?: 0f)
-        "$freeLabel\n$remainingLabel"
-    }
-    val storageTooltipState = rememberTooltipState(isPersistent = true)
-    val scope = rememberCoroutineScope()
-    var wasRecording by remember { mutableStateOf(false) }
-    LaunchedEffect(isRecording, autoShowStorageTooltip) {
-        if (isRecording && !wasRecording && autoShowStorageTooltip && showStorageInfoButton) {
-            storageTooltipState.show()
-            delay(5_000)
-            storageTooltipState.dismiss()
-        }
-        wasRecording = isRecording
-    }
     TransportButtonCluster {
         TransportIconButton(
             onClick = onStartRecord,
@@ -331,34 +230,6 @@ private fun RecordTransportCluster(
                     style = MaterialTheme.typography.labelLarge,
                     color = if (isRecording) RecordRed else MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
-                )
-            }
-        }
-        if (showStorageInfoButton) {
-            clusterDivider()
-            TooltipBox(
-                positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
-                tooltip = {
-                    PlainTooltip {
-                        Text(storageTooltipText)
-                    }
-                },
-                state = storageTooltipState,
-            ) {
-                TransportIconButton(
-                    onClick = {
-                        scope.launch {
-                            if (storageTooltipState.isVisible) {
-                                storageTooltipState.dismiss()
-                            } else {
-                                storageTooltipState.show()
-                            }
-                        }
-                    },
-                    enabled = true,
-                    icon = Icons.Default.Info,
-                    contentDescription = "Storage and recording time estimate",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -473,83 +344,6 @@ private fun LoopTransportButton(
 }
 
 @Composable
-private fun AppModeDropdown(
-    appMode: AppMode,
-    labelDensity: AppModeLabelDensity,
-    onSetAppMode: (AppMode) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val modeIcon = appMode.toolbarIcon()
-    val label = appMode.toolbarLabel(labelDensity)
-    Box {
-        Surface(
-            onClick = { expanded = true },
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-            modifier = Modifier.height(ToolbarControlHeight),
-        ) {
-            Row(
-                Modifier.padding(horizontal = if (label == null) 8.dp else 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Icon(
-                    modeIcon,
-                    contentDescription = appMode.displayLabel,
-                    modifier = Modifier.size(16.dp),
-                    tint = when (appMode) {
-                        AppMode.MULTITRACK_RECORD -> RecordRed
-                        AppMode.VIRTUAL_SOUNDCHECK -> MaterialTheme.colorScheme.primary
-                        AppMode.SIMPLE_PLAY -> MaterialTheme.colorScheme.tertiary
-                    },
-                )
-                if (label != null) {
-                    Text(
-                        label,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.widthIn(max = 96.dp),
-                    )
-                }
-                Icon(
-                    Icons.Default.ArrowDropDown,
-                    contentDescription = "Change mode",
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            AppMode.entries.forEach { mode ->
-                DropdownMenuItem(
-                    text = {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                mode.toolbarIcon(),
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp),
-                                tint = when (mode) {
-                                    AppMode.MULTITRACK_RECORD -> RecordRed
-                                    AppMode.VIRTUAL_SOUNDCHECK -> MaterialTheme.colorScheme.primary
-                                    AppMode.SIMPLE_PLAY -> MaterialTheme.colorScheme.tertiary
-                                },
-                            )
-                            Text(mode.displayLabel)
-                        }
-                    },
-                    onClick = {
-                        expanded = false
-                        if (mode != appMode) onSetAppMode(mode)
-                    },
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun clusterDivider() {
     VerticalDivider(
         modifier = Modifier.height(ToolbarControlHeight),
@@ -566,16 +360,10 @@ fun DawTopBar(
     showMixerCluster: Boolean,
     isRemoteClient: Boolean,
     remoteHostLabel: String?,
-    remoteConnectionState: RemoteConnectionState,
     remoteConnectedClientCount: Int = 0,
     isRemoteHost: Boolean = false,
-    showRecordingStorageInfoButton: Boolean = true,
-    autoShowRecordingStorageTooltip: Boolean = true,
-    showOpenSessionHint: Boolean = false,
     onExitRemoteMode: () -> Unit = {},
     onOpenMixerPicker: () -> Unit,
-    onOpenMixerSettings: () -> Unit,
-    onSetAppMode: (AppMode) -> Unit,
     onStartRecord: () -> Unit,
     onStopRecord: () -> Unit,
     onToggleSoundcheckPlayback: () -> Unit,
@@ -583,9 +371,6 @@ fun DawTopBar(
     onToggleSoundcheckLoop: () -> Unit,
     onSetSoundcheckLoopIn: () -> Unit,
     onSetSoundcheckLoopOut: () -> Unit,
-    onOpenSessionPicker: () -> Unit = {},
-    onOpenSettings: () -> Unit,
-    onOpenRemoteControl: () -> Unit,
     onOpenMenu: () -> Unit = {},
 ) {
     Column {
@@ -638,68 +423,46 @@ fun DawTopBar(
             title = {
                 if (showMixerCluster) {
                     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                        val modeLabelDensity = when {
-                            maxWidth >= ModeLabelFullMinWidth -> AppModeLabelDensity.FULL
-                            maxWidth >= ModeLabelShortMinWidth -> AppModeLabelDensity.SHORT
-                            maxWidth >= ModeLabelAbbrevMinWidth -> AppModeLabelDensity.ABBREV
-                            else -> AppModeLabelDensity.ICON_ONLY
+                        val showBothTransports = maxWidth >= BothTransportsMinWidth
+                        val mixerNameMaxWidth = when {
+                            maxWidth >= 480.dp -> MixerNameWideMaxWidth
+                            maxWidth >= 360.dp -> MixerNameMediumMaxWidth
+                            else -> MixerNameNarrowMaxWidth
                         }
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            MixerControlCluster(
+                            MixerPickerButton(
                                 activeMixerName = activeMixerName,
-                                appMode = appMode,
-                                modeLabelDensity = modeLabelDensity,
+                                mixerNameMaxWidth = mixerNameMaxWidth,
                                 onOpenMixerPicker = onOpenMixerPicker,
-                                onOpenMixerSettings = onOpenMixerSettings,
-                                onSetAppMode = onSetAppMode,
                             )
-                            appMode?.let { mode ->
-                                TransportControlCluster(
-                                    appMode = mode,
+                            val showRecordTransport = showBothTransports ||
+                                appMode == AppMode.MULTITRACK_RECORD
+                            val showPlaybackTransport = showBothTransports ||
+                                appMode?.isPlaybackMode == true
+                            if (showRecordTransport) {
+                                RecordTransportCluster(
                                     session = session,
                                     isRemoteClient = isRemoteClient,
-                                    showRecordingStorageInfoButton = showRecordingStorageInfoButton,
-                                    autoShowRecordingStorageTooltip = autoShowRecordingStorageTooltip,
                                     onStartRecord = onStartRecord,
                                     onStopRecord = onStopRecord,
-                                    onToggleSoundcheckPlayback = onToggleSoundcheckPlayback,
-                                    onStopSoundcheck = onStopSoundcheck,
-                                    onToggleSoundcheckLoop = onToggleSoundcheckLoop,
-                                    onSetSoundcheckLoopIn = onSetSoundcheckLoopIn,
-                                    onSetSoundcheckLoopOut = onSetSoundcheckLoopOut,
+                                )
+                            }
+                            if (showPlaybackTransport) {
+                                PlaybackTransportCluster(
+                                    session = session,
+                                    isRemoteClient = isRemoteClient,
+                                    onTogglePlayback = onToggleSoundcheckPlayback,
+                                    onStopPlayback = onStopSoundcheck,
+                                    onToggleLoop = onToggleSoundcheckLoop,
+                                    onSetLoopIn = onSetSoundcheckLoopIn,
+                                    onSetLoopOut = onSetSoundcheckLoopOut,
                                 )
                             }
                         }
                     }
-                }
-            },
-            actions = {
-                if (appMode?.isPlaybackMode == true) {
-                    OpenSessionButton(
-                        enabled = session?.soundcheckSessions?.isNotEmpty() == true,
-                        showHint = showOpenSessionHint,
-                        onClick = onOpenSessionPicker,
-                    )
-                }
-                val remoteHighlight = isRemoteClient ||
-                    (isRemoteHost && remoteConnectedClientCount > 0) ||
-                    remoteConnectionState == RemoteConnectionState.CONNECTING
-                IconButton(onClick = onOpenRemoteControl) {
-                    Icon(
-                        Icons.Default.Cast,
-                        contentDescription = "Remote control",
-                        tint = if (remoteHighlight) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                    )
-                }
-                IconButton(onClick = onOpenSettings) {
-                    Icon(Icons.Default.Settings, contentDescription = "App settings")
                 }
             },
             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -709,32 +472,219 @@ fun DawTopBar(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun OpenSessionButton(
-    enabled: Boolean,
-    showHint: Boolean,
-    onClick: () -> Unit,
+fun DawOverflowMenu(
+    open: Boolean,
+    onDismiss: () -> Unit,
+    appMode: AppMode?,
+    session: MixerSessionUiState?,
+    isRemoteClient: Boolean,
+    isRemoteHost: Boolean,
+    remoteConnectedClientCount: Int,
+    remoteConnectionState: RemoteConnectionState,
+    showRecordingStorageInfoButton: Boolean,
+    showOpenSessionHint: Boolean,
+    mixerSettingsEnabled: Boolean,
+    onOpenMixerSettings: () -> Unit,
+    onSetAppMode: (AppMode) -> Unit,
+    onOpenSessionPicker: () -> Unit,
+    onOpenRemoteControl: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenLog: () -> Unit,
 ) {
-    val openTooltipState = rememberTooltipState()
-    LaunchedEffect(showHint, enabled) {
-        if (showHint && enabled) {
-            openTooltipState.show()
-        } else {
-            openTooltipState.dismiss()
-        }
+    if (!open) return
+
+    var showStorageInfo by remember { mutableStateOf(false) }
+    val storageInfoText = remember(session?.storageFreeBytes, session?.storageRecordEstimateSec) {
+        formatRecordingStorageInfo(
+            session?.storageFreeBytes ?: 0L,
+            session?.storageRecordEstimateSec ?: 0f,
+        )
     }
-    TooltipBox(
-        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
-        tooltip = {
-            PlainTooltip {
-                Text("Load most recent recording")
+    val remoteHighlight = isRemoteClient ||
+        (isRemoteHost && remoteConnectedClientCount > 0) ||
+        remoteConnectionState == RemoteConnectionState.CONNECTING
+    val openSessionEnabled = appMode?.isPlaybackMode == true &&
+        session?.soundcheckSessions?.isNotEmpty() == true
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Menu") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                DawMenuItem(
+                    icon = Icons.Default.Tune,
+                    label = "Mixer settings",
+                    enabled = mixerSettingsEnabled,
+                    onClick = {
+                        onDismiss()
+                        onOpenMixerSettings()
+                    },
+                )
+                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                Text(
+                    "Mode",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 2.dp),
+                )
+                AppMode.entries.forEach { mode ->
+                    DawMenuItem(
+                        icon = mode.toolbarIcon(),
+                        label = mode.displayLabel,
+                        selected = mode == appMode,
+                        iconTint = when (mode) {
+                            AppMode.MULTITRACK_RECORD -> RecordRed
+                            AppMode.VIRTUAL_SOUNDCHECK -> MaterialTheme.colorScheme.primary
+                            AppMode.SIMPLE_PLAY -> MaterialTheme.colorScheme.tertiary
+                        },
+                        onClick = {
+                            onDismiss()
+                            if (mode != appMode) onSetAppMode(mode)
+                        },
+                    )
+                }
+                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                if (showRecordingStorageInfoButton) {
+                    DawMenuItem(
+                        icon = Icons.Default.Info,
+                        label = "Storage info",
+                        onClick = { showStorageInfo = true },
+                    )
+                }
+                if (appMode?.isPlaybackMode == true) {
+                    DawMenuItem(
+                        icon = Icons.Default.FolderOpen,
+                        label = if (showOpenSessionHint) {
+                            "Open recording (newer available)"
+                        } else {
+                            "Open recording"
+                        },
+                        enabled = openSessionEnabled,
+                        onClick = {
+                            onDismiss()
+                            onOpenSessionPicker()
+                        },
+                    )
+                }
+                DawMenuItem(
+                    icon = Icons.Default.Cast,
+                    label = "Remote control",
+                    iconTint = if (remoteHighlight) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                    onClick = {
+                        onDismiss()
+                        onOpenRemoteControl()
+                    },
+                )
+                DawMenuItem(
+                    icon = Icons.Default.Settings,
+                    label = "Settings",
+                    onClick = {
+                        onDismiss()
+                        onOpenSettings()
+                    },
+                )
+                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                DawMenuItem(
+                    icon = Icons.Default.Menu,
+                    label = "Log viewer",
+                    onClick = {
+                        onDismiss()
+                        onOpenLog()
+                    },
+                )
             }
         },
-        state = openTooltipState,
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        },
+    )
+
+    if (showStorageInfo) {
+        AlertDialog(
+            onDismissRequest = { showStorageInfo = false },
+            title = { Text("Storage") },
+            text = { Text(storageInfoText) },
+            confirmButton = {
+                TextButton(onClick = { showStorageInfo = false }) { Text("OK") }
+            },
+        )
+    }
+}
+
+@Composable
+fun RecordingStorageInfoDialog(
+    open: Boolean,
+    session: MixerSessionUiState?,
+    onDismiss: () -> Unit,
+) {
+    if (!open) return
+    val storageInfoText = remember(session?.storageFreeBytes, session?.storageRecordEstimateSec) {
+        formatRecordingStorageInfo(
+            session?.storageFreeBytes ?: 0L,
+            session?.storageRecordEstimateSec ?: 0f,
+        )
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Storage") },
+        text = { Text(storageInfoText) },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("OK") }
+        },
+    )
+}
+
+@Composable
+private fun DawMenuItem(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    selected: Boolean = false,
+    iconTint: Color = MaterialTheme.colorScheme.onSurface,
+) {
+    val background = if (selected) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+    } else {
+        Color.Transparent
+    }
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        color = background,
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        IconButton(onClick = onClick, enabled = enabled) {
-            Icon(Icons.Default.FolderOpen, contentDescription = "Open recording")
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(22.dp),
+                tint = if (enabled) iconTint else iconTint.copy(alpha = 0.38f),
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (enabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                },
+            )
         }
     }
 }
