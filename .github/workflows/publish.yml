@@ -36,6 +36,7 @@ jobs:
         shell: bash
         run: |
           chmod +x scripts/*.sh
+          ./scripts/test-compute-semver.sh
           ./scripts/compute-semver.sh
 
       - name: Apply version to Gradle
@@ -219,4 +220,4 @@ jobs:
           files: |
             dist/*.apk
             dist/SHA256SUMS
-          prerelease: true
+          prerelease: false

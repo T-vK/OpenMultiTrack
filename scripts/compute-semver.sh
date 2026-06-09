@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Compute semver from conventional commits since the latest v* tag.
-# Writes VERSION, TAG, VERSION_CHANGED to GITHUB_OUTPUT when set.
+# Compute semver from commits since the latest v* tag.
+# Recognizes conventional commits (fix:, feat:) and plain subject lines (Fix …, Add …).
+# Writes version, tag, version_changed to GITHUB_OUTPUT when set.
 set -euo pipefail
 
 TAG_PREFIX="${TAG_PREFIX:-v}"
@@ -23,29 +24,72 @@ else
   commit_range="${last_tag}..HEAD"
 fi
 
+should_skip_subject() {
+  local subject="$1"
+  [[ -z "$subject" ]] && return 0
+  [[ "$subject" == chore\(release\):* ]] && return 0
+  [[ "$subject" == Merge\ * ]] && return 0
+  return 1
+}
+
+classify_subject_bump() {
+  local subject="$1"
+  if [[ "$subject" == *"BREAKING CHANGE"* ]]; then
+    echo major
+    return
+  fi
+  case "$subject" in
+    *!:*|*!\(*:*)
+      echo major
+      return
+      ;;
+  esac
+  case "$subject" in
+    feat:*|feat\(*|Feat:*|Feat\(*|[Aa]dd*|[Ii]mplement*)
+      echo minor
+      return
+      ;;
+  esac
+  case "$subject" in
+    fix:*|fix\(*|Fix*)
+      echo patch
+      return
+      ;;
+  esac
+  echo none
+}
+
 bump="none"
+meaningful_commits=0
 if [[ -n "$(git rev-list "$commit_range" 2>/dev/null | head -1 || true)" ]]; then
   mapfile -t subjects < <(git log "$commit_range" --pretty=format:%s 2>/dev/null || true)
   for subject in "${subjects[@]}"; do
-    [[ -z "$subject" ]] && continue
-    if [[ "$subject" == chore\(release\):* ]]; then
+    if should_skip_subject "$subject"; then
       continue
     fi
-    if [[ "$subject" == *"BREAKING CHANGE"* ]] || [[ "$subject" == *"!"* ]]; then
-      bump="major"
-      break
-    fi
-    if [[ "$subject" == feat:* ]] || [[ "$subject" == feat\(* ]]; then
-      if [[ "$bump" != "major" ]]; then
-        bump="minor"
-      fi
-    fi
-    if [[ "$subject" == fix:* ]] || [[ "$subject" == fix\(* ]]; then
-      if [[ "$bump" == "none" ]]; then
-        bump="patch"
-      fi
-    fi
+    meaningful_commits=1
+    subject_bump="$(classify_subject_bump "$subject")"
+    case "$subject_bump" in
+      major)
+        bump="major"
+        break
+        ;;
+      minor)
+        if [[ "$bump" != "major" ]]; then
+          bump="minor"
+        fi
+        ;;
+      patch)
+        if [[ "$bump" == "none" ]]; then
+          bump="patch"
+        fi
+        ;;
+    esac
   done
+fi
+
+if [[ "$meaningful_commits" -eq 1 && "$bump" == "none" ]]; then
+  bump="patch"
 fi
 
 case "$bump" in
