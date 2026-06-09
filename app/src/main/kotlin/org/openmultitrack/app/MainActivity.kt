@@ -200,7 +200,6 @@ class MainActivity : ComponentActivity() {
                         onToggleSoundcheckLoop = viewModel::toggleSoundcheckLoop,
                         onSetSoundcheckLoopIn = viewModel::setSoundcheckLoopIn,
                         onSetSoundcheckLoopOut = viewModel::setSoundcheckLoopOut,
-                        onResumeInterruptedRecording = viewModel::resumeInterruptedRecording,
                         onConfirmFlow8PairingImport = viewModel::confirmFlow8PairingImport,
                         onDismissFlow8PairingDialog = viewModel::dismissFlow8PairingDialog,
                         onHideArmChange = viewModel::setHideArmButton,

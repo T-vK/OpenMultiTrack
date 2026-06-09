@@ -137,7 +137,6 @@ fun DawMainScreen(
     onToggleSoundcheckLoop: (String) -> Unit,
     onSetSoundcheckLoopIn: (String) -> Unit,
     onSetSoundcheckLoopOut: (String) -> Unit,
-    onResumeInterruptedRecording: (String) -> Unit,
     onConfirmFlow8PairingImport: () -> Unit,
     onDismissFlow8PairingDialog: () -> Unit,
     onHideArmChange: (Boolean) -> Unit,
@@ -255,9 +254,9 @@ fun DawMainScreen(
                             session?.isRecording != true
                         if (showInterrupted) {
                             IncompleteRecordingBanner(
-                                message = "Recording was interrupted. Resume to continue, or finalize to keep what was captured.",
-                                onResume = { onResumeInterruptedRecording(id) },
-                                onFinalize = { onFinalizeIncompleteRecording(id) },
+                                message = state.interruptedRecordingRecovery[id]
+                                    ?: "Recording was interrupted. Resuming automatically…",
+                                onStopAndKeep = { onFinalizeIncompleteRecording(id) },
                             )
                         }
                     }
@@ -581,8 +580,7 @@ private fun WarningBanner(message: String) {
 @Composable
 private fun IncompleteRecordingBanner(
     message: String,
-    onResume: () -> Unit,
-    onFinalize: () -> Unit,
+    onStopAndKeep: () -> Unit,
 ) {
     Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.errorContainer) {
         Row(
@@ -597,11 +595,8 @@ private fun IncompleteRecordingBanner(
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 style = MaterialTheme.typography.bodySmall,
             )
-            TextButton(onClick = onResume) {
-                Text("Resume")
-            }
-            TextButton(onClick = onFinalize) {
-                Text("Finalize")
+            TextButton(onClick = onStopAndKeep) {
+                Text("Stop & keep")
             }
         }
     }

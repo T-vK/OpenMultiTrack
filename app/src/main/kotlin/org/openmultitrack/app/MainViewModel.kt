@@ -106,6 +106,8 @@ data class DawUiState(
     val stripIconMode: StripIconMode = StripIconMode.SHOW,
     /** mixerId → sessionDir for recordings interrupted by an unexpected app exit. */
     val interruptedRecordings: Map<String, String> = emptyMap(),
+    /** mixerId → status text while auto-resuming an interrupted recording. */
+    val interruptedRecordingRecovery: Map<String, String> = emptyMap(),
     val remoteRole: RemoteRole = RemoteRole.OFF,
     val remoteConnectionState: RemoteConnectionState = RemoteConnectionState.DISCONNECTED,
     val remoteHostName: String? = null,
@@ -153,6 +155,7 @@ class MainViewModel(
     private val observedMixerIds = mutableSetOf<String>()
     private val scribbleImportMutex = Mutex()
     private var usbRecoveryJob: Job? = null
+    private val interruptedRecoveryJobs = mutableMapOf<String, Job>()
     private var sessionAttached = false
 
     private val _usbPermissionRequests = MutableSharedFlow<String>(extraBufferCapacity = 4)
@@ -463,7 +466,13 @@ class MainViewModel(
             }
             is PendingAudioAction.Resume -> {
                 pendingAudioAction = null
+                if (scribbleStripCache.hasCache(action.mixerId)) {
+                    applyCachedScribble(action.mixerId)
+                }
                 resumeRecordingInternal(action.mixerId, action.sessionDir)
+                if (_uiState.value.sessionByMixer[action.mixerId]?.isRecording != true) {
+                    scheduleInterruptedRecordingRecovery(action.mixerId)
+                }
             }
         }
     }
@@ -942,19 +951,8 @@ class MainViewModel(
         clearInterruptedRecordingIfNeeded(mixerId)
     }
 
-    fun resumeInterruptedRecording(mixerId: String) {
-        val sessionDir = _uiState.value.interruptedRecordings[mixerId]?.let { java.io.File(it) }
-            ?: IncompleteRecordingStore.recoverableSession(appContext, settings, mixerId)
-            ?: return
-        if (!ensureAudioPermission(PendingAudioAction.Resume(mixerId, sessionDir))) return
-        if (scribbleStripCache.hasCache(mixerId)) {
-            applyCachedScribble(mixerId)
-        }
-        resumeRecordingInternal(mixerId, sessionDir)
-        _uiState.update { it.copy(interruptedRecordings = it.interruptedRecordings - mixerId) }
-    }
-
     fun finalizeIncompleteRecording(mixerId: String) {
+        cancelInterruptedRecordingRecovery(mixerId)
         val sessionDir = _uiState.value.interruptedRecordings[mixerId]?.let { java.io.File(it) }
             ?: IncompleteRecordingStore.recoverableSession(appContext, settings, mixerId)
             ?: IncompleteRecordingStore.latestIncompleteSession(appContext, settings, mixerId)
@@ -979,6 +977,7 @@ class MainViewModel(
         sessionClient.withManager {
             it.getOrCreate(mixerId).resumeRecording(sessionDir, cachedLabels)
         }
+        cancelInterruptedRecordingRecovery(mixerId)
         _uiState.update { it.copy(interruptedRecordings = it.interruptedRecordings - mixerId) }
         showStatus("Recording resumed.", mixerId)
         if (!cachedLabels.isNullOrEmpty()) {
@@ -1005,6 +1004,119 @@ class MainViewModel(
                 ui.interruptedRecordings - mixerId
             }
             ui.copy(interruptedRecordings = updated)
+        }
+        if (sessionDir != null) {
+            scheduleInterruptedRecordingRecovery(mixerId)
+        } else {
+            cancelInterruptedRecordingRecovery(mixerId)
+        }
+    }
+
+    private fun updateInterruptedRecoveryStatus(mixerId: String, message: String) {
+        _uiState.update {
+            it.copy(interruptedRecordingRecovery = it.interruptedRecordingRecovery + (mixerId to message))
+        }
+    }
+
+    private fun cancelInterruptedRecordingRecovery(mixerId: String) {
+        interruptedRecoveryJobs.remove(mixerId)?.cancel()
+        _uiState.update {
+            it.copy(interruptedRecordingRecovery = it.interruptedRecordingRecovery - mixerId)
+        }
+    }
+
+    private fun scheduleInterruptedRecordingRecovery(mixerId: String) {
+        if (isRemoteClient()) return
+        if (IncompleteRecordingStore.recoverableSession(appContext, settings, mixerId) == null) return
+        if (interruptedRecoveryJobs[mixerId]?.isActive == true) return
+        interruptedRecoveryJobs[mixerId] = viewModelScope.launch {
+            val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId }
+                ?: mixerStore.listMixers().firstOrNull { it.id == mixerId }
+                ?: return@launch
+            updateInterruptedRecoveryStatus(
+                mixerId,
+                "Recording was interrupted. Resuming automatically…",
+            )
+            AppLogBuffer.append("I", "Record", "Auto-recovery started for interrupted recording ($mixerId)")
+            while (isActive) {
+                val sessionDir = IncompleteRecordingStore.recoverableSession(appContext, settings, mixerId)
+                if (sessionDir == null) {
+                    cancelInterruptedRecordingRecovery(mixerId)
+                    return@launch
+                }
+                val session = _uiState.value.sessionByMixer[mixerId]
+                if (session?.isRecording == true) {
+                    cancelInterruptedRecordingRecovery(mixerId)
+                    return@launch
+                }
+                val usbDevices = withContext(Dispatchers.IO) {
+                    enumerator.listDevicesForProfiles(listOf(profile))
+                }
+                _uiState.update { it.copy(availableUsbDevices = usbDevices) }
+                syncMixerUsbNames(usbDevices)
+                val usb = resolveUsbDevice(profile, usbDevices)
+                if (usb == null) {
+                    updateInterruptedRecoveryStatus(
+                        mixerId,
+                        "Recording was interrupted. Waiting for USB mixer — reconnect the cable.",
+                    )
+                    delay(2_000)
+                    continue
+                }
+                if (!enumerator.hasUsbPermission(usb.deviceName)) {
+                    updateInterruptedRecoveryStatus(
+                        mixerId,
+                        "Recording was interrupted. Allow USB access when prompted.",
+                    )
+                    _usbPermissionRequests.tryEmit(usb.deviceName)
+                    delay(2_000)
+                    continue
+                }
+                if (!RecordAudioPermissions.hasPermission(appContext)) {
+                    updateInterruptedRecoveryStatus(
+                        mixerId,
+                        "Recording was interrupted. Allow microphone access to resume.",
+                    )
+                    ensureAudioPermission(PendingAudioAction.Resume(mixerId, sessionDir))
+                    delay(2_000)
+                    continue
+                }
+                val probeReady = session?.probe != null && session.probing != true
+                if (!probeReady) {
+                    updateInterruptedRecoveryStatus(
+                        mixerId,
+                        "Recording was interrupted. Reconnecting to mixer…",
+                    )
+                    sessionClient.withManager { mgr ->
+                        autoProbeMixer(profile, mgr, usbDevices)
+                    }
+                    var probed = false
+                    repeat(20) {
+                        if (!isActive) return@launch
+                        delay(500)
+                        val s = _uiState.value.sessionByMixer[mixerId]
+                        if (s?.probe != null && s.probing != true) {
+                            probed = true
+                            return@repeat
+                        }
+                    }
+                    if (!probed) {
+                        delay(2_000)
+                        continue
+                    }
+                }
+                updateInterruptedRecoveryStatus(mixerId, "Recording was interrupted. Resuming…")
+                if (scribbleStripCache.hasCache(mixerId)) {
+                    applyCachedScribble(mixerId)
+                }
+                resumeRecordingInternal(mixerId, sessionDir)
+                delay(1_000)
+                if (_uiState.value.sessionByMixer[mixerId]?.isRecording == true) {
+                    cancelInterruptedRecordingRecovery(mixerId)
+                    return@launch
+                }
+                delay(2_000)
+            }
         }
     }
 
@@ -1281,6 +1393,8 @@ class MainViewModel(
     }
 
     override fun onCleared() {
+        interruptedRecoveryJobs.values.forEach { it.cancel() }
+        interruptedRecoveryJobs.clear()
         sessionClient.unbind()
         super.onCleared()
     }
@@ -1402,6 +1516,7 @@ class MainViewModel(
         if (usb == null) {
             OmtLog.w("ViewModel", "USB device not found for ${profile.displayName} (vid=${profile.vendorId} pid=${profile.productId})")
             showStatus("Not on USB — reconnecting automatically…", profile.id)
+            refreshInterruptedRecording(profile.id, manager)
             return
         }
         val resolvedProfile = if (usb.deviceName != profile.usbDeviceName || usb.productName != profile.productName) {
@@ -1416,6 +1531,7 @@ class MainViewModel(
             OmtLog.w("ViewModel", "USB permission needed for ${resolvedProfile.displayName} (${usb.deviceName})")
             _usbPermissionRequests.tryEmit(usb.deviceName)
             showStatus("Allow USB access when prompted.", resolvedProfile.id)
+            refreshInterruptedRecording(profile.id, manager)
             return
         }
         viewModelScope.launch {
@@ -1426,40 +1542,20 @@ class MainViewModel(
             OmtLog.i("ViewModel", "auto-probed ${resolvedProfile.displayName}")
             usbRecoveryJob?.cancel()
             refreshInterruptedRecording(resolvedProfile.id, manager)
-            val resumePending = !manager.getOrCreate(resolvedProfile.id).state.value.isRecording &&
-                IncompleteRecordingStore.recoverableSession(
-                    appContext,
-                    settings,
-                    resolvedProfile.id,
-                ) != null
-            if (resumePending) {
-                val sessionDir = IncompleteRecordingStore.recoverableSession(
-                    appContext,
-                    settings,
-                    resolvedProfile.id,
-                )
-                if (sessionDir != null && RecordAudioPermissions.hasPermission(appContext)) {
-                    OmtLog.i("ViewModel", "Auto-resuming recording for ${resolvedProfile.displayName}")
-                    AppLogBuffer.append(
-                        "I",
-                        "Record",
-                        "Auto-resuming interrupted recording for ${resolvedProfile.displayName}",
-                    )
-                    resumeRecordingInternal(resolvedProfile.id, sessionDir)
-                } else {
-                    AppLogBuffer.append(
-                        "I",
-                        "Record",
-                        "Interrupted recording detected for ${resolvedProfile.displayName} — tap Resume to continue",
-                    )
+            val resumePending = IncompleteRecordingStore.recoverableSession(
+                appContext,
+                settings,
+                resolvedProfile.id,
+            ) != null
+            if (!resumePending) {
+                if (ScribbleImportSupport.supportsOsc(resolvedProfile)) {
+                    onOscMixerReady(resolvedProfile.id)
+                } else if (
+                    ScribbleImportSupport.supportsFlow8(resolvedProfile) &&
+                    resolvedProfile.id == _uiState.value.activeMixerId
+                ) {
+                    onFlow8MixerReady(resolvedProfile.id)
                 }
-            } else if (ScribbleImportSupport.supportsOsc(resolvedProfile)) {
-                onOscMixerReady(resolvedProfile.id)
-            } else if (
-                ScribbleImportSupport.supportsFlow8(resolvedProfile) &&
-                resolvedProfile.id == _uiState.value.activeMixerId
-            ) {
-                onFlow8MixerReady(resolvedProfile.id)
             }
         }
     }
