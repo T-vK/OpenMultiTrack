@@ -53,8 +53,7 @@ jobs:
             :audio-engine:assembleDebugAndroidTest \
             :app:assembleDebug \
             :app:assembleDebugAndroidTest \
-            --build-cache \
-            --parallel
+            --build-cache
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

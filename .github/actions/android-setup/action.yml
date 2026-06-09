@@ -30,6 +30,11 @@ runs:
         gradle-home-cache-cleanup: true
         add-job-summary: never
         validate-wrappers: false
+        dependency-graph: disabled
+        gradle-home-cache-excludes: |
+          caches/transforms-*
+          caches/*/transforms-*
+          .tmp
 
     - name: Set up Android SDK
       uses: android-actions/setup-android@v3

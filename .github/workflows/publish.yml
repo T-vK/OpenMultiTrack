@@ -81,6 +81,7 @@ jobs:
   pages:
     name: F-Droid repo & GitHub Pages
     needs: build
+    if: github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[skip ci]')
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -171,7 +172,7 @@ jobs:
     name: GitHub Release
     needs: build
     runs-on: ubuntu-latest
-    if: needs.build.outputs.version_changed == 'true'
+    if: needs.build.outputs.version_changed == 'true' && (github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[skip ci]'))
     steps:
       - uses: actions/checkout@v4
         with:
