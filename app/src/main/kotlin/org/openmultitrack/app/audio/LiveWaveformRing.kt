@@ -16,6 +16,8 @@ data class LiveWaveformSnapshot(
 class LiveWaveformRing(
     private val capacityPeaks: Int,
 ) {
+    val capacity: Int get() = capacityPeaks
+
     private val peaks = FloatArray(capacityPeaks)
     private var writeIndex = 0
     private var filled = 0
@@ -26,6 +28,18 @@ class LiveWaveformRing(
             peaks[writeIndex] = abs(sample)
             writeIndex = (writeIndex + 1) % capacityPeaks
             filled = minOf(filled + 1, capacityPeaks)
+        }
+    }
+
+    /** Bulk-load peaks oldest→newest (e.g. when resuming an interrupted recording). */
+    fun seedPeaks(samples: FloatArray) {
+        if (samples.isEmpty()) return
+        lock.write {
+            for (sample in samples) {
+                peaks[writeIndex] = abs(sample)
+                writeIndex = (writeIndex + 1) % capacityPeaks
+                filled = minOf(filled + 1, capacityPeaks)
+            }
         }
     }
 

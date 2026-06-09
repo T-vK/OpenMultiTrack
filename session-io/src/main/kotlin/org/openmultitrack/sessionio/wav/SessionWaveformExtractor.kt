@@ -68,6 +68,27 @@ object SessionWaveformExtractor {
     fun durationSec(sessionDir: File, metadata: SessionMetadata): Float =
         SessionPlaybackDuration.durationSec(sessionDir, metadata)
 
+    /**
+     * Peaks for the tail of [audioFrames] in [file], at [peaksPerSec] resolution.
+     * Used to restore the live recording waveform window after resume.
+     */
+    fun extractTailPeaks(
+        file: File,
+        audioFrames: Long,
+        sampleRate: Int,
+        tailDurationSec: Float,
+        peaksPerSec: Int,
+    ): FloatArray {
+        if (!file.isFile || audioFrames <= 0L || tailDurationSec <= 0f || peaksPerSec <= 0) {
+            return FloatArray(0)
+        }
+        val rate = sampleRate.coerceAtLeast(1)
+        val tailFrames = min(audioFrames, max(1L, (tailDurationSec * rate).toLong()))
+        val startFrame = (audioFrames - tailFrames).coerceAtLeast(0)
+        val peakCount = max(1, (tailFrames.toFloat() / rate * peaksPerSec).toInt())
+        return extractChannelPeaksRange(file, startFrame, audioFrames, peakCount)
+    }
+
     private data class ExtractionPlan(
         val channels: List<org.openmultitrack.sessionio.session.ChannelMetadata>,
         val peakCount: Int,
@@ -102,22 +123,66 @@ object SessionWaveformExtractor {
         val scratch = FloatArray(SAMPLES_PER_PEAK_READ)
         WavReader(file).use { reader ->
             val totalFrames = reader.format.frameCount.coerceAtLeast(1)
-            for (peakIdx in 0 until peakCount) {
-                val startFrame = (peakIdx.toLong() * totalFrames / peakCount).coerceAtMost(totalFrames - 1)
-                reader.seekFrame(startFrame)
-                val framesToRead = min(
-                    SAMPLES_PER_PEAK_READ,
-                    max(1, ((peakIdx + 1).toLong() * totalFrames / peakCount - startFrame).toInt()),
-                )
-                val read = reader.readInterleavedFloat(scratch, framesToRead)
-                if (read <= 0) break
-                var blockMax = 0f
-                for (f in 0 until read) {
-                    blockMax = max(blockMax, abs(scratch[f]))
-                }
-                peaks[peakIdx] = blockMax
-            }
+            extractPeaksInto(
+                reader = reader,
+                scratch = scratch,
+                peaks = peaks,
+                rangeStartFrame = 0,
+                rangeEndFrame = totalFrames,
+            )
         }
         return peaks
+    }
+
+    private fun extractChannelPeaksRange(
+        file: File,
+        startFrame: Long,
+        endFrame: Long,
+        peakCount: Int,
+    ): FloatArray {
+        val peaks = FloatArray(peakCount)
+        val scratch = FloatArray(SAMPLES_PER_PEAK_READ)
+        WavReader(file).use { reader ->
+            extractPeaksInto(
+                reader = reader,
+                scratch = scratch,
+                peaks = peaks,
+                rangeStartFrame = startFrame,
+                rangeEndFrame = endFrame.coerceAtMost(reader.format.frameCount),
+            )
+        }
+        return peaks
+    }
+
+    private fun extractPeaksInto(
+        reader: WavReader,
+        scratch: FloatArray,
+        peaks: FloatArray,
+        rangeStartFrame: Long,
+        rangeEndFrame: Long,
+    ) {
+        val totalFrames = (rangeEndFrame - rangeStartFrame).coerceAtLeast(1)
+        for (peakIdx in peaks.indices) {
+            val startFrame = rangeStartFrame +
+                (peakIdx.toLong() * totalFrames / peaks.size).coerceAtMost(totalFrames - 1)
+            reader.seekFrame(startFrame)
+            val framesToRead = min(
+                SAMPLES_PER_PEAK_READ,
+                max(
+                    1,
+                    (
+                        rangeStartFrame + (peakIdx + 1).toLong() * totalFrames / peaks.size -
+                            startFrame
+                        ).toInt(),
+                ),
+            )
+            val read = reader.readInterleavedFloat(scratch, framesToRead)
+            if (read <= 0) break
+            var blockMax = 0f
+            for (f in 0 until read) {
+                blockMax = max(blockMax, abs(scratch[f]))
+            }
+            peaks[peakIdx] = blockMax
+        }
     }
 }

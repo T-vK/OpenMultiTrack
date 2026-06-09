@@ -40,4 +40,29 @@ class SessionWaveformExtractorTest {
             dir.deleteRecursively()
         }
     }
+
+    @Test
+    fun extractTailPeaksReadsOnlyTheEndOfTheFile() {
+        val dir = createTempDir()
+        try {
+            val ch0 = File(dir, "channel01.wav")
+            WavWriter(ch0, 1, 48_000).use { w ->
+                repeat(100) { i ->
+                    val amp = if (i < 50) 0.05f else 0.9f
+                    w.writeInterleavedFloat(FloatArray(480) { amp }, frames = 480)
+                }
+            }
+            val peaks = SessionWaveformExtractor.extractTailPeaks(
+                file = ch0,
+                audioFrames = 100L * 480L,
+                sampleRate = 48_000,
+                tailDurationSec = 0.5f,
+                peaksPerSec = 4,
+            )
+            assertThat(peaks).isNotEmpty()
+            assertThat(peaks.maxOrNull() ?: 0f).isGreaterThan(0.5f)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }

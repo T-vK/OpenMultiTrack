@@ -17,6 +17,7 @@ import org.openmultitrack.domain.session.RecordingSession
 import org.openmultitrack.sessionio.session.SessionDirectory
 import org.openmultitrack.sessionio.session.SessionMetadata
 import org.openmultitrack.sessionio.wav.PerChannelWavWriter
+import org.openmultitrack.sessionio.wav.SessionWaveformExtractor
 import org.openmultitrack.sessionio.wav.WavWriter
 import org.openmultitrack.usb.AudioBackend
 import org.openmultitrack.usb.AudioEngineRouter
@@ -24,6 +25,7 @@ import org.openmultitrack.usb.CaptureRoute
 import org.openmultitrack.usb.NativeAudioCaptureRegistry
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.min
 import java.util.concurrent.atomic.AtomicReference
 import androidx.annotation.VisibleForTesting
 
@@ -243,6 +245,11 @@ class CaptureSessionEngine(
             customTitle = meta.customTitle,
         )
 
+        val preInterruptionFrames = framesWritten
+        if (waveformRings[0] == null) {
+            allocateWaveformRings()
+        }
+        hydrateWaveformsAfterResume(sessionDir, meta, preInterruptionFrames)
         catchUpTimelineToTarget(maxFramesPerPass = Int.MAX_VALUE / 2)
         maybePersistTimeline()
 
@@ -558,7 +565,59 @@ class CaptureSessionEngine(
         } catch (_: IllegalStateException) {
             // writer closed during stop
         }
+        if (written > 0) {
+            emitSilenceWaveformPeaks(written)
+        }
         return written
+    }
+
+    private fun hydrateWaveformsAfterResume(
+        sessionDir: File,
+        metadata: SessionMetadata,
+        preInterruptionFrames: Long,
+    ) {
+        if (preInterruptionFrames <= 0L) return
+        val rate = sampleRate.coerceAtLeast(1)
+        val tailSec = min(waveformWindowSec, preInterruptionFrames.toFloat() / rate)
+        if (tailSec <= 0f) return
+
+        val capacity = waveformRings.firstOrNull { it != null }?.capacity ?: return
+        val gapFrames = (sessionTargetFrames() - preInterruptionFrames).coerceAtLeast(0)
+        val silenceSlots = (
+            (gapFrames.toFloat() / rate) * waveformPeaksPerSecond
+            ).toInt().coerceIn(0, capacity)
+        val roomForAudio = (capacity - silenceSlots).coerceAtLeast(0)
+        if (roomForAudio <= 0) return
+
+        for (chMeta in metadata.channels) {
+            val ring = waveformRings.getOrNull(chMeta.index) ?: continue
+            val file = File(sessionDir, chMeta.fileName)
+            if (!file.isFile) continue
+            val peaks = SessionWaveformExtractor.extractTailPeaks(
+                file = file,
+                audioFrames = preInterruptionFrames,
+                sampleRate = rate,
+                tailDurationSec = tailSec,
+                peaksPerSec = waveformPeaksPerSecond,
+            )
+            val trimmed = if (peaks.size > roomForAudio) {
+                peaks.copyOfRange(peaks.size - roomForAudio, peaks.size)
+            } else {
+                peaks
+            }
+            ring.seedPeaks(trimmed)
+        }
+    }
+
+    private fun emitSilenceWaveformPeaks(silenceFrames: Int) {
+        if (silenceFrames <= 0 || !isRecording) return
+        val rate = sampleRate.coerceAtLeast(1)
+        val peakCount = maxOf(1, (silenceFrames.toFloat() / rate * waveformPeaksPerSecond).toInt())
+        for (i in 0 until peakCount) {
+            for (ch in 0 until channelCount) {
+                waveformRings[ch]?.pushPeak(0f)
+            }
+        }
     }
 
     private fun buildSessionMetadata(
