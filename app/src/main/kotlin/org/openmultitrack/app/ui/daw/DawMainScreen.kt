@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -207,7 +209,7 @@ fun DawMainScreen(
     val session = activeId?.let { state.sessionByMixer[it] }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val drawerScope = rememberCoroutineScope()
-    var storageInfoDialogOpen by remember { mutableStateOf(false) }
+    var storageTooltipOpen by remember { mutableStateOf(false) }
     var wasRecording by remember { mutableStateOf(false) }
     var playbackStripOverlay by remember { mutableStateOf<Int?>(null) }
     val isRemoteClient = state.remoteRole == RemoteRole.CLIENT &&
@@ -223,9 +225,7 @@ fun DawMainScreen(
     val isRecording = session?.isRecording == true
     LaunchedEffect(isRecording, state.autoShowRecordingStorageTooltip, state.showRecordingStorageInfoButton) {
         if (isRecording && !wasRecording && state.autoShowRecordingStorageTooltip && state.showRecordingStorageInfoButton) {
-            storageInfoDialogOpen = true
-            delay(5_000)
-            storageInfoDialogOpen = false
+            storageTooltipOpen = true
         }
         wasRecording = isRecording
     }
@@ -340,7 +340,10 @@ fun DawMainScreen(
             onDismiss = onCloseMixerPicker,
             onSelectMixer = onSelectMixer,
             onAddNewDevice = onAddMixer,
-            onLoadChannelNames = onLoadScribbleStrip,
+            onLoadChannelNames = { mixerId ->
+                onCloseMixerPicker()
+                onLoadScribbleStrip(mixerId)
+            },
             onRemoveMixer = onRemoveMixer,
         )
         return
@@ -405,7 +408,7 @@ fun DawMainScreen(
                     onOpenSessionPicker = onOpenSessionPicker,
                     onOpenRemoteControl = onOpenRemoteControl,
                     onOpenSettings = onOpenSettings,
-                    onShowStorageInfo = { storageInfoDialogOpen = true },
+                    onStorageTooltipOpenChange = { storageTooltipOpen = it },
                     onOpenLog = onOpenLog,
                 )
             },
@@ -439,7 +442,8 @@ fun DawMainScreen(
                             onSetSoundcheckLoopIn = { activeId?.let(onSetSoundcheckLoopIn) },
                             onSetSoundcheckLoopOut = { activeId?.let(onSetSoundcheckLoopOut) },
                             showRecordingStorageInfoButton = state.showRecordingStorageInfoButton,
-                            onShowStorageInfo = { storageInfoDialogOpen = true },
+                            storageTooltipOpen = storageTooltipOpen,
+                            onStorageTooltipOpenChange = { storageTooltipOpen = it },
                             onOpenSessionPicker = onOpenSessionPicker,
                             onOpenSettings = onOpenSettings,
                             onOpenRemoteControl = onOpenRemoteControl,
@@ -451,7 +455,16 @@ fun DawMainScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
+                .padding(padding)
+                .then(
+                    if (storageTooltipOpen) {
+                        Modifier.pointerInput(storageTooltipOpen) {
+                            detectTapGestures { storageTooltipOpen = false }
+                        }
+                    } else {
+                        Modifier
+                    },
+                ),
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 if (state.prerequisites.isNotEmpty() && !isRemoteClient) {
@@ -597,12 +610,6 @@ fun DawMainScreen(
             },
         )
     }
-
-    RecordingStorageInfoDialog(
-        open = storageInfoDialogOpen,
-        session = session,
-        onDismiss = { storageInfoDialogOpen = false },
-    )
 
     playbackStripOverlay?.let { index ->
         val s = session ?: return@let
@@ -945,10 +952,11 @@ private fun WaveformView(
         val slotWidth = w / capacity
         val stroke = (slotWidth * 0.75f).coerceIn(1f, 4f)
         val minBar = h * 0.06f
+        val startSlot = (capacity - displayPeaks.size).coerceAtLeast(0)
         displayPeaks.forEachIndexed { i, peak ->
             val amp = peak.coerceIn(0f, 1f)
             val barH = maxOf(amp * h * 0.9f, if (amp > 0.02f) minBar else 0f)
-            val x = (i + 0.5f) * slotWidth
+            val x = (startSlot + i + 0.5f) * slotWidth
             drawLine(
                 color = color.copy(alpha = 0.9f),
                 start = Offset(x, mid - barH / 2f),

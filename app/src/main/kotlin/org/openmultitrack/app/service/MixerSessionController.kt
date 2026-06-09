@@ -419,11 +419,17 @@ class MixerSessionController(
 
     fun stopSoundcheck(resetPosition: Boolean = true) {
         scope.launch {
+            stopPlaybackStatusUpdates()
+            _state.update {
+                it.copy(
+                    isPlaying = false,
+                    transportState = TransportState.IDLE,
+                    playbackPositionSec = if (resetPosition) 0f else it.playbackPositionSec,
+                    soundcheckMeterLevels = emptyMap(),
+                )
+            }
             captureMutex.withLock {
-                stopSoundcheckLocked()
-                if (resetPosition) {
-                    _state.update { it.copy(playbackPositionSec = 0f) }
-                }
+                withContext(Dispatchers.IO) { player.stopAndAwait() }
             }
         }
     }
@@ -1013,12 +1019,15 @@ class MixerSessionController(
                     } else {
                         _state.value.playbackPositionSec
                     }
+                    val durationSec = _state.value.playbackDurationSec
+                    val reachedEnd = durationSec > 0f && finalPos >= durationSec - 0.2f
                     _state.update {
                         it.copy(
                             isPlaying = false,
                             transportState = TransportState.IDLE,
-                            playbackPositionSec = finalPos,
+                            playbackPositionSec = if (reachedEnd) 0f else finalPos,
                             soundcheckMeterLevels = emptyMap(),
+                            warningMessage = if (reachedEnd) null else it.warningMessage,
                         )
                     }
                     break
@@ -1031,6 +1040,8 @@ class MixerSessionController(
                     lastAdvanceMs = System.currentTimeMillis()
                 } else if (
                     lastPosSec >= 0f &&
+                    durSec > 0f &&
+                    posSec < durSec - 0.25f &&
                     System.currentTimeMillis() - lastAdvanceMs > 2_500L
                 ) {
                     OmtLog.w("MixerSession", "playback stalled at ${posSec}s — stopping")

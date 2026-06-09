@@ -32,7 +32,6 @@ import androidx.compose.material.icons.filled.SdCard
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DropdownMenu
@@ -48,7 +47,6 @@ import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.TopAppBarDefaults
@@ -419,23 +417,14 @@ private fun RecordTransportCluster(
 ) {
     val isRecording = session?.isRecording == true
     val hostReady = session?.probe != null || (isRemoteClient && session?.captureChannelCount?.let { it > 0 } == true)
-    val canRecord = hostReady && !isRecording
     val elapsed = session?.recordElapsedSec ?: 0f
     TransportButtonCluster {
         TransportIconButton(
-            onClick = onStartRecord,
-            enabled = canRecord,
-            icon = Icons.Default.FiberManualRecord,
-            contentDescription = "Record",
-            tint = RecordRed,
-        )
-        clusterDivider()
-        TransportIconButton(
-            onClick = onStopRecord,
-            enabled = isRecording,
-            icon = Icons.Default.Stop,
-            contentDescription = "Stop recording",
-            tint = if (isRecording) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+            onClick = if (isRecording) onStopRecord else onStartRecord,
+            enabled = hostReady,
+            icon = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
+            contentDescription = if (isRecording) "Stop recording" else "Record",
+            tint = if (isRecording) Color.White else RecordRed,
             background = if (isRecording) RecordRed else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
         )
         clusterDivider()
@@ -479,12 +468,8 @@ private fun PlaybackTransportCluster(
             enabled = hasSession,
             icon = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
             contentDescription = if (isPlaying) "Pause" else "Play",
-            tint = if (isPlaying) Color.White else MaterialTheme.colorScheme.primary,
-            background = if (isPlaying) {
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
-            } else {
-                MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
-            },
+            tint = MaterialTheme.colorScheme.onSurface,
+            background = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
         )
         clusterDivider()
         TransportIconButton(
@@ -493,6 +478,7 @@ private fun PlaybackTransportCluster(
             icon = Icons.Default.Stop,
             contentDescription = "Stop playback",
             tint = MaterialTheme.colorScheme.onSurface,
+            background = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
         )
         clusterDivider()
         LoopTransportButton(
@@ -565,40 +551,31 @@ private fun LoopTransportButton(
     }
 }
 
-@Composable
-private fun StandaloneToolbarIconButton(
-    onClick: () -> Unit,
-    contentDescription: String,
-    modifier: Modifier = Modifier,
-    content: @Composable () -> Unit,
-) {
-    val border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
-    Surface(
-        onClick = onClick,
-        shape = ToolbarShape,
-        border = border,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        modifier = modifier.size(ToolbarControlHeight),
-    ) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            content()
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RecordingStorageButton(
+private fun RecordingStorageToolbarIcon(
     session: MixerSessionUiState?,
-    onShowStorageInfo: () -> Unit,
+    tooltipOpen: Boolean,
+    onTooltipOpenChange: (Boolean) -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
     val storageTooltipText = remember(session?.storageFreeBytes, session?.storageRecordEstimateSec) {
         formatRecordingStorageInfo(
             session?.storageFreeBytes ?: 0L,
             session?.storageRecordEstimateSec ?: 0f,
         )
     }
-    val storageTooltipState = rememberTooltipState(isPersistent = true)
+    val storageTooltipState = rememberTooltipState()
+    LaunchedEffect(tooltipOpen) {
+        if (tooltipOpen) {
+            storageTooltipState.show()
+            kotlinx.coroutines.delay(5_000)
+            storageTooltipState.dismiss()
+            onTooltipOpenChange(false)
+        } else {
+            storageTooltipState.dismiss()
+        }
+    }
     TooltipBox(
         positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
         tooltip = {
@@ -608,11 +585,14 @@ private fun RecordingStorageButton(
         },
         state = storageTooltipState,
     ) {
-        StandaloneToolbarIconButton(
-            onClick = onShowStorageInfo,
-            contentDescription = "Recording storage and time remaining",
+        IconButton(
+            onClick = {
+                scope.launch {
+                    onTooltipOpenChange(true)
+                }
+            },
         ) {
-            RecordingStorageGlyph(tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            RecordingStorageGlyph(tint = MaterialTheme.colorScheme.onSurface)
         }
     }
 }
@@ -651,7 +631,8 @@ internal fun DawTopBar(
     onSetSoundcheckLoopIn: () -> Unit,
     onSetSoundcheckLoopOut: () -> Unit,
     showRecordingStorageInfoButton: Boolean = false,
-    onShowStorageInfo: () -> Unit = {},
+    storageTooltipOpen: Boolean = false,
+    onStorageTooltipOpenChange: (Boolean) -> Unit = {},
     onOpenSessionPicker: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
     onOpenRemoteControl: () -> Unit = {},
@@ -733,12 +714,6 @@ internal fun DawTopBar(
                                 onStopRecord = onStopRecord,
                             )
                         }
-                        if (layout.showStorageInBar) {
-                            RecordingStorageButton(
-                                session = session,
-                                onShowStorageInfo = onShowStorageInfo,
-                            )
-                        }
                         if (showPlaybackTransport) {
                             PlaybackTransportCluster(
                                 session = session,
@@ -773,6 +748,13 @@ internal fun DawTopBar(
                             },
                         )
                     }
+                }
+                if (layout.showStorageInBar && showRecordingStorageInfoButton) {
+                    RecordingStorageToolbarIcon(
+                        session = session,
+                        tooltipOpen = storageTooltipOpen,
+                        onTooltipOpenChange = onStorageTooltipOpenChange,
+                    )
                 }
                 if (layout.showSettingsInBar) {
                     IconButton(onClick = onOpenSettings) {
@@ -835,7 +817,7 @@ internal fun DawNavigationDrawer(
     onOpenSessionPicker: () -> Unit,
     onOpenRemoteControl: () -> Unit,
     onOpenSettings: () -> Unit,
-    onShowStorageInfo: () -> Unit,
+    onStorageTooltipOpenChange: (Boolean) -> Unit,
     onOpenLog: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -932,7 +914,7 @@ internal fun DawNavigationDrawer(
                 },
                 label = { Text("Storage info") },
                 selected = false,
-                onClick = { closeAnd(onShowStorageInfo) },
+                onClick = { closeAnd { onStorageTooltipOpenChange(true) } },
                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
             )
         }
@@ -999,28 +981,5 @@ internal fun DawNavigationDrawer(
             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
         )
     }
-}
-
-@Composable
-fun RecordingStorageInfoDialog(
-    open: Boolean,
-    session: MixerSessionUiState?,
-    onDismiss: () -> Unit,
-) {
-    if (!open) return
-    val storageInfoText = remember(session?.storageFreeBytes, session?.storageRecordEstimateSec) {
-        formatRecordingStorageInfo(
-            session?.storageFreeBytes ?: 0L,
-            session?.storageRecordEstimateSec ?: 0f,
-        )
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Storage") },
-        text = { Text(storageInfoText) },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("OK") }
-        },
-    )
 }
 
