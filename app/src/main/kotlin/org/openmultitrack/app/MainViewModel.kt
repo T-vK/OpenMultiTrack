@@ -38,6 +38,10 @@ import org.openmultitrack.app.data.StripNumberMode
 import org.openmultitrack.app.audio.RecordAudioPermissions
 import org.openmultitrack.app.scribble.Flow8BlePermissions
 import org.openmultitrack.app.ui.daw.StatusToast
+import org.openmultitrack.domain.remote.RemoteConnectionState
+import org.openmultitrack.domain.remote.RemoteRole
+import org.openmultitrack.remote.RemoteDiscoveredHost
+import org.json.JSONObject
 import org.openmultitrack.app.scribble.Flow8BleScribbleImporter
 import org.openmultitrack.app.scribble.IncompleteRecordingStore
 import org.openmultitrack.app.scribble.OscLanDiscovery
@@ -82,6 +86,13 @@ data class DawUiState(
     val stripIconMode: StripIconMode = StripIconMode.SHOW,
     /** mixerId → sessionDir for recordings interrupted by an unexpected app exit. */
     val interruptedRecordings: Map<String, String> = emptyMap(),
+    val remoteRole: RemoteRole = RemoteRole.OFF,
+    val remoteConnectionState: RemoteConnectionState = RemoteConnectionState.DISCONNECTED,
+    val remoteHostName: String? = null,
+    val remoteConnectedHost: String? = null,
+    val remoteLocalIp: String? = null,
+    val remoteDiscoveredHosts: List<RemoteDiscoveredHost> = emptyList(),
+    val remoteError: String? = null,
 )
 
 class MainViewModel(
@@ -136,11 +147,90 @@ class MainViewModel(
             }
             viewModelScope.launch {
                 manager.activeMixerId.collect { id ->
-                    _uiState.update { it.copy(activeMixerId = id) }
+                    if (!isRemoteClient()) {
+                        _uiState.update { it.copy(activeMixerId = id) }
+                    }
                 }
             }
+            attachRemoteControl()
             refreshUsbAndOutputs()
         }
+    }
+
+    private fun isRemoteClient(): Boolean =
+        sessionClient.getRemoteControl()?.isRemoteClientConnected() == true
+
+    private fun remoteCommand(command: String, payload: JSONObject = JSONObject()) {
+        sessionClient.withRemoteControl { remote ->
+            if (remote.isRemoteClientConnected()) {
+                remote.sendCommand(command, payload)
+            }
+        }
+    }
+
+    private fun attachRemoteControl() {
+        val remote = sessionClient.getRemoteControl() ?: return
+        remote.applyRole(settings.remoteRole)
+        viewModelScope.launch {
+            remote.state.collect { remoteState -> applyRemoteState(remoteState) }
+        }
+    }
+
+    private fun applyRemoteState(remoteState: org.openmultitrack.app.remote.RemoteControlUiState) {
+        _uiState.update { ui ->
+            val base = ui.copy(
+                remoteRole = remoteState.role,
+                remoteConnectionState = remoteState.connectionState,
+                remoteHostName = remoteState.hostName,
+                remoteConnectedHost = remoteState.connectedHost,
+                remoteLocalIp = remoteState.localHostIp,
+                remoteDiscoveredHosts = remoteState.discoveredHosts,
+                remoteError = remoteState.errorMessage,
+            )
+            if (remoteState.role == RemoteRole.CLIENT &&
+                remoteState.connectionState == RemoteConnectionState.CONNECTED
+            ) {
+                val settingsPatch = remoteState.uiSettings
+                base.copy(
+                    mixers = remoteState.mixers,
+                    activeMixerId = remoteState.activeMixerId,
+                    sessionByMixer = remoteState.sessionByMixer,
+                    hideArmButton = settingsPatch?.hideArmButton ?: ui.hideArmButton,
+                    hideMonitorButton = settingsPatch?.hideMonitorButton ?: ui.hideMonitorButton,
+                    hideSoloButton = settingsPatch?.hideSoloButton ?: ui.hideSoloButton,
+                    showWaveforms = settingsPatch?.showWaveforms ?: ui.showWaveforms,
+                    showVuMeters = settingsPatch?.showVuMeters ?: ui.showVuMeters,
+                    stripNumberMode = settingsPatch?.stripNumberMode?.let {
+                        StripNumberMode.entries.getOrElse(it) { StripNumberMode.BOTH }
+                    } ?: ui.stripNumberMode,
+                    stripIconMode = settingsPatch?.stripIconMode?.let {
+                        StripIconMode.entries.getOrElse(it) { StripIconMode.SHOW }
+                    } ?: ui.stripIconMode,
+                )
+            } else {
+                base
+            }
+        }
+    }
+
+    fun setRemoteRole(role: RemoteRole) {
+        settings.remoteRole = role
+        sessionClient.withRemoteControl { it.applyRole(role) }
+        if (role != RemoteRole.CLIENT) {
+            loadMixers()
+        }
+    }
+
+    fun discoverRemoteHosts() {
+        sessionClient.withRemoteControl { it.discoverHosts() }
+    }
+
+    fun connectRemoteHost(host: RemoteDiscoveredHost) {
+        sessionClient.withRemoteControl { it.connectToHost(host) }
+    }
+
+    fun disconnectRemote() {
+        sessionClient.withRemoteControl { it.disconnect() }
     }
 
     fun onAppResumed() {
@@ -305,6 +395,10 @@ class MainViewModel(
     }
 
     fun setActiveMixer(id: String) {
+        if (isRemoteClient()) {
+            remoteCommand("set_active_mixer", JSONObject().put("mixerId", id))
+            return
+        }
         settings.lastActiveMixerId = id
         sessionClient.withManager { it.setActiveMixer(id) }
         _uiState.update { it.copy(activeMixerId = id) }
@@ -313,6 +407,13 @@ class MainViewModel(
     }
 
     fun setAppMode(mixerId: String, mode: AppMode) {
+        if (isRemoteClient()) {
+            remoteCommand(
+                "set_app_mode",
+                JSONObject().put("mixerId", mixerId).put("mode", mode.ordinal),
+            )
+            return
+        }
         settings.setAppModeForMixer(mixerId, mode)
         sessionClient.withManager { it.getOrCreate(mixerId).setAppMode(mode) }
     }
@@ -322,46 +423,127 @@ class MainViewModel(
     }
 
     fun selectSoundcheckSession(mixerId: String, sessionDir: String) {
+        if (isRemoteClient()) {
+            remoteCommand(
+                "select_soundcheck",
+                JSONObject().put("mixerId", mixerId).put("sessionDir", sessionDir),
+            )
+            return
+        }
         sessionClient.withManager { it.getOrCreate(mixerId).selectSoundcheckSession(sessionDir) }
     }
 
     fun toggleSoundcheckPlayback(mixerId: String) {
+        if (isRemoteClient()) {
+            remoteCommand("toggle_playback", JSONObject().put("mixerId", mixerId))
+            return
+        }
         sessionClient.withManager { it.getOrCreate(mixerId).toggleSoundcheckPlayback() }
     }
 
     fun stopSoundcheck(mixerId: String) {
+        if (isRemoteClient()) {
+            remoteCommand("stop_playback", JSONObject().put("mixerId", mixerId))
+            return
+        }
         sessionClient.withManager { it.getOrCreate(mixerId).stopSoundcheck() }
     }
 
     fun seekSoundcheck(mixerId: String, positionSec: Float) {
+        if (isRemoteClient()) {
+            remoteCommand(
+                "seek",
+                JSONObject().put("mixerId", mixerId).put("positionSec", positionSec.toDouble()),
+            )
+            return
+        }
         sessionClient.withManager { it.getOrCreate(mixerId).seekSoundcheck(positionSec) }
     }
 
     fun panSoundcheckView(mixerId: String, deltaSec: Float) {
+        if (isRemoteClient()) {
+            remoteCommand(
+                "pan_soundcheck_view",
+                JSONObject().put("mixerId", mixerId).put("deltaSec", deltaSec.toDouble()),
+            )
+            return
+        }
         sessionClient.withManager { it.getOrCreate(mixerId).panSoundcheckView(deltaSec) }
     }
 
     fun zoomSoundcheckView(mixerId: String, scale: Float, focalSec: Float) {
+        if (isRemoteClient()) {
+            remoteCommand(
+                "zoom_soundcheck_view",
+                JSONObject()
+                    .put("mixerId", mixerId)
+                    .put("scale", scale.toDouble())
+                    .put("focalSec", focalSec.toDouble()),
+            )
+            return
+        }
         sessionClient.withManager { it.getOrCreate(mixerId).zoomSoundcheckView(scale, focalSec) }
     }
 
     fun setSoundcheckView(mixerId: String, viewStartSec: Float, viewWindowSec: Float) {
+        if (isRemoteClient()) {
+            remoteCommand(
+                "set_soundcheck_view",
+                JSONObject()
+                    .put("mixerId", mixerId)
+                    .put("viewStartSec", viewStartSec.toDouble())
+                    .put("viewWindowSec", viewWindowSec.toDouble()),
+            )
+            return
+        }
         sessionClient.withManager { it.getOrCreate(mixerId).setSoundcheckView(viewStartSec, viewWindowSec) }
     }
 
     fun setSoundcheckLoopRegion(mixerId: String, startSec: Float, endSec: Float) {
+        if (isRemoteClient()) {
+            remoteCommand(
+                "set_loop",
+                JSONObject()
+                    .put("mixerId", mixerId)
+                    .put("action", "region")
+                    .put("startSec", startSec.toDouble())
+                    .put("endSec", endSec.toDouble()),
+            )
+            return
+        }
         sessionClient.withManager { it.getOrCreate(mixerId).setSoundcheckLoopRegion(startSec, endSec) }
     }
 
     fun toggleSoundcheckLoop(mixerId: String) {
+        if (isRemoteClient()) {
+            remoteCommand(
+                "set_loop",
+                JSONObject().put("mixerId", mixerId).put("action", "toggle"),
+            )
+            return
+        }
         sessionClient.withManager { it.getOrCreate(mixerId).toggleSoundcheckLoopButton() }
     }
 
     fun setSoundcheckLoopIn(mixerId: String) {
+        if (isRemoteClient()) {
+            remoteCommand(
+                "set_loop",
+                JSONObject().put("mixerId", mixerId).put("action", "in"),
+            )
+            return
+        }
         sessionClient.withManager { it.getOrCreate(mixerId).setSoundcheckLoopIn() }
     }
 
     fun setSoundcheckLoopOut(mixerId: String) {
+        if (isRemoteClient()) {
+            remoteCommand(
+                "set_loop",
+                JSONObject().put("mixerId", mixerId).put("action", "out"),
+            )
+            return
+        }
         sessionClient.withManager { it.getOrCreate(mixerId).setSoundcheckLoopOut() }
     }
 
@@ -374,18 +556,39 @@ class MainViewModel(
     }
 
     fun toggleArm(mixerId: String, index: Int) {
+        if (isRemoteClient()) {
+            remoteCommand(
+                "toggle_arm",
+                JSONObject().put("mixerId", mixerId).put("index", index),
+            )
+            return
+        }
         sessionClient.withManager { mgr ->
             mgr.getOrCreate(mixerId).updateChannelStrip(index) { it.copy(armed = !it.armed) }
         }
     }
 
     fun toggleMonitor(mixerId: String, index: Int) {
+        if (isRemoteClient()) {
+            remoteCommand(
+                "toggle_monitor",
+                JSONObject().put("mixerId", mixerId).put("index", index),
+            )
+            return
+        }
         sessionClient.withManager { mgr ->
             mgr.getOrCreate(mixerId).updateChannelStrip(index) { it.copy(monitoring = !it.monitoring) }
         }
     }
 
     fun toggleSolo(mixerId: String, index: Int) {
+        if (isRemoteClient()) {
+            remoteCommand(
+                "toggle_solo",
+                JSONObject().put("mixerId", mixerId).put("index", index),
+            )
+            return
+        }
         sessionClient.withManager { mgr ->
             val ctrl = mgr.getOrCreate(mixerId)
             val wasSolo = ctrl.state.value.channelStrips.firstOrNull { it.index == index }?.solo == true
@@ -402,6 +605,10 @@ class MainViewModel(
     }
 
     fun startMonitor(mixerId: String) {
+        if (isRemoteClient()) {
+            remoteCommand("start_monitor", JSONObject().put("mixerId", mixerId))
+            return
+        }
         if (!ensureAudioPermission(PendingAudioAction.Monitor(mixerId))) return
         startMonitorInternal(mixerId)
     }
@@ -415,10 +622,18 @@ class MainViewModel(
     }
 
     fun stopMonitor(mixerId: String) {
+        if (isRemoteClient()) {
+            remoteCommand("stop_monitor", JSONObject().put("mixerId", mixerId))
+            return
+        }
         sessionClient.withManager { it.getOrCreate(mixerId).stopMonitoring() }
     }
 
     fun startRecord(mixerId: String) {
+        if (isRemoteClient()) {
+            remoteCommand("start_record", JSONObject().put("mixerId", mixerId))
+            return
+        }
         if (!ensureAudioPermission(PendingAudioAction.Record(mixerId))) return
         startRecordInternal(mixerId)
     }
@@ -432,6 +647,10 @@ class MainViewModel(
     }
 
     fun stopRecord(mixerId: String) {
+        if (isRemoteClient()) {
+            remoteCommand("stop_record", JSONObject().put("mixerId", mixerId))
+            return
+        }
         sessionClient.withManager { it.getOrCreate(mixerId).stopRecording() }
         clearInterruptedRecordingIfNeeded(mixerId)
     }
@@ -535,6 +754,10 @@ class MainViewModel(
     }
 
     fun setMonitorGain(gain: Float) {
+        if (isRemoteClient()) {
+            remoteCommand("set_settings", JSONObject().put("monitorGainLinear", gain.toDouble()))
+            return
+        }
         settings.monitorGainLinear = gain
         sessionClient.withManager { mgr ->
             _uiState.value.mixers.forEach { m ->
@@ -544,6 +767,9 @@ class MainViewModel(
     }
 
     fun setHideArmButton(hide: Boolean) {
+        if (isRemoteClient()) {
+            remoteCommand("set_settings", JSONObject().put("hideArmButton", hide))
+        }
         settings.hideArmButton = hide
         _uiState.update { it.copy(hideArmButton = hide) }
     }
@@ -774,6 +1000,7 @@ class MainViewModel(
         if (!observedMixerIds.add(mixerId)) return
         viewModelScope.launch {
             manager.getOrCreate(mixerId).state.collect { session ->
+                if (isRemoteClient()) return@collect
                 _uiState.update { ui ->
                     ui.copy(sessionByMixer = ui.sessionByMixer + (mixerId to session))
                 }

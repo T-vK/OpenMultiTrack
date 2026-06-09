@@ -81,6 +81,7 @@ dependencies {
     implementation(project(":audio-engine"))
     implementation(project(":mixer-behringer"))
     implementation(project(":session-io"))
+    implementation(project(":remote-server"))
 
     implementation(libs.androidx.core.ktx)
     implementation("androidx.core:core:1.15.0")

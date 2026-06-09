@@ -2,6 +2,7 @@ package org.openmultitrack.app.data
 
 import android.content.Context
 import org.json.JSONObject
+import org.openmultitrack.domain.remote.RemoteRole
 import org.openmultitrack.domain.session.AppMode
 
 class AppSettingsStore(context: Context) {
@@ -66,6 +67,14 @@ class AppSettingsStore(context: Context) {
     var lastActiveMixerId: String?
         get() = prefs.getString(KEY_LAST_ACTIVE_MIXER, null)
         set(value) = prefs.edit().putString(KEY_LAST_ACTIVE_MIXER, value).apply()
+
+    var remoteRole: RemoteRole
+        get() = RemoteRole.entries.getOrElse(prefs.getInt(KEY_REMOTE_ROLE, 0)) { RemoteRole.OFF }
+        set(value) = prefs.edit().putInt(KEY_REMOTE_ROLE, value.ordinal).apply()
+
+    var remoteAuthToken: String?
+        get() = prefs.getString(KEY_REMOTE_AUTH_TOKEN, null)
+        set(value) = prefs.edit().putString(KEY_REMOTE_AUTH_TOKEN, value).apply()
 
     val activeRecordingMixerId: String?
         get() = prefs.getString(KEY_ACTIVE_RECORDING_MIXER, null)
@@ -134,5 +143,7 @@ class AppSettingsStore(context: Context) {
         private const val KEY_ACTIVE_RECORDING_MIXER = "active_recording_mixer_id"
         private const val KEY_ACTIVE_RECORDING_DIR = "active_recording_session_dir"
         private const val KEY_APP_MODES_BY_MIXER = "app_modes_by_mixer"
+        private const val KEY_REMOTE_ROLE = "remote_role"
+        private const val KEY_REMOTE_AUTH_TOKEN = "remote_auth_token"
     }
 }

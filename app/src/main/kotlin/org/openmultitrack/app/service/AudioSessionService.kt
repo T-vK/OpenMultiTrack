@@ -17,25 +17,44 @@ import org.openmultitrack.app.MainActivity
 import org.openmultitrack.app.R
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.app.data.AppSettingsStore
+import org.openmultitrack.app.data.MixerDeviceStore
+import org.openmultitrack.app.remote.RemoteControlManager
 import org.openmultitrack.usb.UsbAudioEnumerator
 
 class AudioSessionService : Service() {
     private val binder = LocalBinder()
     private lateinit var mixerManager: MultiMixerSessionManager
+    private lateinit var remoteControl: RemoteControlManager
 
     inner class LocalBinder : Binder() {
         fun getService(): AudioSessionService = this@AudioSessionService
 
         fun getMixerManager(): MultiMixerSessionManager = mixerManager
+
+        fun getRemoteControl(): RemoteControlManager = remoteControl
     }
 
     override fun onCreate() {
         super.onCreate()
         val enumerator = UsbAudioEnumerator(applicationContext)
         val settings = AppSettingsStore(applicationContext)
+        val mixerStore = MixerDeviceStore(applicationContext)
         mixerManager = MultiMixerSessionManager(applicationContext, enumerator, settings)
+        remoteControl = RemoteControlManager(
+            appContext = applicationContext,
+            settings = settings,
+            mixerStore = mixerStore,
+            getManager = { mixerManager },
+            promoteForeground = { status -> promoteToForeground(status) },
+        )
+        remoteControl.applyRole(settings.remoteRole)
         createNotificationChannel()
         OmtLog.i("Service", "AudioSessionService created")
+    }
+
+    override fun onDestroy() {
+        remoteControl.shutdown()
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
@@ -151,6 +170,7 @@ class AudioSessionService : Service() {
 class AudioSessionClient(private val context: Context) {
     private var service: AudioSessionService? = null
     private var mixerManager: MultiMixerSessionManager? = null
+    private var remoteControl: RemoteControlManager? = null
     private var pendingReady: ((MultiMixerSessionManager) -> Unit)? = null
     private var onManagerReady: ((MultiMixerSessionManager) -> Unit)? = null
     private var onManagerLost: (() -> Unit)? = null
@@ -161,6 +181,7 @@ class AudioSessionClient(private val context: Context) {
             val local = binder as AudioSessionService.LocalBinder
             service = local.getService()
             mixerManager = local.getMixerManager()
+            remoteControl = local.getRemoteControl()
             OmtLog.d("ServiceClient", "bound to AudioSessionService")
             val manager = local.getMixerManager()
             pendingReady?.invoke(manager)
@@ -176,6 +197,7 @@ class AudioSessionClient(private val context: Context) {
             OmtLog.w("ServiceClient", "AudioSessionService disconnected")
             service = null
             mixerManager = null
+            remoteControl = null
             onManagerLost?.invoke()
         }
     }
@@ -189,6 +211,7 @@ class AudioSessionClient(private val context: Context) {
         runCatching { context.unbindService(connection) }
         service = null
         mixerManager = null
+        remoteControl = null
         pendingReady = null
     }
 
@@ -205,6 +228,12 @@ class AudioSessionClient(private val context: Context) {
     fun withManager(block: (MultiMixerSessionManager) -> Unit) {
         mixerManager?.let(block)
     }
+
+    fun withRemoteControl(block: (RemoteControlManager) -> Unit) {
+        remoteControl?.let(block)
+    }
+
+    fun getRemoteControl(): RemoteControlManager? = remoteControl
 
     fun promoteForeground(status: String): Boolean {
         AudioSessionService.start(context, status)

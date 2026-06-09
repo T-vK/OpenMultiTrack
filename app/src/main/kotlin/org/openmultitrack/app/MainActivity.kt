@@ -154,6 +154,10 @@ class MainActivity : ComponentActivity() {
                         onPlaybackWaveformWindowChange = viewModel::setPlaybackWaveformWindowSec,
                         onDismissStatusToast = viewModel::dismissStatusToast,
                         onFinalizeIncompleteRecording = viewModel::finalizeIncompleteRecording,
+                        onRemoteRoleChange = viewModel::setRemoteRole,
+                        onDiscoverRemoteHosts = viewModel::discoverRemoteHosts,
+                        onConnectRemoteHost = viewModel::connectRemoteHost,
+                        onDisconnectRemote = viewModel::disconnectRemote,
                     )
                 }
             }

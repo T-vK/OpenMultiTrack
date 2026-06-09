@@ -80,8 +80,11 @@ import org.openmultitrack.app.util.AppLogBuffer
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 import org.openmultitrack.domain.channel.ChannelStripState
 import org.openmultitrack.domain.mixer.MixerProfile
+import org.openmultitrack.domain.remote.RemoteConnectionState
+import org.openmultitrack.domain.remote.RemoteRole
 import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.TransportState
+import org.openmultitrack.remote.RemoteDiscoveredHost
 import org.openmultitrack.usb.LabeledAudioDevice
 
 private val RecordRed = Color(0xFFE53935)
@@ -145,14 +148,33 @@ fun DawMainScreen(
     onPlaybackWaveformWindowChange: (Float) -> Unit,
     onDismissStatusToast: () -> Unit,
     onFinalizeIncompleteRecording: (String) -> Unit,
+    onRemoteRoleChange: (RemoteRole) -> Unit = {},
+    onDiscoverRemoteHosts: () -> Unit = {},
+    onConnectRemoteHost: (RemoteDiscoveredHost) -> Unit = {},
+    onDisconnectRemote: () -> Unit = {},
 ) {
     val activeId = state.activeMixerId
     val session = activeId?.let { state.sessionByMixer[it] }
     var menuOpen by remember { mutableStateOf(false) }
+    val isRemoteClient = state.remoteRole == RemoteRole.CLIENT &&
+        state.remoteConnectionState == RemoteConnectionState.CONNECTED
 
     Scaffold(
         topBar = {
             Column {
+                if (isRemoteClient) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            "Remote → ${state.remoteHostName ?: state.remoteConnectedHost ?: "host"}",
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
+                }
                 TopAppBar(
                     title = {
                         Text(
@@ -167,8 +189,10 @@ fun DawMainScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = onAddMixer) {
-                            Icon(Icons.Default.Add, contentDescription = "Add mixer")
+                        if (!isRemoteClient) {
+                            IconButton(onClick = onAddMixer) {
+                                Icon(Icons.Default.Add, contentDescription = "Add mixer")
+                            }
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -329,6 +353,13 @@ fun DawMainScreen(
                 playbackWaveformWindowSec = playbackWaveformWindowSec,
                 stripNumberMode = state.stripNumberMode,
                 stripIconMode = state.stripIconMode,
+                remoteRole = state.remoteRole,
+                remoteConnectionState = state.remoteConnectionState,
+                remoteLocalIp = state.remoteLocalIp,
+                remoteHostName = state.remoteHostName,
+                remoteConnectedHost = state.remoteConnectedHost,
+                remoteDiscoveredHosts = state.remoteDiscoveredHosts,
+                remoteError = state.remoteError,
             ),
             monitorGain = monitorGain,
             onMonitorGainChange = onMonitorGainChange,
@@ -342,6 +373,10 @@ fun DawMainScreen(
             onPlaybackWaveformWindowChange = onPlaybackWaveformWindowChange,
             onStripNumberModeChange = onStripNumberModeChange,
             onStripIconModeChange = onStripIconModeChange,
+            onRemoteRoleChange = onRemoteRoleChange,
+            onDiscoverRemoteHosts = onDiscoverRemoteHosts,
+            onConnectRemoteHost = onConnectRemoteHost,
+            onDisconnectRemote = onDisconnectRemote,
         )
     }
 

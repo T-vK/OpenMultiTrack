@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
@@ -37,6 +39,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.openmultitrack.app.data.StripIconMode
 import org.openmultitrack.app.data.StripNumberMode
+import org.openmultitrack.domain.remote.RemoteConnectionState
+import org.openmultitrack.domain.remote.RemoteRole
+import org.openmultitrack.remote.RemoteDiscoveredHost
 
 data class SettingsUiState(
     val hideArmIcon: Boolean,
@@ -48,6 +53,13 @@ data class SettingsUiState(
     val playbackWaveformWindowSec: Float,
     val stripNumberMode: StripNumberMode,
     val stripIconMode: StripIconMode,
+    val remoteRole: RemoteRole = RemoteRole.OFF,
+    val remoteConnectionState: RemoteConnectionState = RemoteConnectionState.DISCONNECTED,
+    val remoteLocalIp: String? = null,
+    val remoteHostName: String? = null,
+    val remoteConnectedHost: String? = null,
+    val remoteDiscoveredHosts: List<RemoteDiscoveredHost> = emptyList(),
+    val remoteError: String? = null,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,6 +78,10 @@ fun SettingsSheet(
     onPlaybackWaveformWindowChange: (Float) -> Unit,
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
+    onRemoteRoleChange: (RemoteRole) -> Unit,
+    onDiscoverRemoteHosts: () -> Unit,
+    onConnectRemoteHost: (RemoteDiscoveredHost) -> Unit,
+    onDisconnectRemote: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         SettingsContent(
@@ -82,6 +98,10 @@ fun SettingsSheet(
             onPlaybackWaveformWindowChange = onPlaybackWaveformWindowChange,
             onStripNumberModeChange = onStripNumberModeChange,
             onStripIconModeChange = onStripIconModeChange,
+            onRemoteRoleChange = onRemoteRoleChange,
+            onDiscoverRemoteHosts = onDiscoverRemoteHosts,
+            onConnectRemoteHost = onConnectRemoteHost,
+            onDisconnectRemote = onDisconnectRemote,
         )
     }
 }
@@ -101,6 +121,10 @@ private fun SettingsContent(
     onPlaybackWaveformWindowChange: (Float) -> Unit,
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
+    onRemoteRoleChange: (RemoteRole) -> Unit,
+    onDiscoverRemoteHosts: () -> Unit,
+    onConnectRemoteHost: (RemoteDiscoveredHost) -> Unit,
+    onDisconnectRemote: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
     val normalizedQuery = query.trim().lowercase()
@@ -203,6 +227,99 @@ private fun SettingsContent(
                     }
                 }
             }
+        }
+
+        RemoteControlSection(
+            state = state,
+            onRemoteRoleChange = onRemoteRoleChange,
+            onDiscoverRemoteHosts = onDiscoverRemoteHosts,
+            onConnectRemoteHost = onConnectRemoteHost,
+            onDisconnectRemote = onDisconnectRemote,
+        )
+    }
+}
+
+@Composable
+private fun RemoteControlSection(
+    state: SettingsUiState,
+    onRemoteRoleChange: (RemoteRole) -> Unit,
+    onDiscoverRemoteHosts: () -> Unit,
+    onConnectRemoteHost: (RemoteDiscoveredHost) -> Unit,
+    onDisconnectRemote: () -> Unit,
+) {
+    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+    Text(
+        "Remote control",
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        fontWeight = FontWeight.SemiBold,
+    )
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "Use a second device on the same Wi‑Fi to control this mixer, or mirror a host session.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            RemoteRole.entries.forEachIndexed { index, role ->
+                SegmentedButton(
+                    selected = state.remoteRole == role,
+                    onClick = { onRemoteRoleChange(role) },
+                    shape = SegmentedButtonDefaults.itemShape(index, RemoteRole.entries.size),
+                ) {
+                    Text(
+                        when (role) {
+                            RemoteRole.OFF -> "Off"
+                            RemoteRole.HOST -> "Host"
+                            RemoteRole.CLIENT -> "Remote"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+        }
+        when (state.remoteRole) {
+            RemoteRole.HOST -> {
+                val ip = state.remoteLocalIp ?: "…"
+                Text("Broadcasting on $ip:8765", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "Connect another device in Remote mode and scan for hosts.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            RemoteRole.CLIENT -> {
+                val status = when (state.remoteConnectionState) {
+                    RemoteConnectionState.CONNECTED ->
+                        "Connected to ${state.remoteHostName ?: state.remoteConnectedHost}"
+                    RemoteConnectionState.CONNECTING -> "Connecting…"
+                    RemoteConnectionState.DISCOVERING -> "Scanning LAN…"
+                    RemoteConnectionState.ERROR -> state.remoteError ?: "Connection error"
+                    RemoteConnectionState.DISCONNECTED -> "Not connected"
+                }
+                Text(status, style = MaterialTheme.typography.bodyMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onDiscoverRemoteHosts) { Text("Scan") }
+                    if (state.remoteConnectionState == RemoteConnectionState.CONNECTED) {
+                        OutlinedButton(onClick = onDisconnectRemote) { Text("Disconnect") }
+                    }
+                }
+                state.remoteDiscoveredHosts.forEach { host ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column {
+                            Text(host.name, style = MaterialTheme.typography.bodyLarge)
+                            Text("${host.host}:${host.port}", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Button(onClick = { onConnectRemoteHost(host) }) { Text("Connect") }
+                    }
+                }
+            }
+            RemoteRole.OFF -> Unit
         }
     }
 }
