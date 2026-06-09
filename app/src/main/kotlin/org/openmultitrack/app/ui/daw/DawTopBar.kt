@@ -132,7 +132,7 @@ private fun MixerControlCluster(
                 val modeLabel = if (recording) "Recording Mode" else "Virtual Soundcheck"
                 Surface(
                     onClick = onToggleAppMode,
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
                     modifier = Modifier.height(ToolbarControlHeight),
                 ) {
                     Row(
@@ -189,8 +189,18 @@ fun DawTopBar(
         }
         CenterAlignedTopAppBar(
             navigationIcon = {
-                IconButton(onClick = onOpenMenu) {
-                    Icon(Icons.Default.Menu, contentDescription = "Menu")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onOpenMenu) {
+                        Icon(Icons.Default.Menu, contentDescription = "Menu")
+                    }
+                    Image(
+                        painter = painterResource(R.drawable.ic_app_logo),
+                        contentDescription = "OpenMultiTrack",
+                        modifier = Modifier
+                            .padding(end = 4.dp)
+                            .size(40.dp)
+                            .clip(CircleShape),
+                    )
                 }
             },
             title = {
@@ -205,14 +215,6 @@ fun DawTopBar(
                 }
             },
             actions = {
-                Image(
-                    painter = painterResource(R.drawable.ic_app_logo),
-                    contentDescription = "OpenMultiTrack",
-                    modifier = Modifier
-                        .padding(end = 4.dp)
-                        .size(40.dp)
-                        .clip(CircleShape),
-                )
                 val remoteActive = remoteConnectionState == RemoteConnectionState.CONNECTED
                 IconButton(onClick = onOpenRemoteControl) {
                     Icon(

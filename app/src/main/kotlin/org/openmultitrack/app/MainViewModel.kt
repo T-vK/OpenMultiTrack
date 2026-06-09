@@ -38,6 +38,8 @@ import org.openmultitrack.app.data.StripIconMode
 import org.openmultitrack.app.data.StripNumberMode
 import org.openmultitrack.app.audio.RecordAudioPermissions
 import org.openmultitrack.app.scribble.Flow8BlePermissions
+import org.openmultitrack.app.device.DevicePrerequisites
+import org.openmultitrack.app.device.PrerequisiteItem
 import org.openmultitrack.app.ui.daw.StatusToast
 import org.openmultitrack.domain.mixer.MixerRoutingConfig
 import org.openmultitrack.domain.remote.RemoteConnectionState
@@ -84,6 +86,7 @@ data class DawUiState(
     val showLogViewer: Boolean = false,
     val flow8PairingDialog: Flow8PairingDialogState? = null,
     val statusToast: StatusToast? = null,
+    val prerequisites: List<PrerequisiteItem> = emptyList(),
     val hideArmButton: Boolean = false,
     val hideMonitorButton: Boolean = false,
     val hideSoloButton: Boolean = false,
@@ -331,14 +334,28 @@ class MainViewModel(
 
     fun onAppResumed() {
         refreshUsbAndOutputs()
+        refreshPrerequisites()
+    }
+
+    fun refreshPrerequisites() {
+        val items = DevicePrerequisites.unmet(appContext, _uiState.value.mixers)
+        _uiState.update { it.copy(prerequisites = items) }
+    }
+
+    fun onLocationPermissionResult(granted: Boolean) {
+        if (!granted) {
+            showStatus("Location permission is required for FLOW 8 Bluetooth scan on this Android version.")
+        }
+        refreshPrerequisites()
     }
 
     fun onBluetoothPermissionsResult(granted: Boolean) {
         if (!granted) {
             pendingFlow8Action = null
-            showStatus("Bluetooth permission is required for FLOW 8 scribble import (BLE).")
+            refreshPrerequisites()
             return
         }
+        refreshPrerequisites()
         when (val action = pendingFlow8Action) {
             null -> Unit
             is PendingFlow8Action.ShowPairingDialog -> {
@@ -356,9 +373,10 @@ class MainViewModel(
     fun onAudioPermissionResult(granted: Boolean) {
         if (!granted) {
             pendingAudioAction = null
-            showStatus("Microphone permission is required to record or monitor USB audio.")
+            refreshPrerequisites()
             return
         }
+        refreshPrerequisites()
         when (val action = pendingAudioAction) {
             null -> Unit
             is PendingAudioAction.Record -> {
@@ -1073,6 +1091,7 @@ class MainViewModel(
                 mixerRoutingById = routingStore.loadAll(),
             )
         }
+        refreshPrerequisites()
     }
 
     /**
@@ -1260,7 +1279,7 @@ class MainViewModel(
     }
 
     private fun ensureFlow8BluetoothPermission(pending: PendingFlow8Action? = null): Boolean {
-        if (Flow8BlePermissions.hasAll(appContext)) {
+        if (Flow8BlePermissions.isBleReady(appContext)) {
             pendingFlow8Action = null
             return true
         }
@@ -1271,7 +1290,7 @@ class MainViewModel(
             is PendingFlow8Action.Import -> pending.mixerId
             null -> _uiState.value.activeMixerId
         }
-        showStatus("Allow Bluetooth access for FLOW 8 scribble import (BLE).", mixerId)
+        refreshPrerequisites()
         return false
     }
 

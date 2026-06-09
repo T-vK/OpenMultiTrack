@@ -2,11 +2,14 @@ package org.openmultitrack.app
 
 import android.Manifest
 import android.app.PendingIntent
+import android.bluetooth.BluetoothAdapter
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.provider.Settings
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
@@ -31,6 +34,7 @@ import org.openmultitrack.app.audio.RecordAudioPermissions
 import org.openmultitrack.app.scribble.Flow8BlePermissions
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import org.openmultitrack.app.device.PrerequisiteKind
 import org.openmultitrack.app.ui.daw.DawMainScreen
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
@@ -65,6 +69,19 @@ class MainActivity : ComponentActivity() {
     ) { granted ->
         OmtLog.i("Activity", "RECORD_AUDIO granted=$granted")
         viewModel.onAudioPermissionResult(granted)
+    }
+
+    private val locationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        OmtLog.i("Activity", "ACCESS_FINE_LOCATION granted=$granted")
+        viewModel.onLocationPermissionResult(granted)
+    }
+
+    private val bluetoothEnableLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        viewModel.refreshPrerequisites()
     }
 
     private val remoteQrScanLauncher = registerForActivityResult(ScanContract()) { result ->
@@ -191,6 +208,7 @@ class MainActivity : ComponentActivity() {
                         onDiscoverRemoteHosts = viewModel::discoverRemoteHosts,
                         onConnectRemoteHost = viewModel::connectRemoteHost,
                         onDisconnectRemote = viewModel::disconnectRemote,
+                        onPrerequisiteAction = ::handlePrerequisiteAction,
                     )
                 }
             }
@@ -232,6 +250,7 @@ class MainActivity : ComponentActivity() {
         requestBluetoothPermissionsForFlow8IfNeeded()
         requestAudioPermissionIfNeeded()
         viewModel.onAppResumed()
+        viewModel.refreshPrerequisites()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -318,13 +337,55 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestBluetoothPermissionsForFlow8IfNeeded() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
         val hasFlow8 = MixerDeviceStore(applicationContext).listMixers().any { it.productId == FLOW8_PRODUCT_ID }
         if (!hasFlow8) return
         val missing = Flow8BlePermissions.missing(this)
         if (missing.isNotEmpty()) {
             bluetoothPermissionLauncher.launch(missing.toTypedArray())
         }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
+            Flow8BlePermissions.needsLocationForBleScan(this)
+        ) {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
+
+    private fun handlePrerequisiteAction(kind: PrerequisiteKind) {
+        when (kind) {
+            PrerequisiteKind.BLUETOOTH_PERMISSION -> requestBluetoothPermissionsIfNeeded()
+            PrerequisiteKind.LOCATION_PERMISSION -> {
+                locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+            }
+            PrerequisiteKind.BLUETOOTH_OFF -> requestBluetoothEnable()
+            PrerequisiteKind.RECORD_AUDIO_PERMISSION -> requestAudioPermissionIfNeeded()
+        }
+    }
+
+    private fun requestBluetoothEnable() {
+        val intent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+        try {
+            bluetoothEnableLauncher.launch(intent)
+        } catch (e: ActivityNotFoundException) {
+            OmtLog.w("Activity", "Bluetooth enable intent unavailable", e)
+            openBluetoothSettings()
+        }
+    }
+
+    private fun openBluetoothSettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+        } catch (e: ActivityNotFoundException) {
+            OmtLog.w("Activity", "Bluetooth settings unavailable", e)
+            openAppSettings()
+        }
+    }
+
+    private fun openAppSettings() {
+        val intent = Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            android.net.Uri.fromParts("package", packageName, null),
+        )
+        startActivity(intent)
     }
 
     private fun requestPermissionsForConnectedMixers() {

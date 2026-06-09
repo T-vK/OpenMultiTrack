@@ -25,6 +25,10 @@ import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -214,37 +218,40 @@ internal fun StripIdentityCell(
             modifier = Modifier.width(textAreaWidth),
             verticalArrangement = Arrangement.Center,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (!hideArm || !hideMonitor || !hideSolo) {
-                    StripStatusGlyphs(
-                        strip = strip,
-                        iconSize = controlIconSize,
-                        hideArm = hideArm,
-                        hideMonitor = hideMonitor,
-                        hideSolo = hideSolo,
-                    )
-                }
-                val routeText = if (soundcheckMode) {
-                    "→${routing.outputTarget(strip.index) + 1}"
-                } else {
-                    "←${routing.inputSource(strip.index) + 1}"
-                }
-                Text(
-                    routeText,
-                    fontSize = (labelFontSize * 0.75f).sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 4.dp),
+            if (!hideArm || !hideMonitor || !hideSolo) {
+                StripStatusGlyphs(
+                    strip = strip,
+                    iconSize = controlIconSize,
+                    hideArm = hideArm,
+                    hideMonitor = hideMonitor,
+                    hideSolo = hideSolo,
                 )
             }
-            Spacer(Modifier.height(1.dp))
-            if (lineText.isNotEmpty()) {
-                Text(
-                    lineText,
-                    fontSize = labelFontSize.sp,
-                    fontWeight = FontWeight.Normal,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Clip,
+            Spacer(Modifier.height(2.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (lineText.isNotEmpty()) {
+                    Text(
+                        lineText,
+                        fontSize = labelFontSize.sp,
+                        fontWeight = FontWeight.Normal,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                }
+                val usbIndex = if (soundcheckMode) {
+                    routing.outputTarget(strip.index)
+                } else {
+                    routing.inputSource(strip.index)
+                }
+                RoutingBadge(
+                    usbIndex = usbIndex,
+                    isOutput = soundcheckMode,
+                    highlighted = usbIndex != strip.index,
                 )
             }
         }
@@ -333,10 +340,89 @@ private fun StripStatusIcon(
 }
 
 @Composable
+private fun RoutingBadge(
+    usbIndex: Int,
+    isOutput: Boolean,
+    highlighted: Boolean,
+) {
+    val prefix = if (isOutput) "OUT" else "IN"
+    val bg = if (highlighted) {
+        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f)
+    } else {
+        MaterialTheme.colorScheme.surface.copy(alpha = 0.65f)
+    }
+    val textColor = if (highlighted) {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = bg,
+        border = BorderStroke(
+            0.5.dp,
+            MaterialTheme.colorScheme.outline.copy(alpha = if (highlighted) 0.35f else 0.2f),
+        ),
+    ) {
+        Text(
+            "$prefix ${usbIndex + 1}",
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+            fontSize = 9.sp,
+            fontWeight = if (highlighted) FontWeight.SemiBold else FontWeight.Normal,
+            color = textColor,
+            maxLines = 1,
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun UsbChannelDropdown(
+    label: String,
+    selectedUsbIndex: Int,
+    usbChannelCount: Int,
+    onSelect: (Int) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val count = usbChannelCount.coerceAtLeast(1)
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        OutlinedTextField(
+            value = "USB ${selectedUsbIndex + 1}",
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth(),
+            singleLine = true,
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            repeat(count) { usb ->
+                DropdownMenuItem(
+                    text = { Text("USB ${usb + 1}") },
+                    onClick = {
+                        onSelect(usb)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
 internal fun ChannelStripControlDialog(
     strip: ChannelStripState,
     routing: MixerRoutingConfig,
-    soundcheckMode: Boolean,
+    usbChannelCount: Int,
     hideArm: Boolean,
     hideMonitor: Boolean,
     hideSolo: Boolean,
@@ -346,15 +432,11 @@ internal fun ChannelStripControlDialog(
     onSolo: () -> Unit,
     onInputSourceChange: (Int) -> Unit,
     onOutputTargetChange: (Int) -> Unit,
-    onHiddenChange: (Boolean) -> Unit,
+    onHiddenRecordChange: (Boolean) -> Unit,
+    onHiddenSoundcheckChange: (Boolean) -> Unit,
 ) {
-    var inputText by remember(strip.index, routing) {
-        mutableStateOf((routing.inputSource(strip.index) + 1).toString())
-    }
-    var outputText by remember(strip.index, routing) {
-        mutableStateOf((routing.outputTarget(strip.index) + 1).toString())
-    }
-    val hidden = routing.isHidden(strip.index, soundcheckMode)
+    val hiddenRecord = strip.index in routing.hiddenRecord
+    val hiddenSoundcheck = strip.index in routing.hiddenSoundcheck
     val parsed = StripTextParts(
         strip,
         StripNumberMode.BOTH,
@@ -427,31 +509,25 @@ internal fun ChannelStripControlDialog(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                OutlinedTextField(
-                    value = inputText,
-                    onValueChange = {
-                        inputText = it
-                        it.toIntOrNull()?.minus(1)?.let(onInputSourceChange)
-                    },
-                    label = { Text("USB input (record)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                UsbChannelDropdown(
+                    label = "USB input (recording mode)",
+                    selectedUsbIndex = routing.inputSource(strip.index),
+                    usbChannelCount = usbChannelCount,
+                    onSelect = onInputSourceChange,
                 )
-                OutlinedTextField(
-                    value = outputText,
-                    onValueChange = {
-                        outputText = it
-                        it.toIntOrNull()?.minus(1)?.let(onOutputTargetChange)
-                    },
-                    label = { Text("USB output (soundcheck)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                UsbChannelDropdown(
+                    label = "USB output (virtual soundcheck)",
+                    selectedUsbIndex = routing.outputTarget(strip.index),
+                    usbChannelCount = usbChannelCount,
+                    onSelect = onOutputTargetChange,
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = hidden, onCheckedChange = onHiddenChange)
-                    Text(
-                        if (soundcheckMode) "Hide in soundcheck" else "Hide when recording",
-                    )
+                    Checkbox(checked = hiddenRecord, onCheckedChange = onHiddenRecordChange)
+                    Text("Hide in recording mode")
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = hiddenSoundcheck, onCheckedChange = onHiddenSoundcheckChange)
+                    Text("Hide in virtual soundcheck mode")
                 }
             }
         },

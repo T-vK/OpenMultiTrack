@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.openmultitrack.app.DawUiState
+import org.openmultitrack.app.device.PrerequisiteKind
 import org.openmultitrack.app.scribble.Flow8BleScribbleImporter
 import org.openmultitrack.app.scribble.ScribbleImportSupport
 import org.openmultitrack.app.data.StripIconMode
@@ -172,6 +173,7 @@ fun DawMainScreen(
     onUpdateChannelInput: (String, Int, Int) -> Unit = { _, _, _ -> },
     onUpdateChannelOutput: (String, Int, Int) -> Unit = { _, _, _ -> },
     onSetChannelHidden: (String, Int, Boolean, Boolean) -> Unit = { _, _, _, _ -> },
+    onPrerequisiteAction: (PrerequisiteKind) -> Unit = {},
 ) {
     val activeId = state.activeMixerId
     val session = activeId?.let { state.sessionByMixer[it] }
@@ -234,6 +236,13 @@ fun DawMainScreen(
                 .padding(padding),
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
+                if (state.prerequisites.isNotEmpty()) {
+                    PrerequisiteBanners(
+                        items = state.prerequisites,
+                        onAction = onPrerequisiteAction,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    )
+                }
                 if (state.mixers.isEmpty()) {
                     EmptyMixersPrompt(onAddMixer = onAddMixer)
                 } else {
@@ -274,6 +283,7 @@ fun DawMainScreen(
                                 mixerId = s.mixerId,
                                 strips = s.channelStrips,
                                 routing = activeRouting,
+                                usbChannelCount = s.captureChannelCount.coerceAtLeast(s.channelStrips.size),
                                 soundcheckMode = false,
                                 normalized = waveformNormalized,
                                 waveformPeaks = s.waveformPeaks,
@@ -293,8 +303,11 @@ fun DawMainScreen(
                                 onSolo = { onToggleSolo(s.mixerId, it) },
                                 onUpdateInput = { ch, usb -> onUpdateChannelInput(s.mixerId, ch, usb) },
                                 onUpdateOutput = { ch, usb -> onUpdateChannelOutput(s.mixerId, ch, usb) },
-                                onSetHidden = { ch, hidden ->
+                                onSetHiddenRecord = { ch, hidden ->
                                     onSetChannelHidden(s.mixerId, ch, false, hidden)
+                                },
+                                onSetHiddenSoundcheck = { ch, hidden ->
+                                    onSetChannelHidden(s.mixerId, ch, true, hidden)
                                 },
                             )
                         }
@@ -853,6 +866,7 @@ private fun ChannelStripList(
     mixerId: String,
     strips: List<ChannelStripState>,
     routing: MixerRoutingConfig,
+    usbChannelCount: Int,
     soundcheckMode: Boolean,
     normalized: Boolean,
     waveformPeaks: Map<Int, LiveWaveformSnapshot>,
@@ -872,7 +886,8 @@ private fun ChannelStripList(
     onSolo: (Int) -> Unit,
     onUpdateInput: (Int, Int) -> Unit,
     onUpdateOutput: (Int, Int) -> Unit,
-    onSetHidden: (Int, Boolean) -> Unit,
+    onSetHiddenRecord: (Int, Boolean) -> Unit,
+    onSetHiddenSoundcheck: (Int, Boolean) -> Unit,
 ) {
     var overlayIndex by remember { mutableStateOf<Int?>(null) }
     val visibleStrips = strips.filter { !routing.isHidden(it.index, soundcheckMode) }
@@ -964,7 +979,7 @@ private fun ChannelStripList(
         ChannelStripControlDialog(
             strip = strip,
             routing = routing,
-            soundcheckMode = soundcheckMode,
+            usbChannelCount = usbChannelCount,
             hideArm = false,
             hideMonitor = false,
             hideSolo = false,
@@ -974,7 +989,8 @@ private fun ChannelStripList(
             onSolo = { onSolo(strip.index) },
             onInputSourceChange = { onUpdateInput(strip.index, it) },
             onOutputTargetChange = { onUpdateOutput(strip.index, it) },
-            onHiddenChange = { onSetHidden(strip.index, it) },
+            onHiddenRecordChange = { onSetHiddenRecord(strip.index, it) },
+            onHiddenSoundcheckChange = { onSetHiddenSoundcheck(strip.index, it) },
         )
     }
 }
