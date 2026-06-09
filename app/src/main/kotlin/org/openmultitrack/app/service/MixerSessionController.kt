@@ -2,9 +2,6 @@ package org.openmultitrack.app.service
 
 import android.content.Context
 import android.hardware.usb.UsbDevice
-import android.media.AudioAttributes
-import android.media.AudioFocusRequest
-import android.media.AudioManager
 import android.os.Build
 import android.os.PowerManager
 import kotlinx.coroutines.CoroutineScope
@@ -125,6 +122,7 @@ class MixerSessionController(
     private var playbackStatusJob: Job? = null
     private var profile: MixerProfile? = null
     private var lastVuLogNs = 0L
+    private var recordingWakeLock: PowerManager.WakeLock? = null
 
     private val storageRoot: File
         get() = settings.storageRootPath?.let { File(it) }
@@ -141,6 +139,16 @@ class MixerSessionController(
     fun setProbeResult(descriptor: UsbAudioDeviceDescriptor, probe: FullUsbProbeResult) {
         activeDescriptor = descriptor
         activeProbe = probe
+        if (_state.value.isRecording) {
+            _state.update {
+                it.copy(
+                    usbDescriptor = descriptor,
+                    probe = probe,
+                    probing = false,
+                )
+            }
+            return
+        }
         val chCount = probe.uac2Caps?.maxCaptureChannels?.takeIf { it > 0 }
             ?: probe.input?.takeIf { it.isSuccess }?.channelCount
             ?: 0
@@ -555,6 +563,7 @@ class MixerSessionController(
                 if (sessionDir != null) {
                     settings.setActiveRecording(prof.id, sessionDir.absolutePath)
                 }
+                acquireRecordingWakeLock()
                 _state.update {
                     it.copy(
                         isRecording = true,
@@ -596,6 +605,7 @@ class MixerSessionController(
                     meta.mixerId.takeIf { it.isNotBlank() } ?: profile?.id ?: mixerId,
                     sessionDir.absolutePath,
                 )
+                acquireRecordingWakeLock()
                 _state.update {
                     it.copy(
                         isRecording = true,
@@ -644,6 +654,7 @@ class MixerSessionController(
                 withContext(Dispatchers.IO) { captureEngine.stopRecording() }
             }
             settings.clearActiveRecording()
+            releaseRecordingWakeLock()
             _state.update {
                 it.copy(
                     isRecording = false,
@@ -777,6 +788,7 @@ class MixerSessionController(
     }
 
     fun shutdown() {
+        releaseRecordingWakeLock()
         waveformJob?.cancel()
         waveformJob = null
         stopPlaybackStatusUpdates()
@@ -1061,6 +1073,23 @@ class MixerSessionController(
             !_state.value.isRecording &&
             !_state.value.isPlaying
 
+    private fun acquireRecordingWakeLock() {
+        val pm = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
+        releaseRecordingWakeLock()
+        recordingWakeLock = pm.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "OpenMultiTrack:Recording",
+        ).apply { setReferenceCounted(false) }
+        recordingWakeLock?.acquire()
+    }
+
+    private fun releaseRecordingWakeLock() {
+        recordingWakeLock?.let { lock ->
+            if (lock.isHeld) lock.release()
+        }
+        recordingWakeLock = null
+    }
+
     private fun applyMonitorRouting(enabled: Boolean = _state.value.isMonitoring) {
         val s = _state.value
         val monitorChannels = s.channelStrips.filter { it.monitoring }.map { it.index }.toSet()
@@ -1086,6 +1115,10 @@ class MixerSessionController(
             return Result.success(count)
         }
         if (captureEngine.isCaptureActive && !captureEngine.isNativeCaptureOwner()) {
+            if (_state.value.isRecording) {
+                OmtLog.e("MixerSession", "Refusing capture handoff while recording ($mixerId)")
+                return Result.failure(IllegalStateException("USB capture busy while recording"))
+            }
             withContext(Dispatchers.IO) { captureEngine.stopCapture() }
         }
         val requested = channelCountFromProbe(probe)

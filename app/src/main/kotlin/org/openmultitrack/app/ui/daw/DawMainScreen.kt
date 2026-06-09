@@ -237,7 +237,9 @@ fun DawMainScreen(
                     EmptyMixersPrompt(onAddMixer = onAddMixer)
                 } else {
                     activeId?.let { id ->
-                        state.interruptedRecordings[id]?.let {
+                        val showInterrupted = state.interruptedRecordings[id] != null &&
+                            session?.isRecording != true
+                        if (showInterrupted) {
                             IncompleteRecordingBanner(
                                 message = "Recording was interrupted. Resume to continue, or finalize to keep what was captured.",
                                 onResume = { onResumeInterruptedRecording(id) },

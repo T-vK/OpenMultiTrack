@@ -336,7 +336,7 @@ class MainViewModel(
         _uiState.value.mixerRoutingById[mixerId] ?: MixerRoutingConfig()
 
     fun onAppResumed() {
-        refreshUsbAndOutputs()
+        refreshUsbAndOutputs(recordingSafe = true)
         refreshPrerequisites()
     }
 
@@ -436,7 +436,7 @@ class MainViewModel(
         return false
     }
 
-    fun refreshUsbAndOutputs() {
+    fun refreshUsbAndOutputs(recordingSafe: Boolean = false) {
         viewModelScope.launch {
             val usb = withContext(Dispatchers.IO) { enumerator.listUsbDevices() }
             val outputs = withContext(Dispatchers.IO) {
@@ -448,9 +448,18 @@ class MainViewModel(
             }
             syncMixerUsbNames(usb)
             sessionClient.withManager { mgr ->
-                mixerStore.listMixers().forEach { autoProbeMixer(it, mgr, usb) }
+                val recordingActive = isAnyMixerRecording(mgr)
+                if (recordingSafe && recordingActive) {
+                    mixerStore.listMixers().forEach { profile ->
+                        refreshInterruptedRecording(profile.id, mgr)
+                    }
+                } else {
+                    mixerStore.listMixers().forEach { autoProbeMixer(it, mgr, usb) }
+                }
             }
-            scheduleUsbRecoveryIfNeeded()
+            if (!recordingSafe || !isAnyMixerRecording()) {
+                scheduleUsbRecoveryIfNeeded()
+            }
         }
     }
 
@@ -818,8 +827,17 @@ class MainViewModel(
         AppLogBuffer.append("I", "Record", "Resumed incomplete session at ${sessionDir.absolutePath}")
     }
 
-    private fun refreshInterruptedRecording(mixerId: String) {
-        val sessionDir = IncompleteRecordingStore.recoverableSession(appContext, settings, mixerId)
+    private fun refreshInterruptedRecording(
+        mixerId: String,
+        manager: org.openmultitrack.app.service.MultiMixerSessionManager? = null,
+    ) {
+        val activelyRecording = manager?.getOrCreate(mixerId)?.state?.value?.isRecording == true ||
+            _uiState.value.sessionByMixer[mixerId]?.isRecording == true
+        val sessionDir = if (activelyRecording) {
+            null
+        } else {
+            IncompleteRecordingStore.recoverableSession(appContext, settings, mixerId)
+        }
         _uiState.update { ui ->
             val updated = if (sessionDir != null) {
                 ui.interruptedRecordings + (mixerId to sessionDir.absolutePath)
@@ -828,6 +846,17 @@ class MainViewModel(
             }
             ui.copy(interruptedRecordings = updated)
         }
+    }
+
+    private fun isAnyMixerRecording(
+        manager: org.openmultitrack.app.service.MultiMixerSessionManager? = null,
+    ): Boolean {
+        if (manager != null) {
+            return mixerStore.listMixers().any { profile ->
+                manager.getOrCreate(profile.id).state.value.isRecording
+            }
+        }
+        return _uiState.value.sessionByMixer.values.any { it.isRecording }
     }
 
     private fun clearInterruptedRecordingIfNeeded(mixerId: String) {
@@ -1173,6 +1202,10 @@ class MainViewModel(
         manager: org.openmultitrack.app.service.MultiMixerSessionManager,
         usbDevices: List<UsbAudioDeviceDescriptor> = _uiState.value.availableUsbDevices,
     ) {
+        if (manager.getOrCreate(profile.id).state.value.isRecording) {
+            refreshInterruptedRecording(profile.id, manager)
+            return
+        }
         val usb = resolveUsbDevice(profile, usbDevices)
         if (usb == null) {
             OmtLog.w("ViewModel", "USB device not found for ${profile.displayName} (vid=${profile.vendorId} pid=${profile.productId})")
@@ -1200,12 +1233,13 @@ class MainViewModel(
             manager.onProbeComplete(resolvedProfile.id, usb, result)
             OmtLog.i("ViewModel", "auto-probed ${resolvedProfile.displayName}")
             usbRecoveryJob?.cancel()
-            refreshInterruptedRecording(resolvedProfile.id)
-            val resumePending = IncompleteRecordingStore.recoverableSession(
-                appContext,
-                settings,
-                resolvedProfile.id,
-            ) != null
+            refreshInterruptedRecording(resolvedProfile.id, manager)
+            val resumePending = !manager.getOrCreate(resolvedProfile.id).state.value.isRecording &&
+                IncompleteRecordingStore.recoverableSession(
+                    appContext,
+                    settings,
+                    resolvedProfile.id,
+                ) != null
             if (resumePending) {
                 AppLogBuffer.append(
                     "I",
@@ -1350,6 +1384,7 @@ class MainViewModel(
     }
 
     private fun scheduleUsbRecoveryIfNeeded() {
+        if (isAnyMixerRecording()) return
         val needsRecovery = mixerStore.listMixers().any { profile ->
             val session = _uiState.value.sessionByMixer[profile.id]
             val stripsEmpty = session?.channelStrips.isNullOrEmpty()
