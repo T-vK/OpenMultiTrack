@@ -25,6 +25,7 @@ import org.openmultitrack.app.audio.MonitorMixConfig
 import org.openmultitrack.app.audio.PlaybackMixContext
 import org.openmultitrack.app.audio.SessionPlayer
 import org.openmultitrack.app.data.AppSettingsStore
+import org.openmultitrack.app.data.RecordingStorageResolver
 import org.openmultitrack.app.root.LoopbackSetup
 import org.openmultitrack.app.root.RootShell
 import org.openmultitrack.audio.OmtLog
@@ -133,9 +134,10 @@ class MixerSessionController(
     private var recordingWakeLock: PowerManager.WakeLock? = null
     private var routingConfig: MixerRoutingConfig = MixerRoutingConfig()
 
+    private val storageResolver = RecordingStorageResolver(appContext, settings)
+
     private val storageRoot: File
-        get() = settings.storageRootPath?.let { File(it) }
-            ?: File(appContext.getExternalFilesDir(null), "OpenMultiTrack")
+        get() = storageResolver.defaultRecordingRoot()
 
     private val _state = MutableStateFlow(MixerSessionUiState(mixerId = mixerId))
     val state: StateFlow<MixerSessionUiState> = _state.asStateFlow()
@@ -224,7 +226,11 @@ class MixerSessionController(
         val prof = profile ?: return
         scope.launch {
             val sessions = withContext(Dispatchers.IO) {
-                SessionLibrary.listCompletedSessions(storageRoot, prof.storageFolderName(), prof.id)
+                SessionLibrary.listCompletedSessionsFromRoots(
+                    storageResolver.allLibraryRoots(),
+                    prof.storageFolderName(),
+                    prof.id,
+                )
             }.map { summary ->
                 SoundcheckSessionItem(
                     sessionDir = summary.dir.absolutePath,
@@ -993,7 +999,6 @@ class MixerSessionController(
                 idleChecks = 0
                 val posSec = if (sampleRate > 0) st.positionFrames.toFloat() / sampleRate else 0f
                 val durSec = if (sampleRate > 0) st.durationFrames.toFloat() / sampleRate else 0f
-                val meters = player.meterLevelsSnapshot()
                 if (abs(posSec - lastPosSec) >= 0.08f) {
                     lastPosSec = posSec
                 }
@@ -1003,7 +1008,6 @@ class MixerSessionController(
                         transportState = TransportState.PLAYING,
                         playbackPositionSec = posSec,
                         playbackDurationSec = durSec.coerceAtLeast(s.playbackDurationSec),
-                        soundcheckMeterLevels = meters,
                     )
                 }
                 delay(50)
@@ -1213,7 +1217,9 @@ class MixerSessionController(
                     _state.update { s ->
                         when {
                             s.isRecording -> s.copy(
-                                waveformPeaks = captureEngine.waveformSnapshots(normalize = true),
+                                waveformPeaks = captureEngine.waveformSnapshots(
+                                    normalize = settings.recordWaveformNormalized,
+                                ),
                                 recordElapsedSec = captureEngine.recordElapsedSec(),
                                 captureMeterLevels = levels,
                             )

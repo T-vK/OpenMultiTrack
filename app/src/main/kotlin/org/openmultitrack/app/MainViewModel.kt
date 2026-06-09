@@ -20,6 +20,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.openmultitrack.app.data.AppSettingsStore
+import org.openmultitrack.app.data.RecordingStorageResolver
+import org.openmultitrack.app.data.StorageVolumeOption
 import org.openmultitrack.app.data.MixerDeviceStore
 import org.openmultitrack.app.data.MixerRoutingStore
 import org.openmultitrack.app.data.ScribbleStripCache
@@ -125,6 +127,13 @@ data class DawUiState(
     val promptLoadSoundcheckAfterRecord: Boolean = true,
     val showRecordingStorageInfoButton: Boolean = true,
     val autoShowRecordingStorageTooltip: Boolean = true,
+    val recordWaveformNormalized: Boolean = false,
+    val playbackWaveformNormalized: Boolean = false,
+    val storageRootPath: String? = null,
+    val effectiveStorageRootPath: String = "",
+    val additionalLibraryRoots: List<String> = emptyList(),
+    val autoScanRemovableMedia: Boolean = true,
+    val storageVolumeOptions: List<StorageVolumeOption> = emptyList(),
 )
 
 fun hasNewerRecordingThanSelected(
@@ -150,6 +159,8 @@ class MainViewModel(
     private val routingStore: MixerRoutingStore,
     private val sessionClient: AudioSessionClient,
 ) : ViewModel() {
+    private val storageResolver = RecordingStorageResolver(appContext, settings)
+
     private val _uiState = MutableStateFlow(
         DawUiState(
             hideArmButton = settings.hideArmButton,
@@ -166,6 +177,12 @@ class MainViewModel(
             promptLoadSoundcheckAfterRecord = settings.promptLoadSoundcheckAfterRecord,
             showRecordingStorageInfoButton = settings.showRecordingStorageInfoButton,
             autoShowRecordingStorageTooltip = settings.autoShowRecordingStorageTooltip,
+            recordWaveformNormalized = settings.recordWaveformNormalized,
+            playbackWaveformNormalized = settings.playbackWaveformNormalized,
+            storageRootPath = settings.storageRootPath,
+            effectiveStorageRootPath = storageResolver.defaultRecordingRoot().absolutePath,
+            additionalLibraryRoots = settings.additionalLibraryRoots,
+            autoScanRemovableMedia = settings.autoScanRemovableMedia,
         ),
     )
     val uiState: StateFlow<DawUiState> = _uiState.asStateFlow()
@@ -1254,7 +1271,68 @@ class MainViewModel(
     }
 
     fun showSettings(show: Boolean) {
+        if (show) refreshStorageVolumeOptions()
         _uiState.update { it.copy(showSettings = show) }
+    }
+
+    private fun refreshStorageVolumeOptions() {
+        _uiState.update {
+            it.copy(
+                storageVolumeOptions = storageResolver.discoverVolumeOptions(),
+                effectiveStorageRootPath = storageResolver.defaultRecordingRoot().absolutePath,
+                storageRootPath = settings.storageRootPath,
+                additionalLibraryRoots = settings.additionalLibraryRoots,
+            )
+        }
+    }
+
+    private fun refreshLibrariesAfterStorageChange() {
+        refreshStorageVolumeOptions()
+        _uiState.value.activeMixerId?.let { refreshSoundcheckLibrary(it) }
+            ?: _uiState.value.mixers.forEach { refreshSoundcheckLibrary(it.id) }
+    }
+
+    fun setRecordWaveformNormalized(enabled: Boolean) {
+        settings.recordWaveformNormalized = enabled
+        _uiState.update { it.copy(recordWaveformNormalized = enabled) }
+    }
+
+    fun setPlaybackWaveformNormalized(enabled: Boolean) {
+        settings.playbackWaveformNormalized = enabled
+        _uiState.update { it.copy(playbackWaveformNormalized = enabled) }
+    }
+
+    fun setStorageRootPath(path: String?) {
+        settings.storageRootPath = path
+        _uiState.update {
+            it.copy(
+                storageRootPath = path,
+                effectiveStorageRootPath = storageResolver.defaultRecordingRoot().absolutePath,
+            )
+        }
+        refreshLibrariesAfterStorageChange()
+    }
+
+    fun addAdditionalLibraryRoot(path: String) {
+        val trimmed = path.trim()
+        if (trimmed.isEmpty()) return
+        val updated = (settings.additionalLibraryRoots + trimmed).distinct()
+        settings.additionalLibraryRoots = updated
+        _uiState.update { it.copy(additionalLibraryRoots = updated) }
+        refreshLibrariesAfterStorageChange()
+    }
+
+    fun removeAdditionalLibraryRoot(path: String) {
+        val updated = settings.additionalLibraryRoots.filter { it != path }
+        settings.additionalLibraryRoots = updated
+        _uiState.update { it.copy(additionalLibraryRoots = updated) }
+        refreshLibrariesAfterStorageChange()
+    }
+
+    fun setAutoScanRemovableMedia(enabled: Boolean) {
+        settings.autoScanRemovableMedia = enabled
+        _uiState.update { it.copy(autoScanRemovableMedia = enabled) }
+        refreshLibrariesAfterStorageChange()
     }
 
     fun showLogViewer(show: Boolean) {

@@ -137,7 +137,6 @@ fun SoundcheckPanel(
                     loopEnabled = session.soundcheckLoopEnabled,
                     loopSelecting = session.soundcheckLoopSelecting,
                     isPlaying = session.isPlaying,
-                    meterLevels = session.soundcheckMeterLevels,
                     overview = overview,
                     normalized = normalized,
                     showWaveforms = showWaveforms,
@@ -185,7 +184,6 @@ private fun SoundcheckWaveformStripList(
     loopEnabled: Boolean,
     loopSelecting: Boolean,
     isPlaying: Boolean,
-    meterLevels: Map<Int, Float>,
     overview: SessionWaveformOverview,
     normalized: Boolean,
     showWaveforms: Boolean,
@@ -272,7 +270,7 @@ private fun SoundcheckWaveformStripList(
             hideRoutingBadges = hideRoutingBadges,
         )
         val labelGap = innerPad / 2
-        val waveformAreaStart = innerPad + labelColumnWidth + labelGap + StripVuMeterWidth + labelGap
+        val waveformAreaStart = innerPad + labelColumnWidth + labelGap
         var waveformWidthPx by remember { mutableFloatStateOf(0f) }
         val waveformWidthState by rememberUpdatedState(waveformWidthPx)
 
@@ -355,7 +353,6 @@ private fun SoundcheckWaveformStripList(
                 horizontalArrangement = Arrangement.spacedBy(labelGap),
             ) {
                 Spacer(Modifier.width(labelColumnWidth))
-                Spacer(Modifier.width(StripVuMeterWidth))
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -420,11 +417,6 @@ private fun SoundcheckWaveformStripList(
                             viewStartSec = viewStart,
                             viewWindowSec = viewWindow,
                             contentWidthFraction = contentWidthFraction,
-                            meterLevel = if (isPlaying) {
-                                meterLevels[strip.index] ?: 0f
-                            } else {
-                                peakLevelAtTime(overview, strip.index, playheadSec, normalized)
-                            },
                             normalized = normalized,
                             showWaveform = showWaveforms,
                             numberMode = numberMode,
@@ -535,7 +527,6 @@ private fun SoundcheckStripRow(
     viewStartSec: Float,
     viewWindowSec: Float,
     contentWidthFraction: Float,
-    meterLevel: Float,
     normalized: Boolean,
     showWaveform: Boolean,
     numberMode: StripNumberMode,
@@ -590,10 +581,6 @@ private fun SoundcheckStripRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(labelGap),
         ) {
-        StripVuMeter(
-            level = meterLevel,
-            height = colorBarHeight,
-        )
         if (showWaveform) {
             Box(
                 modifier = Modifier

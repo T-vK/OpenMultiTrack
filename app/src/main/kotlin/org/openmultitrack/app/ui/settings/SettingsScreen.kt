@@ -56,6 +56,13 @@ data class SettingsUiState(
     val promptLoadSoundcheckAfterRecord: Boolean = true,
     val showRecordingStorageInfoButton: Boolean = true,
     val autoShowRecordingStorageTooltip: Boolean = true,
+    val recordWaveformNormalized: Boolean = false,
+    val playbackWaveformNormalized: Boolean = false,
+    val storageRootPath: String? = null,
+    val effectiveStorageRootPath: String = "",
+    val additionalLibraryRoots: List<String> = emptyList(),
+    val autoScanRemovableMedia: Boolean = true,
+    val storageVolumeOptions: List<org.openmultitrack.app.data.StorageVolumeOption> = emptyList(),
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -78,6 +85,12 @@ fun SettingsSheet(
     onPromptLoadSoundcheckAfterRecordChange: (Boolean) -> Unit = {},
     onShowRecordingStorageInfoButtonChange: (Boolean) -> Unit = {},
     onAutoShowRecordingStorageTooltipChange: (Boolean) -> Unit = {},
+    onRecordWaveformNormalizedChange: (Boolean) -> Unit = {},
+    onPlaybackWaveformNormalizedChange: (Boolean) -> Unit = {},
+    onSetStorageRootPath: (String?) -> Unit = {},
+    onAddAdditionalLibraryRoot: (String) -> Unit = {},
+    onRemoveAdditionalLibraryRoot: (String) -> Unit = {},
+    onAutoScanRemovableMediaChange: (Boolean) -> Unit = {},
 ) {
     ExpandedBottomSheet(onDismissRequest = onDismiss) {
         SettingsContent(
@@ -98,6 +111,12 @@ fun SettingsSheet(
             onPromptLoadSoundcheckAfterRecordChange = onPromptLoadSoundcheckAfterRecordChange,
             onShowRecordingStorageInfoButtonChange = onShowRecordingStorageInfoButtonChange,
             onAutoShowRecordingStorageTooltipChange = onAutoShowRecordingStorageTooltipChange,
+            onRecordWaveformNormalizedChange = onRecordWaveformNormalizedChange,
+            onPlaybackWaveformNormalizedChange = onPlaybackWaveformNormalizedChange,
+            onSetStorageRootPath = onSetStorageRootPath,
+            onAddAdditionalLibraryRoot = onAddAdditionalLibraryRoot,
+            onRemoveAdditionalLibraryRoot = onRemoveAdditionalLibraryRoot,
+            onAutoScanRemovableMediaChange = onAutoScanRemovableMediaChange,
         )
     }
 }
@@ -121,6 +140,12 @@ private fun SettingsContent(
     onPromptLoadSoundcheckAfterRecordChange: (Boolean) -> Unit = {},
     onShowRecordingStorageInfoButtonChange: (Boolean) -> Unit = {},
     onAutoShowRecordingStorageTooltipChange: (Boolean) -> Unit = {},
+    onRecordWaveformNormalizedChange: (Boolean) -> Unit = {},
+    onPlaybackWaveformNormalizedChange: (Boolean) -> Unit = {},
+    onSetStorageRootPath: (String?) -> Unit = {},
+    onAddAdditionalLibraryRoot: (String) -> Unit = {},
+    onRemoveAdditionalLibraryRoot: (String) -> Unit = {},
+    onAutoScanRemovableMediaChange: (Boolean) -> Unit = {},
 ) {
     var query by remember { mutableStateOf("") }
     val normalizedQuery = query.trim().lowercase()
@@ -143,6 +168,8 @@ private fun SettingsContent(
             onPromptLoadSoundcheckAfterRecordChange = onPromptLoadSoundcheckAfterRecordChange,
             onShowRecordingStorageInfoButtonChange = onShowRecordingStorageInfoButtonChange,
             onAutoShowRecordingStorageTooltipChange = onAutoShowRecordingStorageTooltipChange,
+            onRecordWaveformNormalizedChange = onRecordWaveformNormalizedChange,
+            onPlaybackWaveformNormalizedChange = onPlaybackWaveformNormalizedChange,
         )
     }
     val visibleRows = if (normalizedQuery.isEmpty()) {
@@ -231,6 +258,22 @@ private fun SettingsContent(
                         is SettingsListItem.Entry -> SettingsRow(item.row)
                     }
                 }
+            }
+            if (normalizedQuery.isEmpty() ||
+                "storage".contains(normalizedQuery) ||
+                "recording".contains(normalizedQuery)
+            ) {
+                SettingsStorageSection(
+                    effectiveStorageRootPath = state.effectiveStorageRootPath,
+                    storageRootPath = state.storageRootPath,
+                    additionalLibraryRoots = state.additionalLibraryRoots,
+                    autoScanRemovableMedia = state.autoScanRemovableMedia,
+                    storageVolumeOptions = state.storageVolumeOptions,
+                    onSetStorageRootPath = onSetStorageRootPath,
+                    onAddAdditionalLibraryRoot = onAddAdditionalLibraryRoot,
+                    onRemoveAdditionalLibraryRoot = onRemoveAdditionalLibraryRoot,
+                    onAutoScanRemovableMediaChange = onAutoScanRemovableMediaChange,
+                )
             }
         }
 
@@ -398,6 +441,8 @@ private fun buildSettingsRows(
     onPromptLoadSoundcheckAfterRecordChange: (Boolean) -> Unit,
     onShowRecordingStorageInfoButtonChange: (Boolean) -> Unit,
     onAutoShowRecordingStorageTooltipChange: (Boolean) -> Unit,
+    onRecordWaveformNormalizedChange: (Boolean) -> Unit,
+    onPlaybackWaveformNormalizedChange: (Boolean) -> Unit,
 ): List<SettingsRowModel> = listOf(
     SettingsToggleRow(
         id = "prompt_soundcheck_after_record",
@@ -422,6 +467,22 @@ private fun buildSettingsRows(
         description = "Automatically show free space and estimated recording time for five seconds when recording begins.",
         checked = state.autoShowRecordingStorageTooltip,
         onCheckedChange = onAutoShowRecordingStorageTooltipChange,
+    ),
+    SettingsToggleRow(
+        id = "record_waveform_normalized",
+        section = "Display",
+        title = "Normalize live recording waveforms",
+        description = "Scale each channel waveform to full height while recording or monitoring.",
+        checked = state.recordWaveformNormalized,
+        onCheckedChange = onRecordWaveformNormalizedChange,
+    ),
+    SettingsToggleRow(
+        id = "playback_waveform_normalized",
+        section = "Display",
+        title = "Normalize playback waveforms",
+        description = "Scale each channel waveform to full height in Simple Play and Virtual Soundcheck.",
+        checked = state.playbackWaveformNormalized,
+        onCheckedChange = onPlaybackWaveformNormalizedChange,
     ),
     SettingsSliderRow(
         id = "monitor_gain",

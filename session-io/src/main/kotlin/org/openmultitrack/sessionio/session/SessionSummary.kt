@@ -29,18 +29,31 @@ object SessionLibrary {
         return parent.listFiles()
             ?.asSequence()
             ?.filter { it.isDirectory && File(it, "session.json").isFile }
-            ?.mapNotNull { dir ->
-                val meta = SessionMetadata.read(dir) ?: return@mapNotNull null
-                if (meta.incomplete || meta.mixerId != mixerId) return@mapNotNull null
-                SessionSummary(
-                    dir = dir,
-                    metadata = meta,
-                    durationFrames = durationFrames(dir, meta),
-                )
-            }
-            ?.sortedByDescending { it.metadata.startedAtEpochMs }
+            ?.mapNotNull { dir -> sessionSummaryIfComplete(dir, mixerId) }
             ?.toList()
             ?: emptyList()
+    }
+
+    fun listCompletedSessionsFromRoots(
+        storageRoots: List<File>,
+        mixerFolderName: String,
+        mixerId: String,
+    ): List<SessionSummary> {
+        val seen = linkedSetOf<String>()
+        return storageRoots
+            .flatMap { listCompletedSessions(it, mixerFolderName, mixerId) }
+            .filter { seen.add(it.dir.absolutePath) }
+            .sortedByDescending { it.metadata.startedAtEpochMs }
+    }
+
+    private fun sessionSummaryIfComplete(dir: File, mixerId: String): SessionSummary? {
+        val meta = SessionMetadata.read(dir) ?: return null
+        if (meta.incomplete || meta.mixerId != mixerId) return null
+        return SessionSummary(
+            dir = dir,
+            metadata = meta,
+            durationFrames = durationFrames(dir, meta),
+        )
     }
 
     private fun durationFrames(dir: File, meta: SessionMetadata): Long =

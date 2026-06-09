@@ -31,9 +31,39 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getLong(KEY_USB_DEBOUNCE_MS, 400L)
         set(value) = prefs.edit().putLong(KEY_USB_DEBOUNCE_MS, value).apply()
 
-    var waveformNormalized: Boolean
-        get() = prefs.getBoolean(KEY_WAVEFORM_NORMALIZED, false)
-        set(value) = prefs.edit().putBoolean(KEY_WAVEFORM_NORMALIZED, value).apply()
+    var recordWaveformNormalized: Boolean
+        get() = prefs.getBoolean(
+            KEY_RECORD_WAVEFORM_NORMALIZED,
+            prefs.getBoolean(KEY_WAVEFORM_NORMALIZED, false),
+        )
+        set(value) = prefs.edit().putBoolean(KEY_RECORD_WAVEFORM_NORMALIZED, value).apply()
+
+    var playbackWaveformNormalized: Boolean
+        get() = prefs.getBoolean(
+            KEY_PLAYBACK_WAVEFORM_NORMALIZED,
+            prefs.getBoolean(KEY_WAVEFORM_NORMALIZED, false),
+        )
+        set(value) = prefs.edit().putBoolean(KEY_PLAYBACK_WAVEFORM_NORMALIZED, value).apply()
+
+    var additionalLibraryRoots: List<String>
+        get() {
+            val raw = prefs.getString(KEY_ADDITIONAL_LIBRARY_ROOTS, null) ?: return emptyList()
+            return runCatching {
+                val arr = JSONArray(raw)
+                (0 until arr.length()).mapNotNull { i ->
+                    arr.optString(i).takeIf { it.isNotBlank() }
+                }
+            }.getOrDefault(emptyList())
+        }
+        set(value) {
+            val arr = JSONArray()
+            value.map { it.trim() }.filter { it.isNotEmpty() }.distinct().forEach { arr.put(it) }
+            prefs.edit().putString(KEY_ADDITIONAL_LIBRARY_ROOTS, arr.toString()).apply()
+        }
+
+    var autoScanRemovableMedia: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_SCAN_REMOVABLE_MEDIA, true)
+        set(value) = prefs.edit().putBoolean(KEY_AUTO_SCAN_REMOVABLE_MEDIA, value).apply()
 
     var debugLogging: Boolean
         get() = prefs.getBoolean(KEY_DEBUG_LOG, true)
@@ -230,6 +260,10 @@ class AppSettingsStore(context: Context) {
         private const val KEY_PLAYBACK_WAVEFORM_SEC = "playback_waveform_sec"
         private const val KEY_USB_DEBOUNCE_MS = "usb_debounce_ms"
         private const val KEY_WAVEFORM_NORMALIZED = "waveform_normalized"
+        private const val KEY_RECORD_WAVEFORM_NORMALIZED = "record_waveform_normalized"
+        private const val KEY_PLAYBACK_WAVEFORM_NORMALIZED = "playback_waveform_normalized"
+        private const val KEY_ADDITIONAL_LIBRARY_ROOTS = "additional_library_roots"
+        private const val KEY_AUTO_SCAN_REMOVABLE_MEDIA = "auto_scan_removable_media"
         private const val KEY_DEBUG_LOG = "debug_log"
         private const val KEY_HIDE_ARM = "hide_arm_button"
         private const val KEY_HIDE_MONITOR = "hide_monitor_button"
