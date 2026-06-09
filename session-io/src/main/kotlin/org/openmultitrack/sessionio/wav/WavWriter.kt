@@ -77,7 +77,8 @@ class WavWriter private constructor(
 
     private fun writePlaceholderHeader() {
         raf.setLength(0)
-        raf.write(ByteArray(RIFF_HEADER_SIZE))
+        dataBytesWritten = 0
+        finalizeHeader()
     }
 
     private fun finalizeHeader() {
