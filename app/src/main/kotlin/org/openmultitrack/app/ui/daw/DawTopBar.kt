@@ -3,6 +3,7 @@ package org.openmultitrack.app.ui.daw
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -31,6 +32,7 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -208,7 +210,8 @@ fun DawTopBar(
                     contentDescription = "OpenMultiTrack",
                     modifier = Modifier
                         .padding(end = 4.dp)
-                        .size(40.dp),
+                        .size(40.dp)
+                        .clip(CircleShape),
                 )
                 val remoteActive = remoteConnectionState == RemoteConnectionState.CONNECTED
                 IconButton(onClick = onOpenRemoteControl) {
