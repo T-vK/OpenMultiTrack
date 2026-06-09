@@ -364,9 +364,14 @@ class MixerSessionController(
         }
     }
 
-    fun stopSoundcheck() {
+    fun stopSoundcheck(resetPosition: Boolean = true) {
         scope.launch {
-            captureMutex.withLock { stopSoundcheckLocked() }
+            captureMutex.withLock {
+                stopSoundcheckLocked()
+                if (resetPosition) {
+                    _state.update { it.copy(playbackPositionSec = 0f) }
+                }
+            }
         }
     }
 
@@ -389,22 +394,46 @@ class MixerSessionController(
     }
 
     fun toggleSoundcheckPlayback() {
+        if (_state.value.isPlaying) {
+            pauseSoundcheckPlayback()
+        } else {
+            playSoundcheckPlayback()
+        }
+    }
+
+    fun pauseSoundcheckPlayback() {
         scope.launch {
             captureMutex.withLock {
                 if (_state.value.isPlaying) {
                     stopSoundcheckLocked()
-                } else {
-                    val dir = _state.value.selectedSoundcheckDir ?: return@withLock
-                    val metadata = SessionMetadata.read(File(dir)) ?: return@withLock
-                    val frame = (_state.value.playbackPositionSec * metadata.sampleRate).toLong()
-                    try {
-                        startSoundcheckPlaybackLocked(frame)
-                    } catch (e: Exception) {
-                        OmtLog.e("MixerSession", "toggleSoundcheckPlayback failed", e)
-                        _state.update { it.copy(statusMessage = e.message) }
-                    }
                 }
             }
+        }
+    }
+
+    fun playSoundcheckPlayback() {
+        scope.launch {
+            captureMutex.withLock {
+                val dir = _state.value.selectedSoundcheckDir ?: return@withLock
+                val metadata = SessionMetadata.read(File(dir)) ?: return@withLock
+                val frame = (_state.value.playbackPositionSec * metadata.sampleRate).toLong()
+                try {
+                    startSoundcheckPlaybackLocked(frame)
+                } catch (e: Exception) {
+                    OmtLog.e("MixerSession", "playSoundcheckPlayback failed", e)
+                    _state.update { it.copy(statusMessage = e.message) }
+                }
+            }
+        }
+    }
+
+    private suspend fun prepareUsbForPlaybackLocked() {
+        if (_state.value.isMonitoring) {
+            captureEngine.updateMonitor(MonitorMixConfig(enabled = false))
+            _state.update { it.copy(isMonitoring = false) }
+        }
+        if (captureEngine.isCaptureActive && !_state.value.isRecording) {
+            withContext(Dispatchers.IO) { captureEngine.stopCapture() }
         }
     }
 
@@ -417,6 +446,7 @@ class MixerSessionController(
             SessionMetadata.read(dir)?.withResolvedChannels(dir)
         } ?: return
         withContext(Dispatchers.IO) {
+            prepareUsbForPlaybackLocked()
             player.stopAndAwait()
             val ui = _state.value
             val usbOutputs = maxPlaybackChannelsFromProbe(probe).coerceAtLeast(1)

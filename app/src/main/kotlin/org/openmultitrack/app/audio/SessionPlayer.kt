@@ -95,12 +95,14 @@ class SessionPlayer {
         val reader = PerChannelWavReader.open(sessionDir, metadata)
         val inputChannels = reader.channelCount.coerceAtMost(32)
         val outputChannels = mixContext?.usbOutputCount?.coerceAtLeast(1) ?: inputChannels
+        val scratchChannels = max(inputChannels, outputChannels)
         return startPlayback(
             scope = scope,
             route = route,
             usbDevice = usbDevice,
             startFrame = startFrame,
             channels = outputChannels,
+            scratchChannels = scratchChannels,
             sampleRate = reader.sampleRate,
             duration = reader.frameCount,
             label = sessionDir.absolutePath,
@@ -148,6 +150,7 @@ class SessionPlayer {
         usbDevice: UsbDevice?,
         startFrame: Long,
         channels: Int,
+        scratchChannels: Int = channels,
         sampleRate: Int,
         duration: Long,
         label: String,
@@ -181,7 +184,7 @@ class SessionPlayer {
             durationFrames = duration,
         )
 
-        val scratch = FloatArray(2048 * channels)
+        val scratch = FloatArray(2048 * scratchChannels.coerceAtLeast(1))
         val backend = route.backend
         playbackJob = scope.launch(Dispatchers.IO) {
             try {

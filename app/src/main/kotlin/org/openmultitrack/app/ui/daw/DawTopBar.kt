@@ -46,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.openmultitrack.app.service.MixerSessionUiState
@@ -100,6 +101,10 @@ private fun MixerControlCluster(
     onStartRecord: () -> Unit,
     onStopRecord: () -> Unit,
     onToggleSoundcheckPlayback: () -> Unit,
+    onStopSoundcheck: () -> Unit,
+    onToggleSoundcheckLoop: () -> Unit,
+    onSetSoundcheckLoopIn: () -> Unit,
+    onSetSoundcheckLoopOut: () -> Unit,
 ) {
     val border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
     Surface(
@@ -151,23 +156,197 @@ private fun MixerControlCluster(
                 )
                 clusterDivider()
                 when {
-                    appMode == AppMode.MULTITRACK_RECORD -> RecordClusterButton(
+                    appMode == AppMode.MULTITRACK_RECORD -> RecordTransportCluster(
                         session = session,
                         onStartRecord = onStartRecord,
                         onStopRecord = onStopRecord,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
                     )
-                    appMode.isPlaybackMode -> PlaybackClusterButton(
+                    appMode.isPlaybackMode -> PlaybackTransportCluster(
                         session = session,
                         onTogglePlayback = onToggleSoundcheckPlayback,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
+                        onStopPlayback = onStopSoundcheck,
+                        onToggleLoop = onToggleSoundcheckLoop,
+                        onSetLoopIn = onSetSoundcheckLoopIn,
+                        onSetLoopOut = onSetSoundcheckLoopOut,
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun TransportButtonCluster(
+    content: @Composable RowScope.() -> Unit,
+) {
+    Surface(
+        shape = ToolbarShape,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.45f),
+        modifier = Modifier.height(ToolbarControlHeight),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxHeight(),
+            verticalAlignment = Alignment.CenterVertically,
+            content = content,
+        )
+    }
+}
+
+@Composable
+private fun TransportIconButton(
+    onClick: () -> Unit,
+    enabled: Boolean,
+    icon: ImageVector,
+    contentDescription: String,
+    tint: Color,
+    background: Color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        color = background,
+        modifier = Modifier.size(ToolbarControlHeight),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                modifier = Modifier.size(20.dp),
+                tint = tint,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecordTransportCluster(
+    session: MixerSessionUiState?,
+    onStartRecord: () -> Unit,
+    onStopRecord: () -> Unit,
+) {
+    val isRecording = session?.isRecording == true
+    val canRecord = session?.probe != null && !isRecording
+    TransportButtonCluster {
+        TransportIconButton(
+            onClick = onStartRecord,
+            enabled = canRecord,
+            icon = Icons.Default.FiberManualRecord,
+            contentDescription = "Record",
+            tint = RecordRed,
+        )
+        clusterDivider()
+        TransportIconButton(
+            onClick = onStopRecord,
+            enabled = isRecording,
+            icon = Icons.Default.Stop,
+            contentDescription = "Stop recording",
+            tint = if (isRecording) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+            background = if (isRecording) RecordRed else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+        )
+    }
+}
+
+@Composable
+private fun PlaybackTransportCluster(
+    session: MixerSessionUiState?,
+    onTogglePlayback: () -> Unit,
+    onStopPlayback: () -> Unit,
+    onToggleLoop: () -> Unit,
+    onSetLoopIn: () -> Unit,
+    onSetLoopOut: () -> Unit,
+) {
+    val isPlaying = session?.isPlaying == true
+    val hasSession = session?.selectedSoundcheckDir != null && session.probe != null
+    val canStop = hasSession && (isPlaying || (session?.playbackPositionSec ?: 0f) > 0.05f)
+    TransportButtonCluster {
+        TransportIconButton(
+            onClick = onTogglePlayback,
+            enabled = hasSession,
+            icon = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+            contentDescription = if (isPlaying) "Pause" else "Play",
+            tint = if (isPlaying) Color.White else MaterialTheme.colorScheme.primary,
+            background = if (isPlaying) {
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+            } else {
+                MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+            },
+        )
+        clusterDivider()
+        TransportIconButton(
+            onClick = onStopPlayback,
+            enabled = canStop,
+            icon = Icons.Default.Stop,
+            contentDescription = "Stop playback",
+            tint = MaterialTheme.colorScheme.onSurface,
+        )
+        clusterDivider()
+        LoopTransportButton(
+            session = session,
+            onSetLoopIn = onSetLoopIn,
+            onSetLoopOut = onSetLoopOut,
+            onToggleLoop = onToggleLoop,
+        )
+    }
+}
+
+@Composable
+private fun LoopTransportButton(
+    session: MixerSessionUiState?,
+    onSetLoopIn: () -> Unit,
+    onSetLoopOut: () -> Unit,
+    onToggleLoop: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val hasSession = session?.selectedSoundcheckDir != null
+    val hasRegion = session?.soundcheckLoopStartSec != null && session.soundcheckLoopEndSec != null
+    val loopTint = when {
+        session?.soundcheckLoopEnabled == true -> LoopAmber
+        session?.soundcheckLoopSelecting == true -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    Box {
+        TransportIconButton(
+            onClick = { expanded = true },
+            enabled = hasSession,
+            icon = Icons.Default.Repeat,
+            contentDescription = "Loop",
+            tint = loopTint,
+        )
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("Set loop in point") },
+                onClick = {
+                    expanded = false
+                    onSetLoopIn()
+                },
+                enabled = hasSession,
+            )
+            DropdownMenuItem(
+                text = { Text("Set loop out point") },
+                onClick = {
+                    expanded = false
+                    onSetLoopOut()
+                },
+                enabled = hasSession,
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        when {
+                            session?.soundcheckLoopSelecting == true -> "Cancel loop selection"
+                            session?.soundcheckLoopEnabled == true -> "Disable loop"
+                            hasRegion -> "Enable loop"
+                            else -> "Start loop region selection"
+                        },
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onToggleLoop()
+                },
+                enabled = hasSession,
+            )
         }
     }
 }
@@ -235,131 +414,6 @@ private fun clusterDivider() {
     )
 }
 
-@Composable
-private fun RecordClusterButton(
-    session: MixerSessionUiState?,
-    onStartRecord: () -> Unit,
-    onStopRecord: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val isRecording = session?.isRecording == true
-    val enabled = session?.probe != null
-    Surface(
-        onClick = { if (isRecording) onStopRecord() else onStartRecord() },
-        enabled = enabled || isRecording,
-        color = if (isRecording) RecordRed else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-        modifier = modifier,
-    ) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            Icon(
-                imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
-                contentDescription = if (isRecording) "Stop recording" else "Record",
-                modifier = Modifier.size(20.dp),
-                tint = if (isRecording) Color.White else RecordRed,
-            )
-        }
-    }
-}
-
-@Composable
-private fun PlaybackClusterButton(
-    session: MixerSessionUiState?,
-    onTogglePlayback: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val isPlaying = session?.isPlaying == true
-    val enabled = session?.selectedSoundcheckDir != null && session.probe != null
-    Surface(
-        onClick = onTogglePlayback,
-        enabled = enabled,
-        color = if (isPlaying) {
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
-        } else {
-            MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
-        },
-        modifier = modifier,
-    ) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            Icon(
-                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                contentDescription = if (isPlaying) "Pause playback" else "Play",
-                modifier = Modifier.size(22.dp),
-                tint = if (isPlaying) Color.White else MaterialTheme.colorScheme.primary,
-            )
-        }
-    }
-}
-
-@Composable
-private fun LoopMenuButton(
-    session: MixerSessionUiState?,
-    onSetLoopIn: () -> Unit,
-    onSetLoopOut: () -> Unit,
-    onToggleLoop: () -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val hasSession = session?.selectedSoundcheckDir != null
-    val hasRegion = session?.soundcheckLoopStartSec != null && session.soundcheckLoopEndSec != null
-
-    Box {
-        IconButton(
-            onClick = { expanded = true },
-            enabled = hasSession,
-        ) {
-            Icon(
-                Icons.Default.Repeat,
-                contentDescription = "Loop",
-                tint = when {
-                    session?.soundcheckLoopEnabled == true -> LoopAmber
-                    session?.soundcheckLoopSelecting == true -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.onSurface
-                },
-            )
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
-                text = { Text("Set loop in point") },
-                onClick = {
-                    expanded = false
-                    onSetLoopIn()
-                },
-                enabled = hasSession,
-            )
-            DropdownMenuItem(
-                text = { Text("Set loop out point") },
-                onClick = {
-                    expanded = false
-                    onSetLoopOut()
-                },
-                enabled = hasSession,
-            )
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        when {
-                            session?.soundcheckLoopSelecting == true -> "Cancel loop selection"
-                            session?.soundcheckLoopEnabled == true -> "Disable loop"
-                            hasRegion -> "Enable loop"
-                            else -> "Start loop region selection"
-                        },
-                    )
-                },
-                onClick = {
-                    expanded = false
-                    onToggleLoop()
-                },
-                enabled = hasSession,
-            )
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DawTopBar(
@@ -376,6 +430,7 @@ fun DawTopBar(
     onStartRecord: () -> Unit,
     onStopRecord: () -> Unit,
     onToggleSoundcheckPlayback: () -> Unit,
+    onStopSoundcheck: () -> Unit,
     onToggleSoundcheckLoop: () -> Unit,
     onSetSoundcheckLoopIn: () -> Unit,
     onSetSoundcheckLoopOut: () -> Unit,
@@ -415,18 +470,14 @@ fun DawTopBar(
                         onStartRecord = onStartRecord,
                         onStopRecord = onStopRecord,
                         onToggleSoundcheckPlayback = onToggleSoundcheckPlayback,
+                        onStopSoundcheck = onStopSoundcheck,
+                        onToggleSoundcheckLoop = onToggleSoundcheckLoop,
+                        onSetSoundcheckLoopIn = onSetSoundcheckLoopIn,
+                        onSetSoundcheckLoopOut = onSetSoundcheckLoopOut,
                     )
                 }
             },
             actions = {
-                if (appMode?.isPlaybackMode == true && showMixerCluster) {
-                    LoopMenuButton(
-                        session = session,
-                        onSetLoopIn = onSetSoundcheckLoopIn,
-                        onSetLoopOut = onSetSoundcheckLoopOut,
-                        onToggleLoop = onToggleSoundcheckLoop,
-                    )
-                }
                 val remoteActive = remoteConnectionState == RemoteConnectionState.CONNECTED
                 IconButton(onClick = onOpenRemoteControl) {
                     Icon(

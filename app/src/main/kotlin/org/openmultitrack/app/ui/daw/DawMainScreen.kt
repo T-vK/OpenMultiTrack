@@ -209,6 +209,7 @@ fun DawMainScreen(
                     onStartRecord = { activeId?.let(onStartRecord) },
                     onStopRecord = { activeId?.let(onStopRecord) },
                     onToggleSoundcheckPlayback = { activeId?.let(onToggleSoundcheckPlayback) },
+                    onStopSoundcheck = { activeId?.let(onStopSoundcheck) },
                     onToggleSoundcheckLoop = { activeId?.let(onToggleSoundcheckLoop) },
                     onSetSoundcheckLoopIn = { activeId?.let(onSetSoundcheckLoopIn) },
                     onSetSoundcheckLoopOut = { activeId?.let(onSetSoundcheckLoopOut) },
