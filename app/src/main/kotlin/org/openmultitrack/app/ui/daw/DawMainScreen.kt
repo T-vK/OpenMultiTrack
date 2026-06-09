@@ -177,6 +177,8 @@ fun DawMainScreen(
     onExitRemoteMode: () -> Unit = {},
     onScanRemoteQr: () -> Unit = {},
     onEnableRemoteHosting: () -> Unit = {},
+    onStopRemoteHosting: () -> Unit = {},
+    onUnpairRemoteHost: (String) -> Unit = {},
     mixerRoutingById: Map<String, MixerRoutingConfig> = emptyMap(),
     showMixerPicker: Boolean = false,
     onCloseMixerPicker: () -> Unit = {},
@@ -367,6 +369,7 @@ fun DawMainScreen(
             pairingUri = remotePairingUri,
             pairingPin = remotePairingPin,
             discoveredHosts = state.remoteDiscoveredHosts,
+            pairedHosts = state.remotePairedHosts,
             errorMessage = state.remoteError,
             onDismiss = onCloseRemoteControl,
             onEnterRemoteMode = onEnterRemoteClientMode,
@@ -376,6 +379,8 @@ fun DawMainScreen(
             onConnectManual = onConnectRemoteManual,
             onScanQr = onScanRemoteQr,
             onEnableHosting = onEnableRemoteHosting,
+            onStopHosting = onStopRemoteHosting,
+            onUnpairHost = onUnpairRemoteHost,
             connectedClientCount = state.remoteConnectedClientCount,
         )
         return

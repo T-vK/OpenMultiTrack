@@ -160,6 +160,8 @@ class MainActivity : ComponentActivity() {
                         onCloseRemoteControl = { viewModel.showRemoteControlSheet(false) },
                         onEnterRemoteClientMode = viewModel::enterRemoteClientMode,
                         onEnableRemoteHosting = viewModel::enableRemoteHosting,
+                        onStopRemoteHosting = viewModel::stopRemoteHosting,
+                        onUnpairRemoteHost = viewModel::unpairRemoteHost,
                         onConnectRemoteManual = viewModel::connectRemoteManual,
                         onScanRemoteQr = {
                             remoteQrScanLauncher.launch(

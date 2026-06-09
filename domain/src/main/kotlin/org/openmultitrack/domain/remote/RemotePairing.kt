@@ -7,6 +7,9 @@ data class RemotePairedHost(
     val hostId: String,
     val displayName: String,
     val pin: String,
+    /** Last known LAN address — used for auto-reconnect without rediscovery. */
+    val lastHost: String? = null,
+    val lastPort: Int? = null,
 )
 
 object RemotePairing {
@@ -18,9 +21,16 @@ object RemotePairing {
     fun generatePin(): String =
         (100_000..999_999).random().toString()
 
-    fun buildPairingUri(hostId: String, pin: String, name: String, port: Int = RemoteProtocol.HTTP_PORT): String {
+    fun buildPairingUri(
+        hostId: String,
+        pin: String,
+        name: String,
+        port: Int = RemoteProtocol.HTTP_PORT,
+        host: String? = null,
+    ): String {
         val encodedName = java.net.URLEncoder.encode(name, "UTF-8")
-        return "omt://remote?hostId=$hostId&pin=$pin&name=$encodedName&port=$port"
+        val base = "omt://remote?hostId=$hostId&pin=$pin&name=$encodedName&port=$port"
+        return if (!host.isNullOrBlank()) "$base&host=$host" else base
     }
 
     fun parsePairingUri(uri: String): RemotePairingPayload? = runCatching {

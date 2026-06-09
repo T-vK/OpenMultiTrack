@@ -170,14 +170,21 @@ class AppSettingsStore(context: Context) {
                     hostId = obj.getString("hostId"),
                     displayName = obj.optString("displayName", "OpenMultiTrack"),
                     pin = obj.getString("pin"),
+                    lastHost = obj.optString("lastHost").takeIf { it.isNotBlank() },
+                    lastPort = obj.optInt("lastPort").takeIf { it > 0 },
                 )
             }
         }.getOrDefault(emptyList())
     }
 
     fun savePairedRemoteHost(host: RemotePairedHost) {
+        val existing = listPairedRemoteHosts().firstOrNull { it.hostId == host.hostId }
+        val merged = host.copy(
+            lastHost = host.lastHost ?: existing?.lastHost,
+            lastPort = host.lastPort ?: existing?.lastPort,
+        )
         val updated = listPairedRemoteHosts()
-            .filter { it.hostId != host.hostId } + host
+            .filter { it.hostId != merged.hostId } + merged
         val arr = JSONArray()
         updated.forEach { h ->
             arr.put(
@@ -185,6 +192,8 @@ class AppSettingsStore(context: Context) {
                     put("hostId", h.hostId)
                     put("displayName", h.displayName)
                     put("pin", h.pin)
+                    h.lastHost?.let { put("lastHost", it) }
+                    h.lastPort?.let { put("lastPort", it) }
                 },
             )
         }
@@ -200,6 +209,8 @@ class AppSettingsStore(context: Context) {
                     put("hostId", h.hostId)
                     put("displayName", h.displayName)
                     put("pin", h.pin)
+                    h.lastHost?.let { put("lastHost", it) }
+                    h.lastPort?.let { put("lastPort", it) }
                 },
             )
         }

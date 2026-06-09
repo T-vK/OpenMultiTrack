@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.openmultitrack.domain.remote.RemoteConnectionState
+import org.openmultitrack.domain.remote.RemotePairedHost
 import org.openmultitrack.domain.remote.RemoteRole
 import org.openmultitrack.remote.RemoteDiscoveredHost
 
@@ -46,6 +47,7 @@ fun RemoteControlScreen(
     pairingUri: String?,
     pairingPin: String?,
     discoveredHosts: List<RemoteDiscoveredHost>,
+    pairedHosts: List<RemotePairedHost> = emptyList(),
     errorMessage: String?,
     onDismiss: () -> Unit,
     onEnterRemoteMode: () -> Unit,
@@ -55,13 +57,19 @@ fun RemoteControlScreen(
     onConnectManual: (host: String, pin: String) -> Unit,
     onScanQr: () -> Unit,
     onEnableHosting: () -> Unit,
+    onStopHosting: () -> Unit = {},
+    onUnpairHost: (String) -> Unit = {},
     connectedClientCount: Int = 0,
 ) {
     var manualHost by remember { mutableStateOf("") }
     var manualPin by remember { mutableStateOf("") }
+    var showAdvanced by remember { mutableStateOf(false) }
     val isRemoteClient = role == RemoteRole.CLIENT &&
         connectionState == RemoteConnectionState.CONNECTED
     val isRemoteHost = role == RemoteRole.HOST
+    val isConnecting = role == RemoteRole.CLIENT &&
+        (connectionState == RemoteConnectionState.CONNECTING ||
+            connectionState == RemoteConnectionState.DISCOVERING)
 
     Scaffold(
         topBar = {
@@ -100,11 +108,23 @@ fun RemoteControlScreen(
                 }
             } else {
                 Text(
-                    "Control another OpenMultiTrack instance on the same Wi‑Fi. Pair once with QR or PIN — rediscovery works after IP changes.",
+                    "Control another OpenMultiTrack on the same Wi‑Fi. Scan the host QR code once — it connects automatically and remembers the host.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(vertical = 8.dp),
                 )
+
+                if (isConnecting) {
+                    Text(
+                        when (connectionState) {
+                            RemoteConnectionState.DISCOVERING -> "Looking for paired host…"
+                            else -> "Connecting to ${hostName ?: connectedHost ?: "host"}…"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                }
 
                 if (role != RemoteRole.HOST) {
                     OutlinedButton(
@@ -140,20 +160,27 @@ fun RemoteControlScreen(
                                 .padding(vertical = 12.dp),
                         )
                         Text(
-                            uri,
+                            "Scan this QR on the remote device — no IP or PIN entry needed.",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                    OutlinedButton(
+                        onClick = onStopHosting,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    ) {
+                        Text("Stop hosting")
                     }
                     HorizontalDivider(Modifier.padding(vertical = 12.dp))
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onEnterRemoteMode, modifier = Modifier.weight(1f)) {
-                        Text("Use as remote")
+                    Button(onClick = onScanQr, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.QrCodeScanner, contentDescription = null)
+                        Text("Scan host QR", modifier = Modifier.padding(start = 8.dp))
                     }
-                    OutlinedButton(onClick = onScanQr) {
-                        Icon(Icons.Default.QrCodeScanner, contentDescription = "Scan QR")
+                    OutlinedButton(onClick = onEnterRemoteMode) {
+                        Text("Reconnect")
                     }
                 }
 
@@ -171,6 +198,34 @@ fun RemoteControlScreen(
 
                 errorMessage?.let {
                     Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+                }
+
+                if (pairedHosts.isNotEmpty()) {
+                    Text(
+                        "Paired hosts",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                    pairedHosts.forEach { paired ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(paired.displayName, style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    paired.lastHost?.let { "$it:${paired.lastPort ?: 8765}" }
+                                        ?: "Address saved after next connect",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            OutlinedButton(onClick = { onUnpairHost(paired.hostId) }) {
+                                Text("Unpair")
+                            }
+                        }
+                    }
                 }
 
                 if (discoveredHosts.isNotEmpty()) {
@@ -198,28 +253,34 @@ fun RemoteControlScreen(
                     }
                 }
 
-                HorizontalDivider(Modifier.padding(vertical = 12.dp))
-                Text("Manual connect", style = MaterialTheme.typography.titleSmall)
-                OutlinedTextField(
-                    value = manualHost,
-                    onValueChange = { manualHost = it },
-                    label = { Text("Host IP") },
+                OutlinedButton(
+                    onClick = { showAdvanced = !showAdvanced },
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = manualPin,
-                    onValueChange = { manualPin = it },
-                    label = { Text("PIN") },
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    singleLine = true,
-                )
-                Button(
-                    onClick = { onConnectManual(manualHost, manualPin) },
-                    enabled = manualHost.isNotBlank() && manualPin.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                 ) {
-                    Text("Connect")
+                    Text(if (showAdvanced) "Hide advanced" else "Advanced (manual IP + PIN)")
+                }
+                if (showAdvanced) {
+                    OutlinedTextField(
+                        value = manualHost,
+                        onValueChange = { manualHost = it },
+                        label = { Text("Host IP") },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = manualPin,
+                        onValueChange = { manualPin = it },
+                        label = { Text("PIN") },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        singleLine = true,
+                    )
+                    Button(
+                        onClick = { onConnectManual(manualHost, manualPin) },
+                        enabled = manualHost.isNotBlank() && manualPin.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    ) {
+                        Text("Connect manually")
+                    }
                 }
             }
         }

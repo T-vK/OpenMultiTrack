@@ -54,8 +54,9 @@ class RemoteClient(
     )
   }
 
-  fun send(text: String) {
-    webSocket?.send(text)
+  fun send(text: String): Boolean {
+    val ws = webSocket ?: return false
+    return runCatching { ws.send(text) }.getOrDefault(false)
   }
 
   fun disconnect() {

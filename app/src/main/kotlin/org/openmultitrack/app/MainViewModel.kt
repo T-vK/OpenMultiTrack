@@ -307,6 +307,7 @@ class MainViewModel(
                 remoteState.role == RemoteRole.CLIENT && mirrorReady -> {
                     val settingsPatch = remoteState.uiSettings
                     base.copy(
+                        showRemoteControlSheet = false,
                         mixers = remoteState.mixers,
                         activeMixerId = remoteState.activeMixerId
                             ?: remoteState.mixers.firstOrNull()?.id,
@@ -405,6 +406,15 @@ class MainViewModel(
 
     fun pairRemoteFromQr(uri: String) {
         sessionClient.withRemoteControl { it.pairFromQr(uri) }
+        _uiState.update { it.copy(showRemoteControlSheet = false) }
+    }
+
+    fun unpairRemoteHost(hostId: String) {
+        sessionClient.withRemoteControl { it.unpairHost(hostId) }
+    }
+
+    fun stopRemoteHosting() {
+        sessionClient.withRemoteControl { it.stopHosting() }
     }
 
     fun connectRemoteManual(host: String, pin: String) {

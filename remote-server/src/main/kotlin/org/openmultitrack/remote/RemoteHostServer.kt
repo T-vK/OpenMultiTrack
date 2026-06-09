@@ -56,7 +56,15 @@ class RemoteHostServer(
 
     fun broadcast(text: String) {
         sockets.forEach { socket ->
-            runCatching { socket.send(text) }
+            safeSend(socket, text)
+        }
+    }
+
+    private fun safeSend(socket: RemoteSocket, text: String) {
+        val ok = runCatching { socket.send(text); true }.getOrDefault(false)
+        if (!ok) {
+            sockets.remove(socket)
+            runCatching { socket.close(NanoWSD.WebSocketFrame.CloseCode.GoingAway, "send failed", false) }
         }
     }
 
@@ -89,7 +97,7 @@ class RemoteHostServer(
         override fun onOpen() {
             Log.i(TAG, "WebSocket client connected (total=${sockets.size + 1})")
             sockets.add(this)
-            listener.onClientConnected { msg -> send(msg) }
+            listener.onClientConnected { msg -> safeSend(this, msg) }
         }
 
         override fun onClose(
@@ -105,7 +113,7 @@ class RemoteHostServer(
 
         override fun onMessage(message: NanoWSD.WebSocketFrame) {
             val text = message.textPayload ?: return
-            listener.onClientMessage(text) { reply -> send(reply) }
+            listener.onClientMessage(text) { reply -> safeSend(this, reply) }
         }
 
         override fun onPong(pong: NanoWSD.WebSocketFrame) = Unit

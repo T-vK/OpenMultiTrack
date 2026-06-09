@@ -79,6 +79,12 @@ class RemoteControlManager(
     private var lastSoundcheckLoadingByMixer = mutableMapOf<String, Boolean>()
     private var snapshotWaitJob: Job? = null
     private var lastConnectHostId: String? = null
+    private var lastConnectPort: Int = RemoteProtocol.HTTP_PORT
+    private var reconnectJob: Job? = null
+    @Volatile
+    private var userInitiatedDisconnect = false
+    @Volatile
+    private var skipRememberedHostOnce = false
     @Volatile
     private var clientSocketOpen = false
 
@@ -106,6 +112,8 @@ class RemoteControlManager(
 
     fun enterRemoteClientMode() {
         if (_state.value.role == RemoteRole.CLIENT && isRemoteClientConnected()) return
+        userInitiatedDisconnect = false
+        settings.remoteRole = RemoteRole.CLIENT
         if (_state.value.role != RemoteRole.CLIENT) {
             applyRole(RemoteRole.CLIENT)
         } else {
@@ -117,25 +125,51 @@ class RemoteControlManager(
     fun discoverHosts() {
         if (_state.value.role != RemoteRole.CLIENT) return
         if (isRemoteClientConnected()) return
+        reconnectJob?.cancel()
         scope.launch {
-            _state.update { it.copy(connectionState = RemoteConnectionState.DISCOVERING, errorMessage = null) }
-            val pairedIds = settings.listPairedRemoteHosts().map { it.hostId }.toSet()
+            _state.update {
+                it.copy(
+                    connectionState = RemoteConnectionState.DISCOVERING,
+                    errorMessage = null,
+                    pairedHosts = settings.listPairedRemoteHosts(),
+                )
+            }
+            val paired = settings.listPairedRemoteHosts()
+            val pairedIds = paired.map { it.hostId }.toSet()
+            val remembered = paired.firstOrNull { !it.lastHost.isNullOrBlank() }
+            if (remembered != null && !skipRememberedHostOnce) {
+                OmtLog.i(
+                    "Remote",
+                    "Connecting to remembered host ${remembered.displayName} at ${remembered.lastHost}:${remembered.lastPort ?: RemoteProtocol.HTTP_PORT}",
+                )
+                connectToAddress(
+                    host = remembered.lastHost!!,
+                    port = remembered.lastPort ?: RemoteProtocol.HTTP_PORT,
+                    name = remembered.displayName,
+                    hostId = remembered.hostId,
+                    pin = remembered.pin,
+                )
+                return@launch
+            }
+            skipRememberedHostOnce = false
             val hosts = RemoteDiscovery.discoverHosts(appContext, pairedHostIds = pairedIds)
                 .sortedWith(compareByDescending<RemoteDiscoveredHost> { it.isPaired }.thenBy { it.name })
             OmtLog.i("Remote", "Discovered ${hosts.size} host(s), paired ids=${pairedIds.size}")
             if (isRemoteClientConnected()) return@launch
             val target = hosts.firstOrNull { it.isPaired } ?: hosts.firstOrNull()
             val pin = target?.hostId?.let { settings.pinForPairedHost(it) }
-                ?: settings.listPairedRemoteHosts().firstOrNull()?.pin
+                ?: paired.firstOrNull()?.pin
             _state.update {
                 it.copy(
                     discoveredHosts = hosts,
                     pairedHosts = settings.listPairedRemoteHosts(),
                     connectionState = RemoteConnectionState.DISCONNECTED,
                     errorMessage = when {
+                        paired.isNotEmpty() && hosts.isEmpty() ->
+                            "Host not on LAN — open remote on the host device or scan its QR code"
                         hosts.isEmpty() -> "No hosts found on LAN"
                         target != null && pin.isNullOrBlank() ->
-                            "Pair with QR or enter the host PIN to connect to ${target.name}"
+                            "Pair with QR to connect to ${target.name}"
                         else -> null
                     },
                 )
@@ -143,9 +177,6 @@ class RemoteControlManager(
             if (target != null && !pin.isNullOrBlank()) {
                 OmtLog.i("Remote", "Connecting to ${target.name} at ${target.host}:${target.port} paired=${target.isPaired}")
                 connectToHost(target)
-            } else if (hosts.isEmpty() && mixerStore.listMixers().isNotEmpty()) {
-                OmtLog.w("Remote", "No remote host found but local mixers exist — exiting client mode")
-                exitRemoteClientMode()
             }
         }
     }
@@ -183,14 +214,58 @@ class RemoteControlManager(
                 hostId = payload.hostId,
                 displayName = payload.name,
                 pin = payload.pin,
+                lastHost = payload.host,
+                lastPort = payload.port,
             ),
         )
+        if (_state.value.role == RemoteRole.HOST) stopHost()
+        settings.remoteRole = RemoteRole.CLIENT
+        userInitiatedDisconnect = false
+        reconnectJob?.cancel()
         refreshPairingState()
-        if (_state.value.role != RemoteRole.CLIENT) enterRemoteClientMode()
-        payload.host?.let { host ->
-            connectToAddress(host, payload.port, payload.name, payload.hostId, payload.pin)
-        } ?: run {
+        _state.update {
+            it.copy(
+                role = RemoteRole.CLIENT,
+                connectionState = RemoteConnectionState.CONNECTING,
+                errorMessage = null,
+                discoveredHosts = emptyList(),
+            )
+        }
+        val directHost = payload.host
+            ?: settings.listPairedRemoteHosts().firstOrNull { it.hostId == payload.hostId }?.lastHost
+        if (!directHost.isNullOrBlank()) {
+            connectToAddress(directHost, payload.port, payload.name, payload.hostId, payload.pin)
+        } else {
             discoverHosts()
+        }
+    }
+
+    fun unpairHost(hostId: String) {
+        settings.removePairedRemoteHost(hostId)
+        refreshPairingState()
+        if (lastConnectHostId == hostId && !isRemoteClientConnected()) {
+            stopClient()
+            _state.update {
+                it.copy(
+                    connectionState = RemoteConnectionState.DISCONNECTED,
+                    errorMessage = null,
+                    connectedHost = null,
+                )
+            }
+        }
+    }
+
+    fun stopHosting() {
+        if (_state.value.role != RemoteRole.HOST) return
+        settings.remoteRole = RemoteRole.OFF
+        stopHost()
+        _state.update {
+            it.copy(
+                role = RemoteRole.OFF,
+                connectionState = RemoteConnectionState.DISCONNECTED,
+                connectedClientCount = 0,
+                localHostIp = null,
+            )
         }
     }
 
@@ -198,11 +273,18 @@ class RemoteControlManager(
         val hostId = settings.remoteHostDeviceId
         val pin = settings.remotePairingPin
         val name = Build.MODEL.ifBlank { "OpenMultiTrack" }
+        val localIp = RemoteDiscovery.localIpv4(appContext)
         _state.update {
             it.copy(
                 hostDeviceId = hostId,
                 pairingPin = pin,
-                pairingUri = RemotePairing.buildPairingUri(hostId, pin, name),
+                pairingUri = RemotePairing.buildPairingUri(
+                    hostId = hostId,
+                    pin = pin,
+                    name = name,
+                    host = localIp,
+                ),
+                localHostIp = localIp ?: it.localHostIp,
                 pairedHosts = settings.listPairedRemoteHosts(),
             )
         }
@@ -217,6 +299,9 @@ class RemoteControlManager(
     ) {
         stopClient()
         lastConnectHostId = hostId
+        lastConnectPort = port
+        userInitiatedDisconnect = false
+        reconnectJob?.cancel()
         _state.update {
             it.copy(
                 connectionState = RemoteConnectionState.CONNECTING,
@@ -231,6 +316,7 @@ class RemoteControlManager(
     }
 
     fun disconnect() {
+        reconnectJob?.cancel()
         when (_state.value.role) {
             RemoteRole.CLIENT -> {
                 stopClient()
@@ -254,6 +340,7 @@ class RemoteControlManager(
 
     fun exitRemoteClientMode() {
         OmtLog.i("Remote", "Exiting remote client mode")
+        userInitiatedDisconnect = true
         disconnect()
     }
 
@@ -317,7 +404,7 @@ class RemoteControlManager(
                 localHostIp = localIp,
                 hostDeviceId = hostId,
                 pairingPin = pin,
-                pairingUri = RemotePairing.buildPairingUri(hostId, pin, hostName),
+                pairingUri = RemotePairing.buildPairingUri(hostId, pin, hostName, host = localIp),
                 connectedClientCount = 0,
             )
         }
@@ -516,18 +603,32 @@ class RemoteControlManager(
 
         override fun onDisconnected(reason: String?) {
             clientSocketOpen = false
+            clientMirror = null
+            clientLivePeaks.clear()
+            if (userInitiatedDisconnect || _state.value.role != RemoteRole.CLIENT) {
+                _state.update {
+                    it.copy(
+                        connectionState = RemoteConnectionState.DISCONNECTED,
+                        errorMessage = reason,
+                        sessionByMixer = emptyMap(),
+                        mixers = emptyList(),
+                        activeMixerId = null,
+                        uiSettings = null,
+                    )
+                }
+                return
+            }
             _state.update {
                 it.copy(
                     connectionState = RemoteConnectionState.DISCONNECTED,
-                    errorMessage = reason,
+                    errorMessage = reason?.takeIf { r -> r.isNotBlank() } ?: "Connection lost",
                     sessionByMixer = emptyMap(),
                     mixers = emptyList(),
                     activeMixerId = null,
                     uiSettings = null,
                 )
             }
-            clientMirror = null
-            clientLivePeaks.clear()
+            scheduleReconnect()
         }
 
         override fun onFailure(error: String) {
@@ -541,17 +642,43 @@ class RemoteControlManager(
         clientSocketOpen = false
         stopClient()
         OmtLog.e("Remote", "Client connection failed: $error")
-        settings.remoteRole = RemoteRole.OFF
+        if (userInitiatedDisconnect || _state.value.role != RemoteRole.CLIENT) return
+        val needsRepair = error.contains("unauthorized", ignoreCase = true) ||
+            error.contains("policy violation", ignoreCase = true) ||
+            error.contains("Could not sync", ignoreCase = true)
+        val friendly = when {
+            needsRepair -> "Pairing expired — scan the host QR code again or unpair and re-pair"
+            error.contains("broken pipe", ignoreCase = true) -> "Connection lost — reconnecting…"
+            error.contains("connection reset", ignoreCase = true) -> "Connection lost — reconnecting…"
+            else -> error
+        }
         _state.update {
             it.copy(
-                role = RemoteRole.OFF,
-                connectionState = RemoteConnectionState.ERROR,
-                errorMessage = error,
+                role = RemoteRole.CLIENT,
+                connectionState = RemoteConnectionState.DISCONNECTED,
+                errorMessage = friendly,
                 sessionByMixer = emptyMap(),
                 mixers = emptyList(),
                 activeMixerId = null,
                 uiSettings = null,
             )
+        }
+        if (needsRepair) return
+        skipRememberedHostOnce = true
+        scheduleReconnect()
+    }
+
+    private fun scheduleReconnect(delayMs: Long = 2500) {
+        if (userInitiatedDisconnect || _state.value.role != RemoteRole.CLIENT) return
+        if (isRemoteClientConnected()) return
+        reconnectJob?.cancel()
+        reconnectJob = scope.launch {
+            delay(delayMs)
+            if (userInitiatedDisconnect || _state.value.role != RemoteRole.CLIENT) return@launch
+            if (!isRemoteClientConnected()) {
+                OmtLog.i("Remote", "Auto-reconnecting to paired host")
+                discoverHosts()
+            }
         }
     }
 
@@ -563,8 +690,18 @@ class RemoteControlManager(
         val pin = lastConnectHostId?.let { settings.pinForPairedHost(it) }
             ?: settings.listPairedRemoteHosts().firstOrNull()?.pin
         lastConnectHostId?.let { hostId ->
-            if (!pin.isNullOrBlank()) {
-                settings.savePairedRemoteHost(RemotePairedHost(hostId, hostName, pin))
+            val connectedHost = _state.value.connectedHost
+            if (!pin.isNullOrBlank() && !connectedHost.isNullOrBlank()) {
+                settings.savePairedRemoteHost(
+                    RemotePairedHost(
+                        hostId = hostId,
+                        displayName = hostName,
+                        pin = pin,
+                        lastHost = connectedHost,
+                        lastPort = lastConnectPort,
+                    ),
+                )
+                refreshPairingState()
             }
         }
         val previousDir = clientMirror?.sessions?.get(snapshot.activeMixerId ?: "")?.selectedSoundcheckDir
@@ -717,6 +854,8 @@ class RemoteControlManager(
     }
 
     private fun stopAll() {
+        reconnectJob?.cancel()
+        reconnectJob = null
         stopHost()
         stopClient()
     }
