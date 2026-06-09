@@ -6,6 +6,7 @@ import org.openmultitrack.app.data.StripIconMode
 import org.openmultitrack.app.data.StripNumberMode
 import org.openmultitrack.app.service.MultiMixerSessionManager
 import org.openmultitrack.domain.session.AppMode
+import org.openmultitrack.domain.session.isPlaybackMode
 import org.openmultitrack.remote.RemoteWaveformUtil
 import org.openmultitrack.sessionio.wav.SessionWaveformOverview
 
@@ -24,7 +25,11 @@ class RemoteCommandExecutor(
                 val mixerId = payload.getString("mixerId")
                 val mode = AppMode.entries[payload.getInt("mode")]
                 settings.setAppModeForMixer(mixerId, mode)
-                manager.getOrCreate(mixerId).setAppMode(mode)
+                val ctrl = manager.getOrCreate(mixerId)
+                ctrl.setAppMode(mode)
+                if (mode.isPlaybackMode) {
+                    ctrl.refreshSoundcheckLibrary()
+                }
                 null
             }
             "toggle_arm" -> {

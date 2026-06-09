@@ -72,6 +72,8 @@ object RemoteSnapshotMapper {
         delta: RemoteDeltaFrame,
         livePeaks: MutableMap<String, MutableMap<Int, LiveWaveformSnapshot>>,
     ): RemoteMirrorSnapshot {
+        val settings = delta.settings ?: snapshot.settings
+        val waveformCapacity = liveWaveformCapacity(settings.recordWaveformWindowSec)
         val sessions = snapshot.sessions.toMutableMap()
         delta.sessions.forEach { (id, mixerDelta) ->
             val base = sessions[id] ?: return@forEach
@@ -81,15 +83,20 @@ object RemoteSnapshotMapper {
             val mixerPeaks = livePeaks.getOrPut(mixerId) { mutableMapOf() }
             channels.forEach { (ch, tail) ->
                 val decoded = RemoteWaveformUtil.decodeTail(tail.peaksU8)
+                val merged = RemoteWaveformUtil.mergeLiveWaveformTail(
+                    existingPeaks = mixerPeaks[ch]?.peaks,
+                    newTail = decoded,
+                    capacity = waveformCapacity,
+                )
                 mixerPeaks[ch] = LiveWaveformSnapshot(
-                    peaks = decoded,
-                    capacity = decoded.size,
+                    peaks = merged,
+                    capacity = waveformCapacity,
                 )
             }
         }
         return snapshot.copy(
             activeMixerId = delta.activeMixerId ?: snapshot.activeMixerId,
-            settings = delta.settings ?: snapshot.settings,
+            settings = settings,
             sessions = sessions,
         )
     }
@@ -250,10 +257,12 @@ object RemoteSnapshotMapper {
     private fun mixerDelta(prev: RemoteMixerSnapshot?, current: RemoteMixerSnapshot): RemoteMixerDelta? {
         val delta = RemoteMixerDelta(
             mixerId = current.mixerId,
+            appMode = changed(prev?.appMode, current.appMode),
             transportState = changed(prev?.transportState, current.transportState),
             isRecording = changed(prev?.isRecording, current.isRecording),
             isMonitoring = changed(prev?.isMonitoring, current.isMonitoring),
             isPlaying = changed(prev?.isPlaying, current.isPlaying),
+            isVuMetering = changed(prev?.isVuMetering, current.isVuMetering),
             recordElapsedSec = changed(prev?.recordElapsedSec, current.recordElapsedSec),
             playbackPositionSec = changed(prev?.playbackPositionSec, current.playbackPositionSec),
             playbackDurationSec = changed(prev?.playbackDurationSec, current.playbackDurationSec),
@@ -268,43 +277,52 @@ object RemoteSnapshotMapper {
                 null
             },
             channelStrips = if (prev?.channelStrips != current.channelStrips) current.channelStrips else null,
+            soundcheckSessions = if (prev?.soundcheckSessions != current.soundcheckSessions) {
+                current.soundcheckSessions
+            } else {
+                null
+            },
+            selectedSoundcheckDir = optionalStringChanged(prev?.selectedSoundcheckDir, current.selectedSoundcheckDir),
+            soundcheckWaveformMeta = if (prev?.soundcheckWaveformMeta != current.soundcheckWaveformMeta) {
+                current.soundcheckWaveformMeta
+            } else {
+                null
+            },
             soundcheckViewStartSec = changed(prev?.soundcheckViewStartSec, current.soundcheckViewStartSec),
             soundcheckViewWindowSec = changed(prev?.soundcheckViewWindowSec, current.soundcheckViewWindowSec),
+            soundcheckLoopStartSec = changed(prev?.soundcheckLoopStartSec, current.soundcheckLoopStartSec),
+            soundcheckLoopEndSec = changed(prev?.soundcheckLoopEndSec, current.soundcheckLoopEndSec),
+            soundcheckLoopEnabled = changed(prev?.soundcheckLoopEnabled, current.soundcheckLoopEnabled),
+            statusMessage = optionalStringChanged(prev?.statusMessage, current.statusMessage),
+            warningMessage = optionalStringChanged(prev?.warningMessage, current.warningMessage),
         )
-        return if (
-            delta.transportState == null &&
-            delta.isRecording == null &&
-            delta.isMonitoring == null &&
-            delta.isPlaying == null &&
-            delta.recordElapsedSec == null &&
-            delta.playbackPositionSec == null &&
-            delta.playbackDurationSec == null &&
-            delta.captureMeterLevels == null &&
-            delta.soundcheckMeterLevels == null &&
-            delta.channelStrips == null &&
-            delta.soundcheckViewStartSec == null &&
-            delta.soundcheckViewWindowSec == null
-        ) {
-            null
-        } else {
-            delta
-        }
+        return if (delta == RemoteMixerDelta(mixerId = current.mixerId)) null else delta
     }
 
     private fun applyMixerDelta(base: RemoteMixerSnapshot, delta: RemoteMixerDelta): RemoteMixerSnapshot =
         base.copy(
+            appMode = delta.appMode ?: base.appMode,
             transportState = delta.transportState ?: base.transportState,
             isRecording = delta.isRecording ?: base.isRecording,
             isMonitoring = delta.isMonitoring ?: base.isMonitoring,
             isPlaying = delta.isPlaying ?: base.isPlaying,
+            isVuMetering = delta.isVuMetering ?: base.isVuMetering,
             recordElapsedSec = delta.recordElapsedSec ?: base.recordElapsedSec,
             playbackPositionSec = delta.playbackPositionSec ?: base.playbackPositionSec,
             playbackDurationSec = delta.playbackDurationSec ?: base.playbackDurationSec,
             captureMeterLevels = delta.captureMeterLevels ?: base.captureMeterLevels,
             soundcheckMeterLevels = delta.soundcheckMeterLevels ?: base.soundcheckMeterLevels,
             channelStrips = delta.channelStrips ?: base.channelStrips,
+            soundcheckSessions = delta.soundcheckSessions ?: base.soundcheckSessions,
+            selectedSoundcheckDir = applyOptionalString(delta.selectedSoundcheckDir, base.selectedSoundcheckDir),
+            soundcheckWaveformMeta = delta.soundcheckWaveformMeta ?: base.soundcheckWaveformMeta,
             soundcheckViewStartSec = delta.soundcheckViewStartSec ?: base.soundcheckViewStartSec,
             soundcheckViewWindowSec = delta.soundcheckViewWindowSec ?: base.soundcheckViewWindowSec,
+            soundcheckLoopStartSec = delta.soundcheckLoopStartSec ?: base.soundcheckLoopStartSec,
+            soundcheckLoopEndSec = delta.soundcheckLoopEndSec ?: base.soundcheckLoopEndSec,
+            soundcheckLoopEnabled = delta.soundcheckLoopEnabled ?: base.soundcheckLoopEnabled,
+            statusMessage = applyOptionalString(delta.statusMessage, base.statusMessage),
+            warningMessage = applyOptionalString(delta.warningMessage, base.warningMessage),
         )
 
     private fun stripToRemote(strip: ChannelStripState): RemoteChannelStripSnapshot =
@@ -317,6 +335,7 @@ object RemoteSnapshotMapper {
             armed = strip.armed,
             monitoring = strip.monitoring,
             solo = strip.solo,
+            muted = strip.muted,
         )
 
     private fun stripToDomain(strip: RemoteChannelStripSnapshot): ChannelStripState =
@@ -329,7 +348,26 @@ object RemoteSnapshotMapper {
             armed = strip.armed,
             monitoring = strip.monitoring,
             solo = strip.solo,
+            muted = strip.muted,
         )
+
+    private fun liveWaveformCapacity(recordWindowSec: Float): Int =
+        kotlin.math.max(10, (recordWindowSec * 50f).toInt())
+
+    /** Empty string means "cleared"; null means "unchanged". */
+    private fun optionalStringChanged(prev: String?, current: String?): String? =
+        when {
+            prev == current -> null
+            current == null -> ""
+            else -> current
+        }
+
+    private fun applyOptionalString(delta: String?, base: String?): String? =
+        when (delta) {
+            null -> base
+            "" -> null
+            else -> delta
+        }
 
     private fun <T> changed(prev: T?, current: T): T? = if (prev == current) null else current
 }

@@ -128,9 +128,9 @@ class MainActivity : ComponentActivity() {
                     val state = viewModel.uiState.collectAsStateWithLifecycle()
                     DawMainScreen(
                         state = state.value,
-                        monitorGain = settings.monitorGainLinear,
-                        recordWaveformWindowSec = settings.recordWaveformWindowSec,
-                        playbackWaveformWindowSec = settings.playbackWaveformWindowSec,
+                        monitorGain = state.value.monitorGainLinear,
+                        recordWaveformWindowSec = state.value.recordWaveformWindowSec,
+                        playbackWaveformWindowSec = state.value.playbackWaveformWindowSec,
                         waveformNormalized = settings.waveformNormalized,
                         onAddMixer = { viewModel.showAddMixerDialog(true) },
                         showMixerPicker = state.value.showMixerPicker,

@@ -31,6 +31,7 @@ data class RemoteChannelStripSnapshot(
     val armed: Boolean = false,
     val monitoring: Boolean = false,
     val solo: Boolean = false,
+    val muted: Boolean = false,
 )
 
 data class RemoteSoundcheckSessionSnapshot(
@@ -112,16 +113,26 @@ data class RemoteDeltaFrame(
 
 data class RemoteMixerDelta(
     val mixerId: String,
+    val appMode: Int? = null,
     val transportState: String? = null,
     val isRecording: Boolean? = null,
     val isMonitoring: Boolean? = null,
     val isPlaying: Boolean? = null,
+    val isVuMetering: Boolean? = null,
     val recordElapsedSec: Float? = null,
     val playbackPositionSec: Float? = null,
     val playbackDurationSec: Float? = null,
     val captureMeterLevels: Map<Int, Float>? = null,
     val soundcheckMeterLevels: Map<Int, Float>? = null,
     val channelStrips: List<RemoteChannelStripSnapshot>? = null,
+    val soundcheckSessions: List<RemoteSoundcheckSessionSnapshot>? = null,
+    val selectedSoundcheckDir: String? = null,
+    val soundcheckWaveformMeta: RemoteSoundcheckWaveformMeta? = null,
     val soundcheckViewStartSec: Float? = null,
     val soundcheckViewWindowSec: Float? = null,
+    val soundcheckLoopStartSec: Float? = null,
+    val soundcheckLoopEndSec: Float? = null,
+    val soundcheckLoopEnabled: Boolean? = null,
+    val statusMessage: String? = null,
+    val warningMessage: String? = null,
 )

@@ -99,6 +99,9 @@ data class DawUiState(
     val hideRoutingBadges: Boolean = false,
     val showWaveforms: Boolean = true,
     val showVuMeters: Boolean = true,
+    val monitorGainLinear: Float = 2.5f,
+    val recordWaveformWindowSec: Float = 15f,
+    val playbackWaveformWindowSec: Float = 180f,
     val stripNumberMode: StripNumberMode = StripNumberMode.HIDE_WHEN_LABELED,
     val stripIconMode: StripIconMode = StripIconMode.SHOW,
     /** mixerId → sessionDir for recordings interrupted by an unexpected app exit. */
@@ -136,6 +139,9 @@ class MainViewModel(
             hideRoutingBadges = settings.hideRoutingBadges,
             showWaveforms = settings.showWaveforms,
             showVuMeters = settings.showVuMeters,
+            monitorGainLinear = settings.monitorGainLinear,
+            recordWaveformWindowSec = settings.recordWaveformWindowSec,
+            playbackWaveformWindowSec = settings.playbackWaveformWindowSec,
             stripNumberMode = settings.stripNumberMode,
             stripIconMode = settings.stripIconMode,
             promptLoadSoundcheckAfterRecord = settings.promptLoadSoundcheckAfterRecord,
@@ -233,6 +239,9 @@ class MainViewModel(
                     hideRoutingBadges = ui.hideRoutingBadges,
                     showWaveforms = settingsPatch?.showWaveforms ?: ui.showWaveforms,
                     showVuMeters = settingsPatch?.showVuMeters ?: ui.showVuMeters,
+                    monitorGainLinear = settingsPatch?.monitorGainLinear ?: ui.monitorGainLinear,
+                    recordWaveformWindowSec = settingsPatch?.recordWaveformWindowSec ?: ui.recordWaveformWindowSec,
+                    playbackWaveformWindowSec = settingsPatch?.playbackWaveformWindowSec ?: ui.playbackWaveformWindowSec,
                     stripNumberMode = settingsPatch?.stripNumberMode?.let {
                         StripNumberMode.entries.getOrElse(it) { StripNumberMode.HIDE_WHEN_LABELED }
                     } ?: ui.stripNumberMode,
@@ -710,7 +719,13 @@ class MainViewModel(
 
     fun setPlaybackWaveformWindowSec(sec: Float) {
         val rounded = sec.coerceIn(30f, 600f).let { kotlin.math.round(it) }
+        if (isRemoteClient()) {
+            remoteCommand("set_settings", JSONObject().put("playbackWaveformWindowSec", rounded.toDouble()))
+            _uiState.update { it.copy(playbackWaveformWindowSec = rounded) }
+            return
+        }
         settings.playbackWaveformWindowSec = rounded
+        _uiState.update { it.copy(playbackWaveformWindowSec = rounded) }
         sessionClient.withManager { mgr ->
             mgr.mixerIds().forEach { mgr.getOrCreate(it).updateSoundcheckViewConfig() }
         }
@@ -950,9 +965,11 @@ class MainViewModel(
     fun setMonitorGain(gain: Float) {
         if (isRemoteClient()) {
             remoteCommand("set_settings", JSONObject().put("monitorGainLinear", gain.toDouble()))
+            _uiState.update { it.copy(monitorGainLinear = gain) }
             return
         }
         settings.monitorGainLinear = gain
+        _uiState.update { it.copy(monitorGainLinear = gain) }
         sessionClient.withManager { mgr ->
             _uiState.value.mixers.forEach { m ->
                 mgr.getOrCreate(m.id).setMonitorGain(gain)
@@ -998,7 +1015,13 @@ class MainViewModel(
 
     fun setRecordWaveformWindowSec(sec: Float) {
         val rounded = sec.coerceIn(5f, 120f).let { kotlin.math.round(it) }
+        if (isRemoteClient()) {
+            remoteCommand("set_settings", JSONObject().put("recordWaveformWindowSec", rounded.toDouble()))
+            _uiState.update { it.copy(recordWaveformWindowSec = rounded) }
+            return
+        }
         settings.recordWaveformWindowSec = rounded
+        _uiState.update { it.copy(recordWaveformWindowSec = rounded) }
         sessionClient.withManager { mgr ->
             mgr.mixerIds().forEach { mgr.getOrCreate(it).updateWaveformConfig() }
         }

@@ -73,6 +73,7 @@ class RemoteControlManager(
     private var clientMirror: RemoteMirrorSnapshot? = null
     private val clientLivePeaks = mutableMapOf<String, MutableMap<Int, LiveWaveformSnapshot>>()
     private val clientSoundcheckPeaks = mutableMapOf<String, MutableMap<Int, FloatArray>>()
+    private var lastSoundcheckWaveformRequestKey: String? = null
 
     fun applyRole(role: RemoteRole) {
         if (_state.value.role == role) return
@@ -121,7 +122,7 @@ class RemoteControlManager(
 
     fun connectToHost(host: RemoteDiscoveredHost) {
         if (_state.value.role != RemoteRole.CLIENT) return
-        val pin = host.hostId?.let { settings.pinForPairedHost(it) } ?: settings.remoteAuthToken
+        val pin = host.hostId?.let { settings.pinForPairedHost(it) }
         connectToAddress(host.host, host.port, host.name, host.hostId, pin)
     }
 
@@ -371,6 +372,14 @@ class RemoteControlManager(
                     val base = clientMirror ?: return
                     clientMirror = RemoteSnapshotMapper.applyDelta(base, delta, clientLivePeaks)
                     publishClientMirror()
+                    maybeRequestSoundcheckWaveforms()
+                }
+                "command_ack" -> {
+                    val ack = JSONObject(json)
+                    if (!ack.optBoolean("ok", true)) {
+                        val error = ack.optString("error").ifBlank { "Remote command failed" }
+                        _state.update { it.copy(errorMessage = error) }
+                    }
                 }
                 "waveform_chunk" -> {
                     val (channel, startSec, peaks) = RemoteJsonCodec.decodeWaveformChunk(json)
@@ -407,21 +416,39 @@ class RemoteControlManager(
     }
 
     private fun applyClientSnapshot(snapshot: RemoteMirrorSnapshot) {
+        val previousDir = clientMirror?.sessions?.get(snapshot.activeMixerId ?: "")?.selectedSoundcheckDir
         clientMirror = snapshot
-        clientLivePeaks.clear()
-        publishClientMirror()
-        snapshot.activeMixerId?.let { mixerId ->
-            val session = snapshot.sessions[mixerId] ?: return
-            val meta = session.soundcheckWaveformMeta ?: return
-            val dir = session.selectedSoundcheckDir ?: return
-            requestSoundcheckWaveforms(
-                mixerId = mixerId,
-                sessionDir = dir,
-                channelCount = meta.channelCount.coerceAtLeast(session.captureChannelCount),
-                startSec = session.soundcheckViewStartSec,
-                windowSec = session.soundcheckViewWindowSec,
-            )
+        val newDir = snapshot.sessions[snapshot.activeMixerId ?: ""]?.selectedSoundcheckDir
+        if (previousDir != newDir) {
+            lastSoundcheckWaveformRequestKey = null
         }
+        publishClientMirror()
+        maybeRequestSoundcheckWaveforms()
+    }
+
+    private fun maybeRequestSoundcheckWaveforms() {
+        val mirror = clientMirror ?: return
+        val mixerId = mirror.activeMixerId ?: return
+        val session = mirror.sessions[mixerId] ?: return
+        val meta = session.soundcheckWaveformMeta ?: return
+        val dir = session.selectedSoundcheckDir ?: return
+        val requestKey = listOf(
+            mixerId,
+            dir,
+            session.soundcheckViewStartSec,
+            session.soundcheckViewWindowSec,
+            meta.channelCount,
+        ).joinToString("|")
+        if (requestKey == lastSoundcheckWaveformRequestKey) return
+        lastSoundcheckWaveformRequestKey = requestKey
+        clientSoundcheckPeaks.remove("$mixerId|$dir")
+        requestSoundcheckWaveforms(
+            mixerId = mixerId,
+            sessionDir = dir,
+            channelCount = meta.channelCount.coerceAtLeast(session.captureChannelCount),
+            startSec = session.soundcheckViewStartSec,
+            windowSec = session.soundcheckViewWindowSec,
+        )
     }
 
     private fun mergeSoundcheckWaveforms(mixerId: String, sessionDir: String) {
@@ -495,6 +522,7 @@ class RemoteControlManager(
         clientMirror = null
         clientLivePeaks.clear()
         clientSoundcheckPeaks.clear()
+        lastSoundcheckWaveformRequestKey = null
     }
 
     private fun stopAll() {

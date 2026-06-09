@@ -15,6 +15,52 @@ object RemoteWaveformUtil {
     fun decodeTail(u8: ByteArray): FloatArray =
         FloatArray(u8.size) { (u8[it].toInt() and 0xFF) / 255f }
 
+    /**
+     * Merges a rolling tail update into an existing live waveform buffer by finding
+     * the longest suffix/prefix overlap and appending only new samples.
+     */
+    fun mergeLiveWaveformTail(
+        existingPeaks: FloatArray?,
+        newTail: FloatArray,
+        capacity: Int,
+    ): FloatArray {
+        if (newTail.isEmpty()) return existingPeaks?.copyOf() ?: FloatArray(0)
+        val existing = existingPeaks
+        if (existing == null || existing.isEmpty()) {
+            return if (newTail.size <= capacity) {
+                newTail
+            } else {
+                newTail.copyOfRange(newTail.size - capacity, newTail.size)
+            }
+        }
+        var overlap = 0
+        val maxOverlap = minOf(existing.size, newTail.size)
+        for (len in maxOverlap downTo 1) {
+            var matches = true
+            for (i in 0 until len) {
+                if (existing[existing.size - len + i] != newTail[i]) {
+                    matches = false
+                    break
+                }
+            }
+            if (matches) {
+                overlap = len
+                break
+            }
+        }
+        val toAppend = if (overlap < newTail.size) {
+            newTail.copyOfRange(overlap, newTail.size)
+        } else {
+            FloatArray(0)
+        }
+        val combined = if (toAppend.isEmpty()) existing else existing + toAppend
+        return if (combined.size <= capacity) {
+            combined
+        } else {
+            combined.copyOfRange(combined.size - capacity, combined.size)
+        }
+    }
+
     fun downsamplePeaksMax(source: FloatArray, targetCount: Int): FloatArray {
         if (source.isEmpty() || targetCount <= 0) return FloatArray(0)
         if (source.size <= targetCount) return source.copyOf()

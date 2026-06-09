@@ -243,30 +243,47 @@ internal object RemoteJson {
 
     private fun encodeMixerDelta(d: RemoteMixerDelta): JSONObject =
         JSONObject().apply {
+            d.appMode?.let { put("appMode", it) }
             d.transportState?.let { put("transportState", it) }
             d.isRecording?.let { put("isRecording", it) }
             d.isMonitoring?.let { put("isMonitoring", it) }
             d.isPlaying?.let { put("isPlaying", it) }
+            d.isVuMetering?.let { put("isVuMetering", it) }
             d.recordElapsedSec?.let { put("recordElapsedSec", it.toDouble()) }
             d.playbackPositionSec?.let { put("playbackPositionSec", it.toDouble()) }
             d.playbackDurationSec?.let { put("playbackDurationSec", it.toDouble()) }
             d.captureMeterLevels?.let { put("captureMeterLevels", encodeMeterMap(it)) }
             d.soundcheckMeterLevels?.let { put("soundcheckMeterLevels", encodeMeterMap(it)) }
             d.channelStrips?.let { put("channelStrips", encodeStrips(it)) }
+            d.soundcheckSessions?.let { sessions ->
+                put("soundcheckSessions", JSONArray().apply { sessions.forEach { put(encodeSoundcheckSession(it)) } })
+            }
+            if (d.selectedSoundcheckDir != null) put("selectedSoundcheckDir", d.selectedSoundcheckDir)
+            d.soundcheckWaveformMeta?.let { put("soundcheckWaveformMeta", encodeWaveformMeta(it)) }
             d.soundcheckViewStartSec?.let { put("soundcheckViewStartSec", it.toDouble()) }
             d.soundcheckViewWindowSec?.let { put("soundcheckViewWindowSec", it.toDouble()) }
+            d.soundcheckLoopStartSec?.let { put("soundcheckLoopStartSec", it.toDouble()) }
+            d.soundcheckLoopEndSec?.let { put("soundcheckLoopEndSec", it.toDouble()) }
+            d.soundcheckLoopEnabled?.let { put("soundcheckLoopEnabled", it) }
+            if (d.statusMessage != null) put("statusMessage", d.statusMessage)
+            if (d.warningMessage != null) put("warningMessage", d.warningMessage)
         }
 
     private fun decodeMixerDelta(mixerId: String, obj: JSONObject): RemoteMixerDelta {
         val strips = obj.optJSONArray("channelStrips")?.let { arr ->
             (0 until arr.length()).map { decodeStrip(arr.getJSONObject(it)) }
         }
+        val sessions = obj.optJSONArray("soundcheckSessions")?.let { arr ->
+            (0 until arr.length()).map { decodeSoundcheckSession(arr.getJSONObject(it)) }
+        }
         return RemoteMixerDelta(
             mixerId = mixerId,
+            appMode = if (obj.has("appMode")) obj.getInt("appMode") else null,
             transportState = obj.optString("transportState").takeIf { it.isNotBlank() },
             isRecording = if (obj.has("isRecording")) obj.getBoolean("isRecording") else null,
             isMonitoring = if (obj.has("isMonitoring")) obj.getBoolean("isMonitoring") else null,
             isPlaying = if (obj.has("isPlaying")) obj.getBoolean("isPlaying") else null,
+            isVuMetering = if (obj.has("isVuMetering")) obj.getBoolean("isVuMetering") else null,
             recordElapsedSec = if (obj.has("recordElapsedSec")) obj.getDouble("recordElapsedSec").toFloat() else null,
             playbackPositionSec = if (obj.has("playbackPositionSec")) {
                 obj.getDouble("playbackPositionSec").toFloat()
@@ -281,6 +298,9 @@ internal object RemoteJson {
             captureMeterLevels = obj.optJSONObject("captureMeterLevels")?.let(::decodeMeterMap),
             soundcheckMeterLevels = obj.optJSONObject("soundcheckMeterLevels")?.let(::decodeMeterMap),
             channelStrips = strips,
+            soundcheckSessions = sessions,
+            selectedSoundcheckDir = if (obj.has("selectedSoundcheckDir")) obj.optString("selectedSoundcheckDir") else null,
+            soundcheckWaveformMeta = obj.optJSONObject("soundcheckWaveformMeta")?.let(::decodeWaveformMeta),
             soundcheckViewStartSec = if (obj.has("soundcheckViewStartSec")) {
                 obj.getDouble("soundcheckViewStartSec").toFloat()
             } else {
@@ -291,6 +311,19 @@ internal object RemoteJson {
             } else {
                 null
             },
+            soundcheckLoopStartSec = if (obj.has("soundcheckLoopStartSec")) {
+                obj.getDouble("soundcheckLoopStartSec").toFloat()
+            } else {
+                null
+            },
+            soundcheckLoopEndSec = if (obj.has("soundcheckLoopEndSec")) {
+                obj.getDouble("soundcheckLoopEndSec").toFloat()
+            } else {
+                null
+            },
+            soundcheckLoopEnabled = if (obj.has("soundcheckLoopEnabled")) obj.getBoolean("soundcheckLoopEnabled") else null,
+            statusMessage = if (obj.has("statusMessage")) obj.optString("statusMessage") else null,
+            warningMessage = if (obj.has("warningMessage")) obj.optString("warningMessage") else null,
         )
     }
 
@@ -307,6 +340,7 @@ internal object RemoteJson {
                         put("armed", strip.armed)
                         put("monitoring", strip.monitoring)
                         put("solo", strip.solo)
+                        put("muted", strip.muted)
                     },
                 )
             }
@@ -322,6 +356,7 @@ internal object RemoteJson {
             armed = obj.optBoolean("armed"),
             monitoring = obj.optBoolean("monitoring"),
             solo = obj.optBoolean("solo"),
+            muted = obj.optBoolean("muted"),
         )
 
     private fun encodeSoundcheckSession(s: RemoteSoundcheckSessionSnapshot): JSONObject =

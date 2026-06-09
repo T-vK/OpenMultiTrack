@@ -40,8 +40,10 @@ class RemoteJsonCodecTest {
             sessions = mapOf(
                 "m1" to RemoteMixerDelta(
                     mixerId = "m1",
+                    appMode = 2,
                     recordElapsedSec = 12.5f,
                     captureMeterLevels = mapOf(0 to 0.75f),
+                    soundcheckLoopEnabled = true,
                 ),
             ),
             liveWaveforms = mapOf(
@@ -54,7 +56,9 @@ class RemoteJsonCodecTest {
             ),
         )
         val decoded = RemoteJsonCodec.decodeDelta(RemoteJsonCodec.encodeDelta(delta))
+        assertThat(decoded.sessions["m1"]?.appMode).isEqualTo(2)
         assertThat(decoded.sessions["m1"]?.recordElapsedSec).isEqualTo(12.5f)
+        assertThat(decoded.sessions["m1"]?.soundcheckLoopEnabled).isTrue()
         assertThat(decoded.liveWaveforms["m1"]?.get(0)?.generation).isEqualTo(3)
         assertThat(decoded.liveWaveforms["m1"]?.get(0)?.peaksU8).isEqualTo(byteArrayOf(10, 20, 30))
     }
