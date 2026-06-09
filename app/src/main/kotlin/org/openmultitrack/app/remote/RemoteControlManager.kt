@@ -90,7 +90,10 @@ class RemoteControlManager(
         when (role) {
             RemoteRole.OFF -> Unit
             RemoteRole.HOST -> startHost()
-            RemoteRole.CLIENT -> Unit
+            RemoteRole.CLIENT -> {
+                refreshPairingState()
+                discoverHosts()
+            }
         }
     }
 
@@ -108,6 +111,7 @@ class RemoteControlManager(
             val pairedIds = settings.listPairedRemoteHosts().map { it.hostId }.toSet()
             val hosts = RemoteDiscovery.discoverHosts(appContext, pairedHostIds = pairedIds)
                 .sortedWith(compareByDescending<RemoteDiscoveredHost> { it.isPaired }.thenBy { it.name })
+            OmtLog.i("Remote", "Discovered ${hosts.size} host(s), paired ids=${pairedIds.size}")
             _state.update {
                 it.copy(
                     discoveredHosts = hosts,
@@ -116,7 +120,11 @@ class RemoteControlManager(
                     errorMessage = if (hosts.isEmpty()) "No hosts found on LAN" else null,
                 )
             }
-            hosts.firstOrNull { it.isPaired }?.let { connectToHost(it) }
+            val target = hosts.firstOrNull { it.isPaired } ?: hosts.firstOrNull()
+            target?.let {
+                OmtLog.i("Remote", "Connecting to ${it.name} at ${it.host}:${it.port} paired=${it.isPaired}")
+                connectToHost(it)
+            }
         }
     }
 
@@ -360,6 +368,7 @@ class RemoteControlManager(
 
     private val clientListener = object : RemoteClient.Listener {
         override fun onConnected() {
+            OmtLog.i("Remote", "Client connected to host")
             _state.update { it.copy(connectionState = RemoteConnectionState.CONNECTED, errorMessage = null) }
         }
 
@@ -406,6 +415,7 @@ class RemoteControlManager(
         }
 
         override fun onFailure(error: String) {
+            OmtLog.e("Remote", "Client connection failed: $error")
             _state.update {
                 it.copy(
                     connectionState = RemoteConnectionState.ERROR,
@@ -531,6 +541,7 @@ class RemoteControlManager(
     }
 
     companion object {
-        private const val NanoTimeoutMs = 5000
+        /** 0 = no socket read timeout; required for long-lived WebSocket clients. */
+        private const val NanoTimeoutMs = 0
     }
 }
