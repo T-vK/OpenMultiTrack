@@ -22,6 +22,17 @@ The composite action `.github/actions/android-setup` caches:
 Gradle build cache is enabled via `org.gradle.caching=true` and `--build-cache` on CI invocations.
 The publish **pages** job skips Android SDK setup (APK is verified in the build job).
 
+## Icons
+
+Regenerate launcher, fastlane, and F-Droid repo icons from the vector artwork:
+
+```bash
+python3 scripts/generate-branding-icons.py
+```
+
+The publish workflow runs `scripts/prepare-fdroid-icons.sh` before `fdroid update` so the
+repository icon (`fdroid/repo/icons/icon.png`) and app metadata icon are staged for F-Droid.
+
 ## Semantic versioning (commit messages)
 
 Versions follow [Conventional Commits](https://www.conventionalcommits.org/) via [`scripts/compute-semver.sh`](../scripts/compute-semver.sh) (no third-party action):

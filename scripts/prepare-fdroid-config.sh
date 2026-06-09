@@ -6,6 +6,8 @@ sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 cat > "${root}/fdroid/config.yml" <<EOF
 repo_url: https://T-vK.github.io/OpenMultiTrack/fdroid/repo
 repo_name: OpenMultiTrack
+repo_icon: icon.png
+archive_icon: icon.png
 repo_description: |
   OpenMultiTrack debug builds — FOSS multitrack recorder for Behringer USB mixers.
 archive_older: 5

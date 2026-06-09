@@ -6,6 +6,7 @@ IssueTracker: https://github.com/T-vK/OpenMultiTrack/issues
 WebSite: https://github.com/T-vK/OpenMultiTrack
 
 AutoName: OpenMultiTrack
+Icon: en-US/images/icon.png
 Summary: Multitrack USB recorder for Behringer mixers
 Description: |-
   Multitrack recorder and virtual soundcheck player for Behringer X32/XR18

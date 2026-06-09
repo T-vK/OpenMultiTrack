@@ -94,6 +94,7 @@ jobs:
           sparse-checkout: |
             site
             fdroid
+            fastlane
             scripts
             keystore
 
@@ -150,6 +151,7 @@ jobs:
           cp dist/*.apk "fdroid/repo/org.openmultitrack_${VERSION}-debug.apk"
           export PATH="$HOME/.local/bin:$PATH"
           ./scripts/prepare-fdroid-config.sh
+          ./scripts/prepare-fdroid-icons.sh
           ./scripts/prepare-fdroid-metadata.sh "$VERSION"
           cd fdroid
           fdroid update --pretty
