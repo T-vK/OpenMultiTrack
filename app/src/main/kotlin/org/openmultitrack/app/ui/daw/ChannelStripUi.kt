@@ -395,22 +395,24 @@ private fun SoloCircledGlyph(
     modifier: Modifier = Modifier,
     contentDescription: String = "Solo",
 ) {
+    // Material icons have intrinsic padding; shrink the circle so "S" matches arm/monitor/mute weight.
+    val innerSize = size * 0.78f
     Box(
         modifier = modifier.size(size),
         contentAlignment = Alignment.Center,
     ) {
         Box(
             modifier = Modifier
-                .fillMaxSize()
+                .size(innerSize)
                 .border(1.dp, tint, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = "S",
                 color = tint,
-                fontSize = (size.value * 0.58f).sp,
+                fontSize = (innerSize.value * 0.58f).sp,
                 fontWeight = FontWeight.Bold,
-                lineHeight = (size.value * 0.58f).sp,
+                lineHeight = (innerSize.value * 0.58f).sp,
                 maxLines = 1,
             )
         }
