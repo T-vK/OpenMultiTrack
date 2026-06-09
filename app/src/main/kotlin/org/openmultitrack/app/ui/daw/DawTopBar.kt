@@ -42,7 +42,7 @@ import org.openmultitrack.domain.session.AppMode
 
 private val ToolbarShape = RoundedCornerShape(8.dp)
 private val ToolbarControlHeight = 40.dp
-private val MixerClusterMaxWidth = 420.dp
+private val MixerNameMaxWidth = 160.dp
 
 @Composable
 internal fun ToolbarChip(
@@ -86,30 +86,31 @@ private fun MixerControlCluster(
         shape = ToolbarShape,
         border = border,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        modifier = Modifier
-            .widthIn(max = MixerClusterMaxWidth)
-            .height(ToolbarControlHeight),
+        modifier = Modifier.height(ToolbarControlHeight),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Surface(
                 onClick = onOpenMixerPicker,
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-                modifier = Modifier
-                    .weight(1f)
-                    .height(ToolbarControlHeight),
+                modifier = Modifier.height(ToolbarControlHeight),
             ) {
                 Row(
                     Modifier.padding(horizontal = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text(
                         activeMixerName ?: "Select mixer",
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
+                        modifier = Modifier.widthIn(max = MixerNameMaxWidth),
                         style = MaterialTheme.typography.labelLarge,
                     )
-                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                    Icon(
+                        Icons.Default.ArrowDropDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
             }
             VerticalDivider(
@@ -128,7 +129,7 @@ private fun MixerControlCluster(
                     color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
                 )
                 val recording = appMode == AppMode.MULTITRACK_RECORD
-                val modeLabel = if (recording) "Virtual Soundcheck" else "Record Mode"
+                val modeLabel = if (recording) "Recording Mode" else "Virtual Soundcheck"
                 Surface(
                     onClick = onToggleAppMode,
                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
@@ -140,14 +141,13 @@ private fun MixerControlCluster(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Icon(
-                            if (recording) Icons.AutoMirrored.Filled.VolumeUp else Icons.Default.Mic,
+                            if (recording) Icons.Default.Mic else Icons.AutoMirrored.Filled.VolumeUp,
                             contentDescription = null,
                             modifier = Modifier.size(16.dp),
                         )
                         Text(
                             modeLabel,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
                             style = MaterialTheme.typography.labelMedium,
                         )
                     }
