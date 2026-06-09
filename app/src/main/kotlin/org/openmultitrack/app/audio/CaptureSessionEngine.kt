@@ -24,6 +24,7 @@ import org.openmultitrack.usb.CaptureRoute
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import androidx.annotation.VisibleForTesting
 
 /**
  * Single USB capture stream shared by recording, live monitor, and optional root virtual mic.
@@ -54,6 +55,8 @@ class CaptureSessionEngine(
     private var perChannelWriter: PerChannelWavWriter? = null
     private var legacyWavWriter: WavWriter? = null
     private var sessionDir: File? = null
+    val activeSessionDir: File?
+        get() = sessionDir
     private var recordingConfig: RecordingConfig? = null
     private var channelCount: Int = 2
     private var sampleRate: Int = 48_000
@@ -79,6 +82,10 @@ class CaptureSessionEngine(
     private var virtualMicOutputRunning = false
     private val waveformRings = Array<LiveWaveformRing?>(64) { null }
     private val pendingWaveformPeaks = FloatArray(64)
+    private val meterHold = FloatArray(64)
+    private val lastRawPeaks = FloatArray(64)
+    private val meterLock = Any()
+    private val vuMeteringEnabled = AtomicBoolean(false)
     private var waveformWindowSec = DEFAULT_WAVEFORM_WINDOW_SEC
     private var waveformPeaksPerSecond = DEFAULT_WAVEFORM_PEAKS_PER_SEC
     private var lastWaveformEmitNs = 0L
@@ -97,6 +104,10 @@ class CaptureSessionEngine(
 
     fun recordElapsedSec(): Float =
         if (sampleRate > 0) framesWritten.toFloat() / sampleRate else 0f
+
+    fun updateVuMetering(enabled: Boolean) {
+        vuMeteringEnabled.set(enabled)
+    }
 
     fun updateMonitor(config: MonitorMixConfig) {
         val prev = monitorConfig.getAndSet(config)
@@ -285,6 +296,18 @@ class CaptureSessionEngine(
 
     fun droppedFrameCount(): Long = droppedFrames
 
+    /** Live per-channel input levels for VU meters (independent of waveform history). */
+    fun captureMeterLevels(): Map<Int, Float> = synchronized(meterLock) {
+        val out = LinkedHashMap<Int, Float>(channelCount)
+        for (ch in 0 until channelCount) {
+            meterHold[ch] *= METER_DECAY_PER_UI_TICK
+            if (meterHold[ch] > METER_OUTPUT_THRESHOLD) {
+                out[ch] = meterHold[ch]
+            }
+        }
+        out
+    }
+
     fun waveformSnapshots(normalize: Boolean): Map<Int, LiveWaveformSnapshot> {
         val out = LinkedHashMap<Int, LiveWaveformSnapshot>()
         for (ch in 0 until channelCount) {
@@ -298,7 +321,14 @@ class CaptureSessionEngine(
     fun clearWaveforms() {
         for (i in waveformRings.indices) waveformRings[i] = null
         pendingWaveformPeaks.fill(0f)
+        meterHold.fill(0f)
+        lastRawPeaks.fill(0f)
         lastWaveformEmitNs = 0L
+    }
+
+    @VisibleForTesting
+    internal fun debugRawMeterPeaks(): FloatArray = synchronized(meterLock) {
+        lastRawPeaks.copyOf(channelCount)
     }
 
     private fun allocateWaveformRings() {
@@ -314,7 +344,10 @@ class CaptureSessionEngine(
     private fun needsCapture(): Boolean {
         val monitor = monitorConfig.get()
         val virtualMic = virtualMicConfig.get()
-        return isRecording || monitor.enabled || (virtualMic?.enabled == true)
+        return isRecording ||
+            monitor.enabled ||
+            (virtualMic?.enabled == true) ||
+            vuMeteringEnabled.get()
     }
 
     private suspend fun stopCaptureInternalLocked() {
@@ -515,17 +548,21 @@ class CaptureSessionEngine(
     }
 
     private fun accumulateWaveformPeaks(scratch: FloatArray, frames: Int, channels: Int) {
-        for (ch in 0 until channels) {
-            var peak = 0f
-            for (frame in 0 until frames) {
-                val sample = scratch[frame * channels + ch]
-                peak = maxOf(peak, kotlin.math.abs(sample))
+        synchronized(meterLock) {
+            for (ch in 0 until channels) {
+                var peak = 0f
+                for (frame in 0 until frames) {
+                    val sample = scratch[frame * channels + ch]
+                    peak = maxOf(peak, kotlin.math.abs(sample))
+                }
+                pendingWaveformPeaks[ch] = maxOf(pendingWaveformPeaks[ch], peak)
             }
-            pendingWaveformPeaks[ch] = maxOf(pendingWaveformPeaks[ch], peak)
+            absorbInterleavedPeaks(meterHold, lastRawPeaks, scratch, frames, channels)
         }
     }
 
     private fun maybeEmitWaveformPeaks() {
+        if (!isRecording) return
         val intervalNs = 1_000_000_000L / waveformPeaksPerSecond
         val now = System.nanoTime()
         if (lastWaveformEmitNs != 0L && now - lastWaveformEmitNs < intervalNs) return
@@ -553,6 +590,8 @@ class CaptureSessionEngine(
     companion object {
         const val DEFAULT_WAVEFORM_WINDOW_SEC = 15f
         const val DEFAULT_WAVEFORM_PEAKS_PER_SEC = 30
+        private const val METER_DECAY_PER_UI_TICK = 0.88f
+        private const val METER_OUTPUT_THRESHOLD = 1e-5f
     }
 
     private fun ensureVirtualMicOutput(config: VirtualMicConfig) {

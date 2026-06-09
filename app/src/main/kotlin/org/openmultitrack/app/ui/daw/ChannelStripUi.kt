@@ -1,5 +1,7 @@
 package org.openmultitrack.app.ui.daw
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -9,6 +11,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -27,6 +30,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +55,59 @@ import org.openmultitrack.mixer.behringer.ScribbleStripLabel
 private val RecordRed = Color(0xFFE53935)
 private val MonitorBlue = Color(0xFF1E88E5)
 private val SoloAmber = Color(0xFFFFB300)
+private val VuGreen = Color(0xFF43A047)
+private val VuYellow = Color(0xFFFFB300)
+private val VuRed = Color(0xFFE53935)
+
+val StripVuMeterWidth = 5.dp
+
+@Composable
+internal fun StripVuMeter(
+    level: Float,
+    height: Dp,
+    modifier: Modifier = Modifier,
+    width: Dp = StripVuMeterWidth,
+) {
+    val target = level.coerceIn(0f, 1f)
+    val animated by animateFloatAsState(
+        targetValue = target,
+        animationSpec = tween(durationMillis = 60),
+        label = "stripVu",
+    )
+    val fillColor = when {
+        animated >= 0.92f -> VuRed
+        animated >= 0.72f -> VuYellow
+        else -> VuGreen
+    }
+    Box(
+        modifier = modifier
+            .width(width)
+            .height(height)
+            .clip(RoundedCornerShape(2.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)),
+    ) {
+        if (animated > 0.005f) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(animated)
+                    .align(Alignment.BottomCenter)
+                    .background(fillColor.copy(alpha = 0.92f)),
+            )
+        }
+    }
+}
+
+/** Peak level from the newest samples in a live waveform ring buffer. */
+internal fun liveVuLevel(
+    waveform: org.openmultitrack.app.audio.LiveWaveformSnapshot?,
+    normalized: Boolean,
+): Float {
+    val peaks = waveform?.peaks ?: return 0f
+    if (peaks.isEmpty()) return 0f
+    val raw = peaks.takeLast(3).max()
+    return scalePeaksForDisplay(floatArrayOf(raw), normalized).first()
+}
 
 private val ColorBarIconGap = 12.dp
 

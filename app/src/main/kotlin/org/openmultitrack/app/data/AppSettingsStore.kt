@@ -20,7 +20,7 @@ class AppSettingsStore(context: Context) {
         set(value) = prefs.edit().putFloat(KEY_RECORD_WAVEFORM_SEC, value).apply()
 
     var playbackWaveformWindowSec: Float
-        get() = prefs.getFloat(KEY_PLAYBACK_WAVEFORM_SEC, 300f)
+        get() = prefs.getFloat(KEY_PLAYBACK_WAVEFORM_SEC, 180f)
         set(value) = prefs.edit().putFloat(KEY_PLAYBACK_WAVEFORM_SEC, value).apply()
 
     var usbDetachDebounceMs: Long
@@ -51,6 +51,10 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_SHOW_WAVEFORMS, true)
         set(value) = prefs.edit().putBoolean(KEY_SHOW_WAVEFORMS, value).apply()
 
+    var showVuMeters: Boolean
+        get() = prefs.getBoolean(KEY_SHOW_VU_METERS, true)
+        set(value) = prefs.edit().putBoolean(KEY_SHOW_VU_METERS, value).apply()
+
     var stripNumberMode: StripNumberMode
         get() = StripNumberMode.entries.getOrElse(prefs.getInt(KEY_STRIP_NUMBER_MODE, 0)) { StripNumberMode.BOTH }
         set(value) = prefs.edit().putInt(KEY_STRIP_NUMBER_MODE, value.ordinal).apply()
@@ -62,6 +66,26 @@ class AppSettingsStore(context: Context) {
     var lastActiveMixerId: String?
         get() = prefs.getString(KEY_LAST_ACTIVE_MIXER, null)
         set(value) = prefs.edit().putString(KEY_LAST_ACTIVE_MIXER, value).apply()
+
+    val activeRecordingMixerId: String?
+        get() = prefs.getString(KEY_ACTIVE_RECORDING_MIXER, null)
+
+    val activeRecordingSessionDir: String?
+        get() = prefs.getString(KEY_ACTIVE_RECORDING_DIR, null)
+
+    fun setActiveRecording(mixerId: String, sessionDir: String) {
+        prefs.edit()
+            .putString(KEY_ACTIVE_RECORDING_MIXER, mixerId)
+            .putString(KEY_ACTIVE_RECORDING_DIR, sessionDir)
+            .commit()
+    }
+
+    fun clearActiveRecording() {
+        prefs.edit()
+            .remove(KEY_ACTIVE_RECORDING_MIXER)
+            .remove(KEY_ACTIVE_RECORDING_DIR)
+            .commit()
+    }
 
     fun appModeForMixer(mixerId: String): AppMode {
         val json = prefs.getString(KEY_APP_MODES_BY_MIXER, null) ?: return AppMode.MULTITRACK_RECORD
@@ -103,9 +127,12 @@ class AppSettingsStore(context: Context) {
         private const val KEY_HIDE_MONITOR = "hide_monitor_button"
         private const val KEY_HIDE_SOLO = "hide_solo_button"
         private const val KEY_SHOW_WAVEFORMS = "show_waveforms"
+        private const val KEY_SHOW_VU_METERS = "show_vu_meters"
         private const val KEY_STRIP_NUMBER_MODE = "strip_number_mode"
         private const val KEY_STRIP_ICON_MODE = "strip_icon_mode"
         private const val KEY_LAST_ACTIVE_MIXER = "last_active_mixer_id"
+        private const val KEY_ACTIVE_RECORDING_MIXER = "active_recording_mixer_id"
+        private const val KEY_ACTIVE_RECORDING_DIR = "active_recording_session_dir"
         private const val KEY_APP_MODES_BY_MIXER = "app_modes_by_mixer"
     }
 }

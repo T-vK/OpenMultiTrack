@@ -36,8 +36,14 @@ import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.TransportState
 import org.openmultitrack.sessionio.session.SessionLibrary
 import org.openmultitrack.sessionio.session.SessionMetadata
+import org.openmultitrack.sessionio.wav.SessionWaveformCache
+import org.openmultitrack.sessionio.wav.SessionWaveformExtractor
+import org.openmultitrack.sessionio.wav.SessionWaveformOverview
 import org.openmultitrack.sessionio.wav.WavReader
 import org.openmultitrack.sessionio.wav.WavWriter
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 import org.openmultitrack.usb.AudioEngineRouter
 import org.openmultitrack.usb.FullUsbProbeResult
 import org.openmultitrack.usb.UsbAudioEnumerator
@@ -64,6 +70,7 @@ data class MixerSessionUiState(
     val appMode: AppMode = AppMode.MULTITRACK_RECORD,
     val isRecording: Boolean = false,
     val isMonitoring: Boolean = false,
+    val isVuMetering: Boolean = false,
     val isUsbDegraded: Boolean = false,
     val isVirtualMicActive: Boolean = false,
     val isPlaying: Boolean = false,
@@ -75,10 +82,24 @@ data class MixerSessionUiState(
     val captureChannelCount: Int = 0,
     val recordElapsedSec: Float = 0f,
     val waveformPeaks: Map<Int, LiveWaveformSnapshot> = emptyMap(),
+    val captureMeterLevels: Map<Int, Float> = emptyMap(),
     val soundcheckSessions: List<SoundcheckSessionItem> = emptyList(),
     val selectedSoundcheckDir: String? = null,
     val playbackPositionSec: Float = 0f,
     val playbackDurationSec: Float = 0f,
+    val soundcheckSampleRate: Int = 48_000,
+    val soundcheckWaveforms: SessionWaveformOverview? = null,
+    val soundcheckWaveformsLoading: Boolean = false,
+    val soundcheckWaveformProgress: Float = 0f,
+    val soundcheckWaveformChannelsLoaded: Int = 0,
+    val soundcheckWaveformChannelsTotal: Int = 0,
+    val soundcheckViewStartSec: Float = 0f,
+    val soundcheckViewWindowSec: Float = 180f,
+    val soundcheckLoopStartSec: Float? = null,
+    val soundcheckLoopEndSec: Float? = null,
+    val soundcheckLoopEnabled: Boolean = false,
+    val soundcheckLoopSelecting: Boolean = false,
+    val soundcheckMeterLevels: Map<Int, Float> = emptyMap(),
 )
 
 class MixerSessionController(
@@ -98,8 +119,10 @@ class MixerSessionController(
     private var loopbackPlaybackId: Int? = null
     private var usbDetachJob: Job? = null
     private var waveformJob: Job? = null
+    private var soundcheckWaveformJob: Job? = null
     private var playbackStatusJob: Job? = null
     private var profile: MixerProfile? = null
+    private var lastVuLogNs = 0L
 
     private val storageRoot: File
         get() = settings.storageRootPath?.let { File(it) }
@@ -134,6 +157,7 @@ class MixerSessionController(
                 statusMessage = "Ready — $chCount channels",
             )
         }
+        syncVuMeterCapture()
     }
 
     fun setProbing(probing: Boolean) {
@@ -149,7 +173,14 @@ class MixerSessionController(
         }
         _state.update { it.copy(appMode = mode) }
         if (mode == AppMode.VIRTUAL_SOUNDCHECK) {
+            captureEngine.updateVuMetering(false)
+            _state.update { it.copy(isVuMetering = false) }
             refreshSoundcheckLibrary()
+            _state.update {
+                it.copy(soundcheckViewWindowSec = settings.playbackWaveformWindowSec.coerceIn(30f, 600f))
+            }
+        } else {
+            syncVuMeterCapture()
         }
     }
 
@@ -177,104 +208,248 @@ class MixerSessionController(
                     playbackDurationSec = sessions.firstOrNull { it.sessionDir == selected }?.durationSec ?: 0f,
                 )
             }
+            _state.value.selectedSoundcheckDir?.let { loadSoundcheckWaveforms(it) }
         }
     }
 
     fun selectSoundcheckSession(sessionDir: String) {
-        stopSoundcheck()
         val item = _state.value.soundcheckSessions.firstOrNull { it.sessionDir == sessionDir }
+        scope.launch {
+            captureMutex.withLock {
+                stopSoundcheckLocked()
+                soundcheckWaveformJob?.cancel()
+            }
+            val dir = File(sessionDir)
+            val metadata = withContext(Dispatchers.IO) {
+                SessionMetadata.read(dir)?.withResolvedChannels(dir)
+            } ?: return@launch
+            val durationSec = item?.durationSec?.takeIf { it > 0f }
+                ?: withContext(Dispatchers.IO) { SessionWaveformExtractor.durationSec(dir, metadata) }
+            prepareSoundcheckSessionUi(sessionDir, metadata, durationSec)
+            loadSoundcheckWaveformsBackground(dir, metadata)
+        }
+    }
+
+    fun setSoundcheckView(viewStartSec: Float, viewWindowSec: Float) {
+        val duration = _state.value.playbackDurationSec
+        val window = viewWindowSec.coerceIn(30f, 600f)
+        val maxStart = max(0f, duration - window)
         _state.update {
             it.copy(
-                selectedSoundcheckDir = sessionDir,
-                playbackPositionSec = 0f,
-                playbackDurationSec = item?.durationSec ?: 0f,
+                soundcheckViewStartSec = viewStartSec.coerceIn(0f, maxStart),
+                soundcheckViewWindowSec = window,
             )
         }
     }
 
-    fun playSoundcheck(startFrame: Long = 0) {
-        val descriptor = activeDescriptor ?: return
-        val probe = activeProbe ?: return
-        val sessionDir = _state.value.selectedSoundcheckDir ?: return
-        val dir = File(sessionDir)
-        val metadata = SessionMetadata.read(dir) ?: return
+    fun panSoundcheckView(deltaSec: Float) {
+        val s = _state.value
+        setSoundcheckView(s.soundcheckViewStartSec + deltaSec, s.soundcheckViewWindowSec)
+    }
+
+    fun zoomSoundcheckView(scale: Float, focalSec: Float) {
+        val s = _state.value
+        val newWindow = (s.soundcheckViewWindowSec / scale).coerceIn(30f, 600f)
+        val rel = if (s.soundcheckViewWindowSec > 0f) {
+            (focalSec - s.soundcheckViewStartSec) / s.soundcheckViewWindowSec
+        } else {
+            0.5f
+        }
+        val newStart = focalSec - rel * newWindow
+        setSoundcheckView(newStart, newWindow)
+    }
+
+    fun setSoundcheckLoopRegion(startSec: Float, endSec: Float) {
+        val duration = _state.value.playbackDurationSec
+        if (duration <= 0f) return
+        var start = min(startSec, endSec).coerceIn(0f, duration)
+        var end = max(startSec, endSec).coerceIn(0f, duration)
+        if (end <= start + 0.05f) {
+            end = (start + 0.25f).coerceAtMost(duration)
+            if (end <= start + 0.05f) start = (end - 0.25f).coerceAtLeast(0f)
+        }
+        if (end <= start + 0.05f) return
+        _state.update {
+            it.copy(
+                soundcheckLoopStartSec = start,
+                soundcheckLoopEndSec = end,
+                soundcheckLoopSelecting = false,
+            )
+        }
+    }
+
+    fun setSoundcheckLoopEnabled(enabled: Boolean) {
         scope.launch {
-            try {
-                captureMutex.withLock {
-                    withContext(Dispatchers.IO) {
-                        val playbackChannels = minOf(
-                            metadata.channels.size,
-                            maxPlaybackChannelsFromProbe(probe),
-                        ).coerceAtLeast(1)
-                        val playbackMetadata = metadata.copy(
-                            channels = metadata.channels.sortedBy { it.index }.take(playbackChannels),
-                        )
-                        val route = ensurePlaybackLocked(descriptor, probe, playbackChannels).getOrThrow()
-                        player.playSession(
-                            scope = scope,
-                            sessionDir = dir,
-                            metadata = playbackMetadata,
-                            route = route,
-                            usbDevice = activeUsbDevice,
-                            startFrame = startFrame,
-                        ).getOrThrow()
-                    }
+            captureMutex.withLock {
+                _state.update { it.copy(soundcheckLoopEnabled = enabled) }
+                if (_state.value.isPlaying) {
+                    restartSoundcheckPlaybackLocked()
                 }
-                startPlaybackStatusUpdates(metadata.sampleRate)
-                _state.update {
-                    it.copy(
-                        isPlaying = true,
-                        transportState = TransportState.PLAYING,
-                        statusMessage = "Playing to USB returns",
-                        warningMessage = null,
-                    )
+            }
+        }
+    }
+
+    fun setSoundcheckLoopSelecting(selecting: Boolean) {
+        _state.update { it.copy(soundcheckLoopSelecting = selecting) }
+    }
+
+    fun setSoundcheckLoopIn() {
+        val s = _state.value
+        val duration = s.playbackDurationSec
+        if (duration <= 0f) return
+        val pos = s.playbackPositionSec.coerceIn(0f, duration)
+        val end = s.soundcheckLoopEndSec ?: duration
+        setSoundcheckLoopRegion(pos, max(end, pos + 0.1f).coerceAtMost(duration))
+    }
+
+    fun setSoundcheckLoopOut() {
+        val s = _state.value
+        val duration = s.playbackDurationSec
+        if (duration <= 0f) return
+        val pos = s.playbackPositionSec.coerceIn(0f, duration)
+        val start = s.soundcheckLoopStartSec ?: 0f
+        setSoundcheckLoopRegion(min(start, pos - 0.1f).coerceAtLeast(0f), pos)
+    }
+
+    fun toggleSoundcheckLoopButton() {
+        val s = _state.value
+        when {
+            s.soundcheckLoopSelecting -> _state.update { it.copy(soundcheckLoopSelecting = false) }
+            s.soundcheckLoopStartSec != null && s.soundcheckLoopEndSec != null ->
+                setSoundcheckLoopEnabled(!s.soundcheckLoopEnabled)
+            else -> _state.update { it.copy(soundcheckLoopSelecting = true) }
+        }
+    }
+
+    fun playSoundcheck(startFrame: Long = 0) {
+        scope.launch {
+            captureMutex.withLock {
+                try {
+                    startSoundcheckPlaybackLocked(startFrame)
+                } catch (e: Exception) {
+                    OmtLog.e("MixerSession", "playSoundcheck failed", e)
+                    _state.update { it.copy(statusMessage = e.message) }
                 }
-            } catch (e: Exception) {
-                OmtLog.e("MixerSession", "playSoundcheck failed", e)
-                _state.update { it.copy(statusMessage = e.message) }
             }
         }
     }
 
     fun stopSoundcheck() {
+        scope.launch {
+            captureMutex.withLock { stopSoundcheckLocked() }
+        }
+    }
+
+    fun seekSoundcheck(positionSec: Float) {
+        scope.launch {
+            val s = _state.value
+            val duration = s.playbackDurationSec
+            if (duration <= 0f) return@launch
+            val clamped = positionSec.coerceIn(0f, duration)
+            val sampleRate = s.soundcheckSampleRate
+            if (sampleRate <= 0) return@launch
+            val frame = (clamped * sampleRate).toLong()
+            captureMutex.withLock {
+                _state.update { it.copy(playbackPositionSec = clamped) }
+                if (player.isPlaying) {
+                    player.seekToFrame(frame)
+                }
+            }
+        }
+    }
+
+    fun toggleSoundcheckPlayback() {
+        scope.launch {
+            captureMutex.withLock {
+                if (_state.value.isPlaying) {
+                    stopSoundcheckLocked()
+                } else {
+                    val dir = _state.value.selectedSoundcheckDir ?: return@withLock
+                    val metadata = SessionMetadata.read(File(dir)) ?: return@withLock
+                    val frame = (_state.value.playbackPositionSec * metadata.sampleRate).toLong()
+                    try {
+                        startSoundcheckPlaybackLocked(frame)
+                    } catch (e: Exception) {
+                        OmtLog.e("MixerSession", "toggleSoundcheckPlayback failed", e)
+                        _state.update { it.copy(statusMessage = e.message) }
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun startSoundcheckPlaybackLocked(startFrame: Long) {
+        val descriptor = activeDescriptor ?: return
+        val probe = activeProbe ?: return
+        val sessionDir = _state.value.selectedSoundcheckDir ?: return
+        val dir = File(sessionDir)
+        val metadata = withContext(Dispatchers.IO) {
+            SessionMetadata.read(dir)?.withResolvedChannels(dir)
+        } ?: return
+        withContext(Dispatchers.IO) {
+            player.stopAndAwait()
+            val playbackChannels = minOf(
+                metadata.channels.size,
+                maxPlaybackChannelsFromProbe(probe),
+            ).coerceAtLeast(1)
+            val playbackMetadata = metadata.copy(
+                channels = metadata.channels.sortedBy { it.index }.take(playbackChannels),
+            )
+            val route = ensurePlaybackLocked(descriptor, probe, playbackChannels).getOrThrow()
+            val ui = _state.value
+            val loopStart = ui.soundcheckLoopStartSec?.takeIf { ui.soundcheckLoopEnabled }
+                ?.let { (it * metadata.sampleRate).toLong() }
+            val loopEnd = ui.soundcheckLoopEndSec?.takeIf { ui.soundcheckLoopEnabled }
+                ?.let { (it * metadata.sampleRate).toLong() }
+            player.playSession(
+                scope = scope,
+                sessionDir = dir,
+                metadata = playbackMetadata,
+                route = route,
+                usbDevice = activeUsbDevice,
+                startFrame = startFrame,
+                loopStartFrame = loopStart,
+                loopEndFrame = loopEnd,
+                loopEnabled = ui.soundcheckLoopEnabled,
+            ).getOrThrow()
+        }
+        startPlaybackStatusUpdates(metadata.sampleRate)
+        _state.update {
+            it.copy(
+                isPlaying = true,
+                transportState = TransportState.PLAYING,
+                statusMessage = "Playing to USB returns",
+                warningMessage = null,
+            )
+        }
+    }
+
+    private suspend fun restartSoundcheckPlaybackLocked() {
+        val sessionDir = _state.value.selectedSoundcheckDir ?: return
+        val metadata = SessionMetadata.read(File(sessionDir)) ?: return
+        val frame = (_state.value.playbackPositionSec * metadata.sampleRate).toLong()
+        startSoundcheckPlaybackLocked(frame)
+    }
+
+    private suspend fun stopSoundcheckLocked() {
         val sampleRate = _state.value.selectedSoundcheckDir
             ?.let { SessionMetadata.read(File(it))?.sampleRate }
             ?: 48_000
-        val posSec = if (sampleRate > 0) {
+        val posSec = if (sampleRate > 0 && player.isPlaying) {
             player.status.positionFrames.toFloat() / sampleRate
         } else {
             _state.value.playbackPositionSec
         }
-        player.stop()
+        withContext(Dispatchers.IO) { player.stopAndAwait() }
         stopPlaybackStatusUpdates()
         _state.update {
             it.copy(
                 isPlaying = false,
                 transportState = TransportState.IDLE,
                 playbackPositionSec = posSec,
+                soundcheckMeterLevels = emptyMap(),
             )
         }
-    }
-
-    fun seekSoundcheck(positionSec: Float) {
-        val duration = _state.value.playbackDurationSec
-        if (duration <= 0f) return
-        val clamped = positionSec.coerceIn(0f, duration)
-        val metadata = _state.value.selectedSoundcheckDir?.let { SessionMetadata.read(File(it)) } ?: return
-        val frame = (clamped * metadata.sampleRate).toLong()
-        stopSoundcheck()
-        playSoundcheck(startFrame = frame)
-    }
-
-    fun toggleSoundcheckPlayback() {
-        if (_state.value.isPlaying) {
-            stopSoundcheck()
-            return
-        }
-        val dir = _state.value.selectedSoundcheckDir ?: return
-        val metadata = SessionMetadata.read(File(dir)) ?: return
-        val frame = (_state.value.playbackPositionSec * metadata.sampleRate).toLong()
-        playSoundcheck(startFrame = frame)
     }
 
     fun applyScribbleLabels(labels: List<UsbChannelScribble>) {
@@ -330,15 +505,17 @@ class MixerSessionController(
                 withContext(Dispatchers.IO) {
                     ensureCapture(descriptor, probe).getOrThrow()
                 }
-                applyMonitorRouting(enabled = true)
-                startWaveformUpdates()
                 _state.update {
                     it.copy(
                         isMonitoring = true,
+                        waveformPeaks = emptyMap(),
+                        recordElapsedSec = 0f,
                         statusMessage = "Monitoring",
                         warningMessage = null,
                     )
                 }
+                applyMonitorRouting(enabled = true)
+                startCaptureUiUpdates()
             }
         }
     }
@@ -346,10 +523,7 @@ class MixerSessionController(
     fun stopMonitoring() {
         captureEngine.updateMonitor(MonitorMixConfig(enabled = false))
         _state.update { it.copy(isMonitoring = false, statusMessage = "Monitor off") }
-        stopWaveformUpdatesIfIdle()
-        scope.launch {
-            captureMutex.withLock { releaseCaptureIfIdleLocked() }
-        }
+        syncVuMeterCapture()
     }
 
     fun startRecording() {
@@ -375,15 +549,20 @@ class MixerSessionController(
                         ).getOrThrow()
                     }
                 }
-                startWaveformUpdates()
+                val sessionDir = captureEngine.activeSessionDir
+                if (sessionDir != null) {
+                    settings.setActiveRecording(prof.id, sessionDir.absolutePath)
+                }
                 _state.update {
                     it.copy(
                         isRecording = true,
                         transportState = TransportState.RECORDING,
                         statusMessage = "Recording…",
                         warningMessage = null,
+                        lastRecordingPath = sessionDir?.absolutePath ?: it.lastRecordingPath,
                     )
                 }
+                startCaptureUiUpdates()
             } catch (e: Exception) {
                 OmtLog.e("MixerSession", "startRecording failed", e)
                 _state.update { it.copy(statusMessage = e.message) }
@@ -394,12 +573,11 @@ class MixerSessionController(
     fun resumeRecording(sessionDir: File, scribbleLabels: List<UsbChannelScribble>? = null) {
         val descriptor = activeDescriptor ?: return
         val probe = activeProbe ?: return
+        val meta = SessionMetadata.read(sessionDir) ?: return
         scope.launch {
             try {
                 captureMutex.withLock {
                     withContext(Dispatchers.IO) {
-                        val meta = SessionMetadata.read(sessionDir)
-                            ?: error("No session metadata in ${sessionDir.absolutePath}")
                         restoreChannelStripsFromMetadata(meta)
                         if (!captureEngine.isCaptureActive) {
                             ensureCapture(descriptor, probe).getOrThrow()
@@ -412,7 +590,10 @@ class MixerSessionController(
                         captureEngine.resumeRecording(sessionDir).getOrThrow()
                     }
                 }
-                startWaveformUpdates()
+                settings.setActiveRecording(
+                    meta.mixerId.takeIf { it.isNotBlank() } ?: profile?.id ?: mixerId,
+                    sessionDir.absolutePath,
+                )
                 _state.update {
                     it.copy(
                         isRecording = true,
@@ -422,6 +603,7 @@ class MixerSessionController(
                         lastRecordingPath = sessionDir.absolutePath,
                     )
                 }
+                startCaptureUiUpdates()
             } catch (e: Exception) {
                 OmtLog.e("MixerSession", "resumeRecording failed", e)
                 _state.update { it.copy(statusMessage = e.message) }
@@ -442,6 +624,9 @@ class MixerSessionController(
                     meta.markComplete(sessionDir)
                 }
             }
+            if (settings.activeRecordingSessionDir == sessionDir.absolutePath) {
+                settings.clearActiveRecording()
+            }
             _state.update {
                 it.copy(
                     statusMessage = "Incomplete session finalized",
@@ -454,10 +639,9 @@ class MixerSessionController(
     fun stopRecording() {
         scope.launch {
             val session = captureMutex.withLock {
-                val ended = withContext(Dispatchers.IO) { captureEngine.stopRecording() }
-                releaseCaptureIfIdleLocked()
-                ended
+                withContext(Dispatchers.IO) { captureEngine.stopRecording() }
             }
+            settings.clearActiveRecording()
             _state.update {
                 it.copy(
                     isRecording = false,
@@ -466,12 +650,43 @@ class MixerSessionController(
                     statusMessage = session?.let { s -> "Saved → ${s.filePath}" } ?: "Stopped",
                 )
             }
-            stopWaveformUpdatesIfIdle()
+            syncVuMeterCapture()
             if (_state.value.appMode == AppMode.VIRTUAL_SOUNDCHECK) {
                 refreshSoundcheckLibrary()
             }
         }
     }
+
+    fun syncVuMeterCapture() {
+        if (_state.value.appMode != AppMode.MULTITRACK_RECORD) {
+            captureEngine.updateVuMetering(false)
+            _state.update { it.copy(isVuMetering = false) }
+            return
+        }
+        scope.launch {
+            captureMutex.withLock {
+                val want = vuCaptureDesired()
+                captureEngine.updateVuMetering(want)
+                if (want) {
+                    val descriptor = activeDescriptor ?: return@withLock
+                    val probe = activeProbe ?: return@withLock
+                    withContext(Dispatchers.IO) {
+                        if (!captureEngine.isCaptureActive) {
+                            ensureCapture(descriptor, probe).getOrThrow()
+                        }
+                    }
+                    _state.update { it.copy(isVuMetering = true) }
+                    startCaptureUiUpdates()
+                } else {
+                    _state.update { it.copy(isVuMetering = false) }
+                    stopWaveformUpdatesIfIdle()
+                    releaseCaptureIfIdleLocked()
+                }
+            }
+        }
+    }
+
+    internal fun debugRawMeterPeaksForTest(): FloatArray = captureEngine.debugRawMeterPeaks()
 
     fun onUsbDetached(deviceName: String?) {
         val desc = activeDescriptor ?: return
@@ -557,25 +772,173 @@ class MixerSessionController(
     private fun startPlaybackStatusUpdates(sampleRate: Int) {
         playbackStatusJob?.cancel()
         playbackStatusJob = scope.launch {
+            var lastPosSec = -1f
             while (isActive) {
                 val st = player.status
-                val posSec = if (sampleRate > 0) st.positionFrames.toFloat() / sampleRate else 0f
-                val durSec = if (sampleRate > 0) st.durationFrames.toFloat() / sampleRate else 0f
-                _state.update {
-                    it.copy(
-                        isPlaying = st.state == TransportState.PLAYING,
-                        transportState = st.state,
-                        playbackPositionSec = posSec,
-                        playbackDurationSec = durSec.coerceAtLeast(it.playbackDurationSec),
-                    )
-                }
-                if (st.state == TransportState.IDLE) {
-                    _state.update { it.copy(isPlaying = false, transportState = TransportState.IDLE) }
+                if (st.state != TransportState.PLAYING) {
+                    _state.update {
+                        it.copy(
+                            isPlaying = false,
+                            transportState = TransportState.IDLE,
+                            soundcheckMeterLevels = emptyMap(),
+                        )
+                    }
                     break
                 }
-                delay(50)
+                val posSec = if (sampleRate > 0) st.positionFrames.toFloat() / sampleRate else 0f
+                val durSec = if (sampleRate > 0) st.durationFrames.toFloat() / sampleRate else 0f
+                val meters = player.meterLevelsSnapshot()
+                if (abs(posSec - lastPosSec) >= 0.08f) {
+                    lastPosSec = posSec
+                }
+                _state.update { s ->
+                    s.copy(
+                        isPlaying = true,
+                        transportState = TransportState.PLAYING,
+                        playbackPositionSec = posSec,
+                        playbackDurationSec = durSec.coerceAtLeast(s.playbackDurationSec),
+                        soundcheckMeterLevels = meters,
+                    )
+                }
+                delay(80)
             }
         }
+    }
+
+    private fun prepareSoundcheckSessionUi(
+        sessionDir: String,
+        metadata: SessionMetadata,
+        durationSec: Float,
+    ) {
+        restoreSoundcheckStripsFromMetadata(metadata)
+        val windowSec = settings.playbackWaveformWindowSec.coerceIn(30f, 600f)
+        val channelTotal = metadata.channels.size
+        _state.update {
+            it.copy(
+                selectedSoundcheckDir = sessionDir,
+                playbackPositionSec = 0f,
+                playbackDurationSec = durationSec,
+                soundcheckSampleRate = metadata.sampleRate,
+                soundcheckWaveforms = SessionWaveformOverview(
+                    peaksByChannel = emptyMap(),
+                    peaksPerSec = SessionWaveformExtractor.DEFAULT_PEAKS_PER_SEC,
+                    durationSec = durationSec,
+                ),
+                soundcheckWaveformsLoading = channelTotal > 0,
+                soundcheckWaveformProgress = 0f,
+                soundcheckWaveformChannelsLoaded = 0,
+                soundcheckWaveformChannelsTotal = channelTotal,
+                soundcheckViewStartSec = 0f,
+                soundcheckViewWindowSec = windowSec,
+                soundcheckLoopStartSec = null,
+                soundcheckLoopEndSec = null,
+                soundcheckLoopEnabled = false,
+                soundcheckLoopSelecting = false,
+            )
+        }
+    }
+
+    private fun loadSoundcheckWaveforms(sessionDir: String) {
+        soundcheckWaveformJob?.cancel()
+        soundcheckWaveformJob = scope.launch {
+            val dir = File(sessionDir)
+            val metadata = withContext(Dispatchers.IO) {
+                SessionMetadata.read(dir)?.withResolvedChannels(dir)
+            } ?: return@launch
+            val durationSec = withContext(Dispatchers.IO) { SessionWaveformExtractor.durationSec(dir, metadata) }
+            prepareSoundcheckSessionUi(sessionDir, metadata, durationSec)
+            loadSoundcheckWaveformsBackground(dir, metadata)
+        }
+    }
+
+    private fun loadSoundcheckWaveformsBackground(dir: File, metadata: SessionMetadata) {
+        soundcheckWaveformJob?.cancel()
+        soundcheckWaveformJob = scope.launch {
+            val cached = withContext(Dispatchers.IO) { SessionWaveformCache.load(dir, metadata) }
+            if (cached != null) {
+                applySoundcheckWaveformOverview(cached, loading = false)
+                return@launch
+            }
+            val overview = withContext(Dispatchers.IO) {
+                SessionWaveformExtractor.extractIncremental(dir, metadata) { chIndex, peaks, completed, total ->
+                    launch(Dispatchers.Main.immediate) {
+                        mergeSoundcheckChannelPeaks(chIndex, peaks, completed, total)
+                    }
+                }
+            }
+            withContext(Dispatchers.IO) { SessionWaveformCache.save(dir, overview) }
+            applySoundcheckWaveformOverview(overview, loading = false)
+        }
+    }
+
+    private fun mergeSoundcheckChannelPeaks(
+        channelIndex: Int,
+        peaks: FloatArray,
+        completed: Int,
+        total: Int,
+    ) {
+        _state.update { s ->
+            val base = s.soundcheckWaveforms ?: SessionWaveformOverview(
+                peaksByChannel = emptyMap(),
+                peaksPerSec = SessionWaveformExtractor.DEFAULT_PEAKS_PER_SEC,
+                durationSec = s.playbackDurationSec,
+            )
+            val updatedPeaks = base.peaksByChannel.toMutableMap()
+            updatedPeaks[channelIndex] = peaks
+            s.copy(
+                soundcheckWaveforms = base.copy(peaksByChannel = updatedPeaks),
+                soundcheckWaveformsLoading = completed < total,
+                soundcheckWaveformProgress = if (total > 0) completed.toFloat() / total else 1f,
+                soundcheckWaveformChannelsLoaded = completed,
+                soundcheckWaveformChannelsTotal = total,
+            )
+        }
+    }
+
+    private fun applySoundcheckWaveformOverview(overview: SessionWaveformOverview, loading: Boolean) {
+        _state.update {
+            it.copy(
+                soundcheckWaveforms = overview,
+                soundcheckWaveformsLoading = loading,
+                soundcheckWaveformProgress = if (loading) it.soundcheckWaveformProgress else 1f,
+                soundcheckWaveformChannelsLoaded = if (loading) {
+                    it.soundcheckWaveformChannelsLoaded
+                } else {
+                    overview.peaksByChannel.size
+                },
+                soundcheckWaveformChannelsTotal = overview.peaksByChannel.size
+                    .coerceAtLeast(it.soundcheckWaveformChannelsTotal),
+                playbackDurationSec = overview.durationSec.coerceAtLeast(it.playbackDurationSec),
+            )
+        }
+    }
+
+    private fun restoreSoundcheckStripsFromMetadata(meta: SessionMetadata) {
+        _state.update { s ->
+            val strips = meta.channels.sortedBy { it.index }.map { metaCh ->
+                val existing = s.channelStrips.firstOrNull { it.index == metaCh.index }
+                    ?: ChannelStripState(index = metaCh.index)
+                val hasCachedLabel = existing.displayName.isNotBlank() || existing.label.isNotBlank()
+                existing.copy(
+                    displayName = if (hasCachedLabel) existing.displayName else metaCh.displayName,
+                    label = if (hasCachedLabel) existing.label else labelFromSessionFileName(metaCh.fileName),
+                    colorArgb = if (hasCachedLabel) existing.colorArgb else metaCh.colorArgb,
+                    iconId = existing.iconId,
+                    armed = true,
+                    monitoring = false,
+                    solo = false,
+                )
+            }
+            s.copy(
+                channelStrips = strips,
+                captureChannelCount = strips.size.coerceAtLeast(s.captureChannelCount),
+            )
+        }
+    }
+
+    fun updateSoundcheckViewConfig() {
+        val window = settings.playbackWaveformWindowSec.coerceIn(30f, 600f)
+        _state.update { it.copy(soundcheckViewWindowSec = window) }
     }
 
     private fun stopPlaybackStatusUpdates() {
@@ -583,14 +946,41 @@ class MixerSessionController(
         playbackStatusJob = null
     }
 
-    private fun startWaveformUpdates() {
+    private fun startCaptureUiUpdates() {
         waveformJob?.cancel()
         waveformJob = scope.launch {
             while (isActive) {
                 if (captureEngine.isCaptureActive) {
-                    val peaks = captureEngine.waveformSnapshots(normalize = true)
-                    val elapsed = if (_state.value.isRecording) captureEngine.recordElapsedSec() else 0f
-                    _state.update { it.copy(waveformPeaks = peaks, recordElapsedSec = elapsed) }
+                    val levels = captureEngine.captureMeterLevels()
+                    val nowNs = System.nanoTime()
+                    if (nowNs - lastVuLogNs >= 2_000_000_000L) {
+                        lastVuLogNs = nowNs
+                        val ch1 = levels[0] ?: 0f
+                        val ch2 = levels[1] ?: 0f
+                        if (levels.isNotEmpty()) {
+                            OmtLog.i(
+                                "VuMeter",
+                                "ch1=${"%.3f".format(ch1)} ch2=${"%.3f".format(ch2)} " +
+                                    "vuOnly=${_state.value.isVuMetering} " +
+                                    "monitoring=${_state.value.isMonitoring}",
+                            )
+                        }
+                    }
+                    _state.update { s ->
+                        when {
+                            s.isRecording -> s.copy(
+                                waveformPeaks = captureEngine.waveformSnapshots(normalize = true),
+                                recordElapsedSec = captureEngine.recordElapsedSec(),
+                                captureMeterLevels = levels,
+                            )
+                            s.isMonitoring -> s.copy(
+                                captureMeterLevels = levels,
+                                waveformPeaks = emptyMap(),
+                                recordElapsedSec = 0f,
+                            )
+                            else -> s.copy(captureMeterLevels = levels)
+                        }
+                    }
                 }
                 delay(40)
             }
@@ -632,13 +1022,22 @@ class MixerSessionController(
     }
 
     private fun stopWaveformUpdatesIfIdle() {
-        if (!_state.value.isMonitoring && !_state.value.isRecording) {
+        if (!_state.value.isMonitoring && !_state.value.isRecording && !vuCaptureDesired()) {
             waveformJob?.cancel()
             waveformJob = null
             captureEngine.clearWaveforms()
-            _state.update { it.copy(waveformPeaks = emptyMap()) }
+            _state.update { it.copy(waveformPeaks = emptyMap(), captureMeterLevels = emptyMap()) }
         }
     }
+
+    private fun vuCaptureDesired(): Boolean =
+        settings.showVuMeters &&
+            _state.value.appMode == AppMode.MULTITRACK_RECORD &&
+            activeDescriptor != null &&
+            activeProbe != null &&
+            !_state.value.isMonitoring &&
+            !_state.value.isRecording &&
+            !_state.value.isPlaying
 
     private fun applyMonitorRouting(enabled: Boolean = _state.value.isMonitoring) {
         val s = _state.value
@@ -714,7 +1113,12 @@ class MixerSessionController(
     }
 
     private suspend fun releaseCaptureIfIdleLocked() {
-        if (!captureEngine.isRecording && !_state.value.isMonitoring && !_state.value.isPlaying) {
+        if (!captureEngine.isRecording &&
+            !_state.value.isMonitoring &&
+            !_state.value.isPlaying &&
+            !vuCaptureDesired()
+        ) {
+            captureEngine.updateVuMetering(false)
             withContext(Dispatchers.IO) { captureEngine.stopCapture() }
             usbStream?.close()
             usbStream = null

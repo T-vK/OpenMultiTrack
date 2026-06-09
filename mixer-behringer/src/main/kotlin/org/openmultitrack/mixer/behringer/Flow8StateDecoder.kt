@@ -14,6 +14,10 @@ object Flow8StateDecoder {
         0x0554, 0x0572, 0x0590, 0x05AE, 0x05CC, 0x05EA,
     )
 
+    private const val SYSEX_NAME_REGION_MIN_SIZE = 0x600
+    private const val SYSEX_START = 0xF0
+    private const val NAMES_START = 0x0554
+
     private const val INPUT_TYPE_DYNAMIC_MIC = 0
     private const val INPUT_TYPE_CONDENSOR_MIC = 1
     private const val INPUT_TYPE_GUITAR_OR_BASS = 2
@@ -40,9 +44,13 @@ object Flow8StateDecoder {
     )
 
     fun decodeNames(buf: ByteArray): List<String> {
-        val fixed = FIXED_OFFSETS.toList().mapNotNull { offset -> readLengthPrefixed(buf, offset) }
-        if (fixed.size >= MIXER_NAME_COUNT) return fixed.take(MIXER_NAME_COUNT)
-        return scanNames(buf).take(MIXER_NAME_COUNT)
+        if (usesSysexNameRegion(buf)) {
+            val fixed = FIXED_OFFSETS.map { readLengthPrefixed(buf, it).orEmpty() }
+            if (fixed.count { it.isNotEmpty() } >= MIXER_NAME_COUNT) {
+                return fixed.take(MIXER_NAME_COUNT)
+            }
+        }
+        return orderedNamesFromStripMap(scanChannelRecords(buf))
     }
 
     internal fun readLengthPrefixed(buf: ByteArray, offset: Int): String? {
@@ -63,7 +71,7 @@ object Flow8StateDecoder {
         mixerState: ByteArray? = null,
         maxStrips: Int = MIXER_NAME_COUNT,
     ): List<Int?> {
-        val nameOffsets = mixerState?.let(::scanNameOffsets).orEmpty()
+        val nameOffsets = mixerState?.let(::nameOffsetsByStrip).orEmpty()
         val groups = payload.size / 4
         return (0 until minOf(maxStrips, groups)).map { index ->
             val base = index * 4
@@ -73,20 +81,8 @@ object Flow8StateDecoder {
         }
     }
 
-    internal fun scanNameOffsets(buf: ByteArray, maxNames: Int = MIXER_NAME_COUNT): List<Int> {
-        val offsets = mutableListOf<Int>()
-        var i = 0
-        while (i < buf.size && offsets.size < maxNames) {
-            val name = readLengthPrefixed(buf, i)
-            if (name != null) {
-                offsets.add(i)
-                i += 1 + (buf[i].toInt() and 0xFF)
-            } else {
-                i++
-            }
-        }
-        return offsets
-    }
+    internal fun scanNameOffsets(buf: ByteArray, maxNames: Int = MIXER_NAME_COUNT): List<Int> =
+        (0 until maxNames).mapNotNull { nameOffsetsByStrip(buf)[it] }
 
     internal fun decodeInputType(buf: ByteArray, nameOffset: Int): Int {
         if (nameOffset >= 1 && (buf[nameOffset - 1].toInt() and 0xFF) == RECORD_MAGIC) {
@@ -104,14 +100,12 @@ object Flow8StateDecoder {
         marker: Int,
         preset: Int,
         mixerState: ByteArray?,
-        nameOffsets: List<Int>,
+        nameOffsets: Map<Int, Int>,
     ): Int? {
         if (marker == ICON_MARKER_TYPED) {
-            val inputType = if (mixerState != null && stripIndex < nameOffsets.size) {
-                decodeInputType(mixerState, nameOffsets[stripIndex])
-            } else {
-                INPUT_TYPE_DYNAMIC_MIC
-            }
+            val inputType = mixerState?.let { state ->
+                nameOffsets[stripIndex]?.let { offset -> decodeInputType(state, offset) }
+            } ?: INPUT_TYPE_DYNAMIC_MIC
             return resolvePresetIcon(inputType, preset)
         }
         if (marker == ICON_MARKER_PLAIN) {
@@ -125,24 +119,72 @@ object Flow8StateDecoder {
         }
     }
 
-    private fun resolvePresetIcon(inputType: Int, preset: Int): Int? {
-        PRESET_TO_MS_ICON[inputType to preset]?.let { return it }
-        return preset.takeIf { it in 1..MixingStationIcons.MAX_ID }
+    internal fun isValidChannelNameRecord(buf: ByteArray, offset: Int): Boolean {
+        if (readLengthPrefixed(buf, offset) == null || offset < 6) return false
+        if ((buf[offset - 1].toInt() and 0xFF) == RECORD_MAGIC) {
+            val stripIndex = buf[offset - 3].toInt() and 0xFF
+            return stripIndex in 0..2 &&
+                (buf[offset - 2].toInt() and 0xFF) == 0 &&
+                (buf[offset - 4].toInt() and 0xFF) == 0 &&
+                (buf[offset - 5].toInt() and 0xFF) == 0
+        }
+        val stripIndex = buf[offset - 3].toInt() and 0xFF
+        if (stripIndex !in 3..5 ||
+            (buf[offset - 5].toInt() and 0xFF) != 0 ||
+            (buf[offset - 4].toInt() and 0xFF) != 0
+        ) {
+            return false
+        }
+        return (buf[offset - 2].toInt() and 0xFF) in 1..2
     }
 
-    private fun scanNames(buf: ByteArray): List<String> {
-        val names = mutableListOf<String>()
+    internal fun channelStripIndexFromRecord(buf: ByteArray, offset: Int): Int =
+        buf[offset - 3].toInt() and 0xFF
+
+    internal fun scanChannelRecords(buf: ByteArray): Map<Int, String> {
+        val records = linkedMapOf<Int, String>()
         var i = 0
         while (i < buf.size) {
-            val name = readLengthPrefixed(buf, i)
-            if (name != null) {
-                val len = buf[i].toInt() and 0xFF
-                names.add(name)
-                i += 1 + len
+            if (isValidChannelNameRecord(buf, i)) {
+                val stripIndex = channelStripIndexFromRecord(buf, i)
+                val name = readLengthPrefixed(buf, i)
+                if (name != null && stripIndex in 0 until MIXER_NAME_COUNT) {
+                    records[stripIndex] = name
+                }
+                i += 1 + (buf[i].toInt() and 0xFF)
             } else {
                 i++
             }
         }
-        return names
+        return records
     }
+
+    internal fun nameOffsetsByStrip(buf: ByteArray): Map<Int, Int> {
+        val offsets = linkedMapOf<Int, Int>()
+        var i = 0
+        while (i < buf.size) {
+            if (isValidChannelNameRecord(buf, i)) {
+                val stripIndex = channelStripIndexFromRecord(buf, i)
+                if (stripIndex in 0 until MIXER_NAME_COUNT) {
+                    offsets[stripIndex] = i
+                }
+                i += 1 + (buf[i].toInt() and 0xFF)
+            } else {
+                i++
+            }
+        }
+        return offsets
+    }
+
+    private fun usesSysexNameRegion(buf: ByteArray): Boolean {
+        if (buf.size < SYSEX_NAME_REGION_MIN_SIZE) return false
+        if ((buf[0].toInt() and 0xFF) == SYSEX_START) return true
+        return readLengthPrefixed(buf, NAMES_START) != null
+    }
+
+    private fun orderedNamesFromStripMap(records: Map<Int, String>): List<String> =
+        (0 until MIXER_NAME_COUNT).map { records[it].orEmpty() }
+
+    private fun resolvePresetIcon(inputType: Int, preset: Int): Int? =
+        PRESET_TO_MS_ICON[inputType to preset]
 }

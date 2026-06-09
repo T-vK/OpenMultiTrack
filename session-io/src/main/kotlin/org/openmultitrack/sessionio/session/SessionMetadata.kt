@@ -66,8 +66,7 @@ data class SessionMetadata(
             fun longField(name: String): Long =
                 Regex(""""$name"\s*:\s*(\d+)""").find(text)?.groupValues?.get(1)?.toLong() ?: 0L
 
-            val channels = Regex(""""index"\s*:\s*(\d+).*?"fileName"\s*:\s*"([^"]*)".*?"displayName"\s*:\s*"([^"]*)".*?"colorArgb"\s*:\s*(\d+)""")
-                .findAll(text)
+            val channels = CHANNEL_JSON_PATTERN.findAll(text)
                 .map { m ->
                     ChannelMetadata(
                         index = m.groupValues[1].toInt(),
@@ -91,5 +90,58 @@ data class SessionMetadata(
         }
 
         private fun esc(s: String): String = s.replace("\\", "\\\\").replace("\"", "\\\"")
+
+        /** Android colors are signed ints; the legacy regex only matched positive digits. */
+        private val CHANNEL_JSON_PATTERN = Regex(
+            """"index"\s*:\s*(\d+).*?"fileName"\s*:\s*"([^"]*)".*?"displayName"\s*:\s*"([^"]*)".*?"colorArgb"\s*:\s*(-?\d+)""",
+        )
+
+        fun discoverChannelsFromDisk(sessionDir: File): List<ChannelMetadata> {
+            val channelFilePattern = Regex("""channel(\d+)(?:\s*-.*)?\.wav""", RegexOption.IGNORE_CASE)
+            return sessionDir.listFiles()
+                ?.asSequence()
+                ?.filter { it.isFile && channelFilePattern.matches(it.name) }
+                ?.mapNotNull { file ->
+                    val index = channelFilePattern.matchEntire(file.name)?.groupValues?.get(1)
+                        ?.toIntOrNull()?.minus(1) ?: return@mapNotNull null
+                    val label = labelFromFileName(file.name)
+                    ChannelMetadata(
+                        index = index,
+                        fileName = file.name,
+                        displayName = ChannelFileNaming.displayName(index, label),
+                        colorArgb = defaultStripColor(index),
+                    )
+                }
+                ?.sortedBy { it.index }
+                ?.toList()
+                ?: emptyList()
+        }
+
+        private fun labelFromFileName(fileName: String): String? {
+            val withoutExt = fileName.removeSuffix(".wav")
+            val dash = withoutExt.indexOf(" - ")
+            return if (dash >= 0) withoutExt.substring(dash + 3).takeIf { it.isNotBlank() } else null
+        }
+
+        private fun defaultStripColor(index: Int): Int {
+            val palette = intArrayOf(
+                0xFFE53935.toInt(),
+                0xFF1E88E5.toInt(),
+                0xFF43A047.toInt(),
+                0xFFFFB300.toInt(),
+                0xFF8E24AA.toInt(),
+                0xFF00ACC1.toInt(),
+            )
+            return palette[index % palette.size]
+        }
     }
+
+    fun withResolvedChannels(sessionDir: File): SessionMetadata {
+        if (channels.isNotEmpty()) return this
+        val discovered = discoverChannelsFromDisk(sessionDir)
+        return if (discovered.isEmpty()) this else copy(channels = discovered)
+    }
+
+    fun resolvedChannels(sessionDir: File): List<ChannelMetadata> =
+        channels.ifEmpty { discoverChannelsFromDisk(sessionDir) }
 }

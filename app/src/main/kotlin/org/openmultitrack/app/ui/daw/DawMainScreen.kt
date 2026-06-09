@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
@@ -118,20 +119,30 @@ fun DawMainScreen(
     onCloseLog: () -> Unit,
     onMonitorGainChange: (Float) -> Unit,
     onLoadScribbleStrip: (String) -> Unit,
-    onRefreshSoundcheckLibrary: (String) -> Unit,
+    playbackWaveformWindowSec: Float,
     onSelectSoundcheckSession: (String, String) -> Unit,
     onToggleSoundcheckPlayback: (String) -> Unit,
     onStopSoundcheck: (String) -> Unit,
     onSeekSoundcheck: (String, Float) -> Unit,
+    onPanSoundcheckView: (String, Float) -> Unit,
+    onZoomSoundcheckView: (String, Float, Float) -> Unit,
+    onSetSoundcheckView: (String, Float, Float) -> Unit,
+    onSetSoundcheckLoopRegion: (String, Float, Float) -> Unit,
+    onToggleSoundcheckLoop: (String) -> Unit,
+    onSetSoundcheckLoopIn: (String) -> Unit,
+    onSetSoundcheckLoopOut: (String) -> Unit,
+    onResumeInterruptedRecording: (String) -> Unit,
     onConfirmFlow8PairingImport: () -> Unit,
     onDismissFlow8PairingDialog: () -> Unit,
     onHideArmChange: (Boolean) -> Unit,
     onHideMonitorChange: (Boolean) -> Unit,
     onHideSoloChange: (Boolean) -> Unit,
     onShowWaveformsChange: (Boolean) -> Unit,
+    onShowVuMetersChange: (Boolean) -> Unit,
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
     onRecordWaveformWindowChange: (Float) -> Unit,
+    onPlaybackWaveformWindowChange: (Float) -> Unit,
     onDismissStatusToast: () -> Unit,
     onFinalizeIncompleteRecording: (String) -> Unit,
 ) {
@@ -186,6 +197,9 @@ fun DawMainScreen(
                         onStopRecord = { onStopRecord(activeId) },
                         onToggleSoundcheckPlayback = { onToggleSoundcheckPlayback(activeId) },
                         onStopSoundcheck = { onStopSoundcheck(activeId) },
+                        onToggleSoundcheckLoop = { onToggleSoundcheckLoop(activeId) },
+                        onSetSoundcheckLoopIn = { onSetSoundcheckLoopIn(activeId) },
+                        onSetSoundcheckLoopOut = { onSetSoundcheckLoopOut(activeId) },
                     )
                 }
             }
@@ -200,25 +214,35 @@ fun DawMainScreen(
                 if (state.mixers.isEmpty()) {
                     EmptyMixersPrompt(onAddMixer = onAddMixer)
                 } else {
-                    if (state.pendingRecordingResume) {
-                        IncompleteRecordingBanner(
-                            message = "Interrupted recording detected — resuming automatically. " +
-                                "Silence is inserted for any time not captured.",
-                            onFinalize = activeId?.let { id -> { onFinalizeIncompleteRecording(id) } },
-                        )
+                    activeId?.let { id ->
+                        state.interruptedRecordings[id]?.let {
+                            IncompleteRecordingBanner(
+                                message = "Recording was interrupted. Resume to continue, or finalize to keep what was captured.",
+                                onResume = { onResumeInterruptedRecording(id) },
+                                onFinalize = { onFinalizeIncompleteRecording(id) },
+                            )
+                        }
                     }
                     session?.warningMessage?.let { WarningBanner(it) }
                     when (session?.appMode) {
                         AppMode.VIRTUAL_SOUNDCHECK -> session?.let { s ->
                             SoundcheckPanel(
-                                sessions = s.soundcheckSessions,
-                                selectedDir = s.selectedSoundcheckDir,
-                                isPlaying = s.isPlaying,
-                                positionSec = s.playbackPositionSec,
-                                durationSec = s.playbackDurationSec,
-                                onRefresh = { onRefreshSoundcheckLibrary(activeId!!) },
+                                session = s,
+                                normalized = waveformNormalized,
+                                showWaveforms = state.showWaveforms,
+                                numberMode = state.stripNumberMode,
+                                iconMode = state.stripIconMode,
+                                hideArm = state.hideArmButton,
+                                hideMonitor = state.hideMonitorButton,
+                                hideSolo = state.hideSoloButton,
                                 onSelectSession = { onSelectSoundcheckSession(activeId!!, it) },
                                 onSeek = { onSeekSoundcheck(activeId!!, it) },
+                                onPanView = { onPanSoundcheckView(activeId!!, it) },
+                                onZoomView = { scale, focal -> onZoomSoundcheckView(activeId!!, scale, focal) },
+                                onSetView = { start, window -> onSetSoundcheckView(activeId!!, start, window) },
+                                onSetLoopRegion = { start, end ->
+                                    onSetSoundcheckLoopRegion(activeId!!, start, end)
+                                },
                             )
                         }
                         else -> session?.let { s ->
@@ -226,6 +250,11 @@ fun DawMainScreen(
                                 strips = s.channelStrips,
                                 normalized = waveformNormalized,
                                 waveformPeaks = s.waveformPeaks,
+                                captureMeterLevels = s.captureMeterLevels,
+                                isMonitoring = s.isMonitoring,
+                                isRecording = s.isRecording,
+                                isVuMetering = s.isVuMetering,
+                                showVuMeters = state.showVuMeters,
                                 showWaveforms = state.showWaveforms,
                                 hideArm = state.hideArmButton,
                                 hideMonitor = state.hideMonitorButton,
@@ -295,7 +324,9 @@ fun DawMainScreen(
                 hideMonitorIcon = state.hideMonitorButton,
                 hideSoloIcon = state.hideSoloButton,
                 showWaveforms = state.showWaveforms,
+                showVuMeters = state.showVuMeters,
                 recordWaveformWindowSec = recordWaveformWindowSec,
+                playbackWaveformWindowSec = playbackWaveformWindowSec,
                 stripNumberMode = state.stripNumberMode,
                 stripIconMode = state.stripIconMode,
             ),
@@ -306,7 +337,9 @@ fun DawMainScreen(
             onHideMonitorChange = onHideMonitorChange,
             onHideSoloChange = onHideSoloChange,
             onShowWaveformsChange = onShowWaveformsChange,
+            onShowVuMetersChange = onShowVuMetersChange,
             onRecordWaveformWindowChange = onRecordWaveformWindowChange,
+            onPlaybackWaveformWindowChange = onPlaybackWaveformWindowChange,
             onStripNumberModeChange = onStripNumberModeChange,
             onStripIconModeChange = onStripIconModeChange,
         )
@@ -348,6 +381,9 @@ private fun TransportToolbar(
     onStopRecord: () -> Unit,
     onToggleSoundcheckPlayback: () -> Unit,
     onStopSoundcheck: () -> Unit,
+    onToggleSoundcheckLoop: () -> Unit,
+    onSetSoundcheckLoopIn: () -> Unit,
+    onSetSoundcheckLoopOut: () -> Unit,
 ) {
     var mixerMenuOpen by remember { mutableStateOf(false) }
     var removeMixerConfirm by remember { mutableStateOf<MixerProfile?>(null) }
@@ -454,6 +490,17 @@ private fun TransportToolbar(
                 )
 
                 if (session.appMode == AppMode.VIRTUAL_SOUNDCHECK) {
+                    SoundcheckLoopInOutControls(
+                        session = session,
+                        showLabels = showLabels,
+                        onLoopIn = onSetSoundcheckLoopIn,
+                        onLoopOut = onSetSoundcheckLoopOut,
+                    )
+                    SoundcheckLoopControl(
+                        session = session,
+                        showLabels = showLabels,
+                        onToggleLoop = onToggleSoundcheckLoop,
+                    )
                     SoundcheckPlayControl(
                         session = session,
                         showLabels = showLabels,
@@ -732,6 +779,61 @@ private fun MonitorControl(
 }
 
 @Composable
+private fun SoundcheckLoopInOutControls(
+    session: MixerSessionUiState,
+    showLabels: Boolean,
+    onLoopIn: () -> Unit,
+    onLoopOut: () -> Unit,
+) {
+    val enabled = session.selectedSoundcheckDir != null
+    ToolbarActionButton(onClick = onLoopIn, enabled = enabled) {
+        Text("In", style = MaterialTheme.typography.labelLarge)
+        if (showLabels) {
+            Spacer(Modifier.width(4.dp))
+            Text("Loop in", style = MaterialTheme.typography.labelSmall)
+        }
+    }
+    Spacer(Modifier.width(4.dp))
+    ToolbarActionButton(onClick = onLoopOut, enabled = enabled) {
+        Text("Out", style = MaterialTheme.typography.labelLarge)
+        if (showLabels) {
+            Spacer(Modifier.width(4.dp))
+            Text("Loop out", style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
+private fun SoundcheckLoopControl(
+    session: MixerSessionUiState,
+    showLabels: Boolean,
+    onToggleLoop: () -> Unit,
+) {
+    val hasRegion = session.soundcheckLoopStartSec != null && session.soundcheckLoopEndSec != null
+    val active = session.soundcheckLoopSelecting || (hasRegion && session.soundcheckLoopEnabled)
+    ToolbarActionButton(
+        onClick = onToggleLoop,
+        active = active,
+        activeColor = if (session.soundcheckLoopEnabled) SoloAmber else MonitorBlue,
+        enabled = session.selectedSoundcheckDir != null,
+    ) {
+        Icon(Icons.Default.Repeat, contentDescription = "Loop", modifier = Modifier.size(18.dp))
+        if (showLabels) {
+            Spacer(Modifier.width(6.dp))
+            Text(
+                when {
+                    session.soundcheckLoopSelecting -> "Tap start/end"
+                    hasRegion && session.soundcheckLoopEnabled -> "Loop on"
+                    hasRegion -> "Loop off"
+                    else -> "Loop"
+                },
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+    }
+}
+
+@Composable
 private fun SoundcheckPlayControl(
     session: MixerSessionUiState,
     showLabels: Boolean,
@@ -843,7 +945,8 @@ private fun WarningBanner(message: String) {
 @Composable
 private fun IncompleteRecordingBanner(
     message: String,
-    onFinalize: (() -> Unit)?,
+    onResume: () -> Unit,
+    onFinalize: () -> Unit,
 ) {
     Surface(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.errorContainer) {
         Row(
@@ -858,10 +961,11 @@ private fun IncompleteRecordingBanner(
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 style = MaterialTheme.typography.bodySmall,
             )
-            onFinalize?.let { finalize ->
-                TextButton(onClick = finalize) {
-                    Text("Finalize")
-                }
+            TextButton(onClick = onResume) {
+                Text("Resume")
+            }
+            TextButton(onClick = onFinalize) {
+                Text("Finalize")
             }
         }
     }
@@ -872,6 +976,11 @@ private fun ChannelStripList(
     strips: List<ChannelStripState>,
     normalized: Boolean,
     waveformPeaks: Map<Int, LiveWaveformSnapshot>,
+    captureMeterLevels: Map<Int, Float>,
+    isMonitoring: Boolean,
+    isRecording: Boolean,
+    isVuMetering: Boolean,
+    showVuMeters: Boolean,
     showWaveforms: Boolean,
     hideArm: Boolean,
     hideMonitor: Boolean,
@@ -945,9 +1054,14 @@ private fun ChannelStripList(
                     innerPad = innerPad,
                     labelFontSize = labelFontSize,
                     labelColumnWidth = labelColumnWidth,
-                    waveform = if (showWaveforms) waveformPeaks[strip.index] else null,
+                    waveform = if (showWaveforms && isRecording) waveformPeaks[strip.index] else null,
+                    captureMeterLevel = if (showVuMeters && (isMonitoring || isRecording || isVuMetering)) {
+                        captureMeterLevels[strip.index] ?: 0f
+                    } else {
+                        null
+                    },
                     normalized = normalized,
-                    showWaveform = showWaveforms,
+                    showWaveform = showWaveforms && isRecording,
                     numberMode = numberMode,
                     iconMode = iconMode,
                     hideArm = hideArm,
@@ -982,6 +1096,7 @@ private fun ChannelStripRow(
     labelFontSize: Float,
     labelColumnWidth: Dp,
     waveform: LiveWaveformSnapshot?,
+    captureMeterLevel: Float?,
     normalized: Boolean,
     showWaveform: Boolean,
     numberMode: StripNumberMode,
@@ -1013,6 +1128,10 @@ private fun ChannelStripRow(
             hideSolo = hideSolo,
             onClick = onOpenControls,
         )
+        StripVuMeter(
+            level = captureMeterLevel ?: liveVuLevel(waveform, normalized),
+            height = colorBarHeight,
+        )
         if (showWaveform) {
             WaveformView(
                 waveform = waveform,
@@ -1043,7 +1162,7 @@ private fun WaveformView(
         Box(modifier = modifier)
         return
     }
-    val displayPeaks = scalePeaksForDisplay(data, normalized)
+    val displayPeaks = org.openmultitrack.app.ui.daw.scalePeaksForDisplay(data, normalized)
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
@@ -1064,18 +1183,6 @@ private fun WaveformView(
             )
         }
     }
-}
-
-/** USB peaks are often very small floats; scale for display so live waveforms stay visible. */
-private fun scalePeaksForDisplay(peaks: FloatArray, normalized: Boolean): FloatArray {
-    if (peaks.isEmpty()) return peaks
-    val maxPeak = peaks.max()
-    if (maxPeak <= 1e-6f) return peaks
-    if (normalized) {
-        return FloatArray(peaks.size) { i -> (peaks[i] / maxPeak).coerceIn(0f, 1f) }
-    }
-    val gain = if (maxPeak < 0.15f) 1f / maxPeak else 1f
-    return FloatArray(peaks.size) { i -> (peaks[i] * gain).coerceIn(0f, 1f) }
 }
 
 @Composable

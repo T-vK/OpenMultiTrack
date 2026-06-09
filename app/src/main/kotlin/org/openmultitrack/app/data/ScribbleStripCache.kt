@@ -67,7 +67,7 @@ class ScribbleStripCache(context: Context) {
     )
 
     companion object {
-        private const val CACHE_VERSION = 1
+        private const val CACHE_VERSION = 2
 
         fun fingerprint(labels: List<UsbChannelScribble>): String {
             val canonical = labels.sortedBy { it.usbChannel }.joinToString("|") { label ->
