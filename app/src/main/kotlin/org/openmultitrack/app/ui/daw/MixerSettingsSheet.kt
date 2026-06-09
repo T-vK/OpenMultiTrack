@@ -13,19 +13,25 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,19 +49,24 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.openmultitrack.domain.channel.ChannelStripState
 import org.openmultitrack.domain.mixer.MixerRoutingConfig
+import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.mixer.behringer.MixingStationIcons
 import org.openmultitrack.mixer.behringer.ScribbleStripLabel
+import org.openmultitrack.usb.LabeledAudioDevice
 
 private sealed interface MixerSettingsPage {
     data object Menu : MixerSettingsPage
+    data object Monitor : MixerSettingsPage
     data object InputMatrix : MixerSettingsPage
     data object OutputMatrix : MixerSettingsPage
     data object HiddenSoundcheck : MixerSettingsPage
     data object HiddenRecord : MixerSettingsPage
 }
 
-private val LabelColumnWidth = 148.dp
-private val MatrixCellSize = 40.dp
+private val LabelColumnWidth = 112.dp
+private val MatrixCellSize = 36.dp
+private val MatrixGap = 3.dp
+private val MonitorBlue = Color(0xFF1E88E5)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,6 +76,13 @@ fun MixerSettingsSheet(
     usbChannelCount: Int,
     strips: List<ChannelStripState>,
     config: MixerRoutingConfig,
+    appMode: AppMode?,
+    isMonitoring: Boolean,
+    monitorEnabled: Boolean,
+    outputDevices: List<LabeledAudioDevice>,
+    onStartMonitor: () -> Unit,
+    onStopMonitor: () -> Unit,
+    onSetMonitorOutput: (Int) -> Unit,
     onDismiss: () -> Unit,
     onSave: (MixerRoutingConfig) -> Unit,
 ) {
@@ -117,10 +135,20 @@ fun MixerSettingsSheet(
 
             when (page) {
                 MixerSettingsPage.Menu -> SettingsMenu(
+                    onMonitor = { page = MixerSettingsPage.Monitor },
                     onInputMatrix = { page = MixerSettingsPage.InputMatrix },
                     onOutputMatrix = { page = MixerSettingsPage.OutputMatrix },
                     onHiddenSoundcheck = { page = MixerSettingsPage.HiddenSoundcheck },
                     onHiddenRecord = { page = MixerSettingsPage.HiddenRecord },
+                )
+                MixerSettingsPage.Monitor -> MonitorSettingsPage(
+                    appMode = appMode,
+                    isMonitoring = isMonitoring,
+                    monitorEnabled = monitorEnabled,
+                    outputDevices = outputDevices,
+                    onStartMonitor = onStartMonitor,
+                    onStopMonitor = onStopMonitor,
+                    onSetMonitorOutput = onSetMonitorOutput,
                 )
                 MixerSettingsPage.InputMatrix -> RoutingMatrix(
                     title = "Tap a cell to route each strip to a USB input.",
@@ -161,6 +189,7 @@ fun MixerSettingsSheet(
 
 private fun pageTitle(page: MixerSettingsPage): String = when (page) {
     MixerSettingsPage.Menu -> "Mixer settings"
+    MixerSettingsPage.Monitor -> "Monitor output"
     MixerSettingsPage.InputMatrix -> "Input matrix"
     MixerSettingsPage.OutputMatrix -> "Output matrix"
     MixerSettingsPage.HiddenSoundcheck -> "Hidden channels (soundcheck)"
@@ -169,12 +198,14 @@ private fun pageTitle(page: MixerSettingsPage): String = when (page) {
 
 @Composable
 private fun SettingsMenu(
+    onMonitor: () -> Unit,
     onInputMatrix: () -> Unit,
     onOutputMatrix: () -> Unit,
     onHiddenSoundcheck: () -> Unit,
     onHiddenRecord: () -> Unit,
 ) {
     Column(Modifier.padding(top = 8.dp)) {
+        SettingsMenuItem("Monitor output", onMonitor)
         SettingsMenuItem("Input matrix", onInputMatrix)
         SettingsMenuItem("Output matrix", onOutputMatrix)
         SettingsMenuItem("Hidden channels (soundcheck)", onHiddenSoundcheck)
@@ -199,6 +230,73 @@ private fun SettingsMenuItem(label: String, onClick: () -> Unit) {
 }
 
 @Composable
+private fun MonitorSettingsPage(
+    appMode: AppMode?,
+    isMonitoring: Boolean,
+    monitorEnabled: Boolean,
+    outputDevices: List<LabeledAudioDevice>,
+    onStartMonitor: () -> Unit,
+    onStopMonitor: () -> Unit,
+    onSetMonitorOutput: (Int) -> Unit,
+) {
+    var deviceMenuOpen by remember { mutableStateOf(false) }
+    val recordMode = appMode == AppMode.MULTITRACK_RECORD
+
+    Text(
+        "Route a local output device for low-latency cue monitoring while recording.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(vertical = 12.dp),
+    )
+    if (!recordMode) {
+        Text(
+            "Monitoring is only available in recording mode.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+    OutlinedButton(
+        onClick = { if (isMonitoring) onStopMonitor() else onStartMonitor() },
+        enabled = monitorEnabled,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Icon(
+            Icons.Default.Headphones,
+            contentDescription = null,
+            tint = if (isMonitoring) MonitorBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            if (isMonitoring) "Stop monitoring" else "Start monitoring",
+            modifier = Modifier.padding(start = 8.dp),
+        )
+    }
+    Box(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+        OutlinedButton(
+            onClick = { deviceMenuOpen = true },
+            enabled = outputDevices.isNotEmpty(),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Monitor output device", modifier = Modifier.weight(1f))
+                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+            }
+        }
+        DropdownMenu(expanded = deviceMenuOpen, onDismissRequest = { deviceMenuOpen = false }) {
+            outputDevices.forEach { labeled ->
+                DropdownMenuItem(
+                    text = { Text(labeled.label, maxLines = 2) },
+                    onClick = {
+                        deviceMenuOpen = false
+                        onSetMonitorOutput(labeled.device.id)
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun RoutingMatrix(
     title: String,
     logicalCount: Int,
@@ -217,66 +315,79 @@ private fun RoutingMatrix(
     )
 
     Row(Modifier.fillMaxWidth()) {
-        Box(Modifier.width(LabelColumnWidth).height(MatrixCellSize)) {
-            Text(
-                "Strip",
-                modifier = Modifier.align(Alignment.CenterStart),
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-        Row(
+        Column(
             Modifier
-                .weight(1f)
-                .horizontalScroll(usbScroll),
+                .width(LabelColumnWidth)
+                .padding(end = MatrixGap),
         ) {
-            repeat(usbCount) { usb ->
-                Box(
-                    Modifier
-                        .size(MatrixCellSize)
-                        .padding(2.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
+            Box(
+                Modifier.height(MatrixCellSize),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Column {
                     Text(
-                        "USB ${usb + 1}",
+                        "Channel",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "USB →",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(MatrixGap)) {
+                repeat(logicalCount) { logical ->
+                    val strip = stripByIndex[logical] ?: ChannelStripState(index = logical)
+                    ChannelStripLabel(
+                        strip = strip,
+                        modifier = Modifier.height(MatrixCellSize),
                     )
                 }
             }
         }
-    }
-
-    HorizontalDivider(Modifier.padding(vertical = 4.dp))
-
-    repeat(logicalCount) { logical ->
-        val strip = stripByIndex[logical] ?: ChannelStripState(index = logical)
-        val mappedUsb = selectedUsb(logical)
-        Row(
+        Column(
             Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .weight(1f)
+                .horizontalScroll(usbScroll),
         ) {
-            ChannelStripLabel(
-                strip = strip,
-                modifier = Modifier.width(LabelColumnWidth),
-            )
-            Row(
-                Modifier
-                    .weight(1f)
-                    .horizontalScroll(usbScroll),
-            ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(MatrixGap)) {
                 repeat(usbCount) { usb ->
-                    MatrixCell(
-                        selected = mappedUsb == usb,
-                        onClick = { onSelect(logical, usb) },
-                    )
+                    Box(
+                        Modifier.size(MatrixCellSize),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            formatUsbColumn(usb + 1),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            }
+            Column(
+                modifier = Modifier.padding(top = MatrixGap),
+                verticalArrangement = Arrangement.spacedBy(MatrixGap),
+            ) {
+                repeat(logicalCount) { logical ->
+                    val mappedUsb = selectedUsb(logical)
+                    Row(horizontalArrangement = Arrangement.spacedBy(MatrixGap)) {
+                        repeat(usbCount) { usb ->
+                            MatrixCell(
+                                selected = mappedUsb == usb,
+                                onClick = { onSelect(logical, usb) },
+                            )
+                        }
+                    }
                 }
             }
         }
     }
 }
+
+private fun formatUsbColumn(index: Int): String =
+    if (index < 10) "0$index" else index.toString()
 
 @Composable
 private fun MatrixCell(
@@ -291,7 +402,6 @@ private fun MatrixCell(
     }
     Box(
         modifier = Modifier
-            .padding(2.dp)
             .size(MatrixCellSize)
             .clip(shape)
             .background(bg)
@@ -319,35 +429,40 @@ private fun ChannelStripLabel(
     val barColor = Color(strip.colorArgb)
 
     Row(
-        modifier = modifier.padding(end = 6.dp),
+        modifier = modifier.widthIn(max = LabelColumnWidth),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Box(
             Modifier
                 .width(3.dp)
-                .height(32.dp)
+                .height(28.dp)
                 .clip(RoundedCornerShape(2.dp))
                 .background(barColor),
         )
         if (iconEmoji != null) {
-            Text(iconEmoji, fontSize = 16.sp)
+            Text(iconEmoji, fontSize = 14.sp)
         }
         Column {
             Text(
-                "${strip.index + 1}",
+                formatChannelLabel(strip.index),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
             )
             Text(
                 name,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
 }
+
+private fun formatChannelLabel(index: Int): String =
+    "Channel %02d".format(index + 1)
 
 @Composable
 private fun HiddenChannelsPage(

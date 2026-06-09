@@ -77,7 +77,6 @@ import org.openmultitrack.app.ui.settings.SettingsSheet
 import org.openmultitrack.app.ui.settings.SettingsUiState
 import org.openmultitrack.app.audio.LiveWaveformSnapshot
 import org.openmultitrack.app.service.MixerSessionUiState
-import org.openmultitrack.app.util.AppLogBuffer
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 import org.openmultitrack.domain.channel.ChannelStripState
 import org.openmultitrack.domain.mixer.MixerProfile
@@ -190,6 +189,7 @@ fun DawMainScreen(
                 DawTopBar(
                     activeMixerName = activeProfile?.displayName,
                     appMode = session?.appMode,
+                    session = session,
                     showMixerCluster = state.mixers.isNotEmpty(),
                     isRemoteClient = isRemoteClient,
                     remoteHostLabel = state.remoteHostName ?: state.remoteConnectedHost,
@@ -206,27 +206,16 @@ fun DawMainScreen(
                             onSetAppMode(id, next)
                         }
                     },
+                    onStartRecord = { activeId?.let(onStartRecord) },
+                    onStopRecord = { activeId?.let(onStopRecord) },
+                    onToggleSoundcheckPlayback = { activeId?.let(onToggleSoundcheckPlayback) },
+                    onToggleSoundcheckLoop = { activeId?.let(onToggleSoundcheckLoop) },
+                    onSetSoundcheckLoopIn = { activeId?.let(onSetSoundcheckLoopIn) },
+                    onSetSoundcheckLoopOut = { activeId?.let(onSetSoundcheckLoopOut) },
                     onOpenSettings = onOpenSettings,
                     onOpenRemoteControl = onOpenRemoteControl,
                     onOpenMenu = { menuOpen = true },
                 )
-                if (state.mixers.isNotEmpty() && session != null && activeId != null) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-                    TransportToolbar(
-                        session = session,
-                        outputDevices = state.outputDevices,
-                        onSetMonitorOutput = { onSetMonitorOutput(activeId, it) },
-                        onStartMonitor = { onStartMonitor(activeId) },
-                        onStopMonitor = { onStopMonitor(activeId) },
-                        onStartRecord = { onStartRecord(activeId) },
-                        onStopRecord = { onStopRecord(activeId) },
-                        onToggleSoundcheckPlayback = { onToggleSoundcheckPlayback(activeId) },
-                        onStopSoundcheck = { onStopSoundcheck(activeId) },
-                        onToggleSoundcheckLoop = { onToggleSoundcheckLoop(activeId) },
-                        onSetSoundcheckLoopIn = { onSetSoundcheckLoopIn(activeId) },
-                        onSetSoundcheckLoopOut = { onSetSoundcheckLoopOut(activeId) },
-                    )
-                }
             }
         },
     ) { padding ->
@@ -412,6 +401,13 @@ fun DawMainScreen(
                 usbChannelCount = sessionForSettings?.captureChannelCount ?: 0,
                 strips = sessionForSettings?.channelStrips ?: profile.channelStrips,
                 config = mixerRoutingById[settingsMixerId] ?: MixerRoutingConfig(),
+                appMode = sessionForSettings?.appMode,
+                isMonitoring = sessionForSettings?.isMonitoring == true,
+                monitorEnabled = sessionForSettings?.probe != null,
+                outputDevices = state.outputDevices,
+                onStartMonitor = { onStartMonitor(settingsMixerId) },
+                onStopMonitor = { onStopMonitor(settingsMixerId) },
+                onSetMonitorOutput = { onSetMonitorOutput(settingsMixerId, it) },
                 onDismiss = onCloseMixerSettings,
                 onSave = { onSaveMixerRouting(settingsMixerId, it) },
             )
@@ -441,363 +437,7 @@ fun DawMainScreen(
     }
 
     if (state.showLogViewer) {
-        ModalBottomSheet(onDismissRequest = onCloseLog) {
-            Column(Modifier.padding(16.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Debug log", style = MaterialTheme.typography.titleLarge)
-                    TextButton(onClick = { AppLogBuffer.clear() }) { Text("Clear") }
-                }
-                Text(
-                    AppLogBuffer.allText().ifBlank { "(empty)" },
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.height(320.dp),
-                )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun TransportToolbar(
-    session: MixerSessionUiState,
-    outputDevices: List<LabeledAudioDevice>,
-    onSetMonitorOutput: (Int) -> Unit,
-    onStartMonitor: () -> Unit,
-    onStopMonitor: () -> Unit,
-    onStartRecord: () -> Unit,
-    onStopRecord: () -> Unit,
-    onToggleSoundcheckPlayback: () -> Unit,
-    onStopSoundcheck: () -> Unit,
-    onToggleSoundcheckLoop: () -> Unit,
-    onSetSoundcheckLoopIn: () -> Unit,
-    onSetSoundcheckLoopOut: () -> Unit,
-) {
-    var monitorDeviceMenuOpen by remember { mutableStateOf(false) }
-
-    BoxWithConstraints {
-        val showLabels = maxWidth >= 640.dp
-        Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Spacer(Modifier.weight(1f))
-
-                MonitorControl(
-                    session = session,
-                    outputDevices = outputDevices,
-                    showLabels = showLabels,
-                    monitorDeviceMenuOpen = monitorDeviceMenuOpen,
-                    onMonitorDeviceMenuOpen = { monitorDeviceMenuOpen = it },
-                    onStartMonitor = onStartMonitor,
-                    onStopMonitor = onStopMonitor,
-                    onSetMonitorOutput = onSetMonitorOutput,
-                )
-
-                if (session.appMode == AppMode.VIRTUAL_SOUNDCHECK) {
-                    SoundcheckLoopInOutControls(
-                        session = session,
-                        showLabels = showLabels,
-                        onLoopIn = onSetSoundcheckLoopIn,
-                        onLoopOut = onSetSoundcheckLoopOut,
-                    )
-                    SoundcheckLoopControl(
-                        session = session,
-                        showLabels = showLabels,
-                        onToggleLoop = onToggleSoundcheckLoop,
-                    )
-                    SoundcheckPlayControl(
-                        session = session,
-                        showLabels = showLabels,
-                        onTogglePlay = onToggleSoundcheckPlayback,
-                        onStop = onStopSoundcheck,
-                    )
-                } else {
-                    RecordControl(
-                        session = session,
-                        showLabels = showLabels,
-                        onStartRecord = onStartRecord,
-                        onStopRecord = onStopRecord,
-                    )
-                }
-
-                if (session.transportState == TransportState.RECORDING_DEGRADED) {
-                    TransportWarningChip()
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TransportWarningChip() {
-    Surface(
-        shape = ToolbarShape,
-        color = MaterialTheme.colorScheme.errorContainer,
-        border = BorderStroke(1.dp, RecordRed.copy(alpha = 0.35f)),
-    ) {
-        Text(
-            "USB",
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onErrorContainer,
-        )
-    }
-}
-
-@Composable
-private fun ToolbarActionButton(
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-    active: Boolean = false,
-    activeColor: Color = MaterialTheme.colorScheme.primary,
-    modifier: Modifier = Modifier,
-    content: @Composable RowScope.() -> Unit,
-) {
-    val background = when {
-        active -> activeColor
-        else -> MaterialTheme.colorScheme.surfaceContainerHigh
-    }
-    val foreground = when {
-        active -> Color.White
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Surface(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier
-            .height(ToolbarControlHeight)
-            .widthIn(min = ToolbarControlHeight),
-        shape = ToolbarShape,
-        color = background,
-        border = BorderStroke(
-            1.dp,
-            if (active) activeColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-        ),
-        contentColor = foreground,
-    ) {
-        Row(
-            Modifier.padding(horizontal = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            content = content,
-        )
-    }
-}
-
-@Composable
-private fun MonitorControl(
-    session: MixerSessionUiState,
-    outputDevices: List<LabeledAudioDevice>,
-    showLabels: Boolean,
-    monitorDeviceMenuOpen: Boolean,
-    onMonitorDeviceMenuOpen: (Boolean) -> Unit,
-    onStartMonitor: () -> Unit,
-    onStopMonitor: () -> Unit,
-    onSetMonitorOutput: (Int) -> Unit,
-) {
-    val enabled = session.probe != null && session.appMode == AppMode.MULTITRACK_RECORD
-    val borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-    Row(
-        modifier = Modifier
-            .height(ToolbarControlHeight)
-            .clip(ToolbarShape)
-            .border(BorderStroke(1.dp, borderColor), ToolbarShape),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Row(
-            modifier = Modifier
-                .clickable(enabled = enabled) {
-                    if (session.isMonitoring) onStopMonitor() else onStartMonitor()
-                }
-                .padding(horizontal = if (showLabels) 10.dp else 8.dp)
-                .height(ToolbarControlHeight),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.Default.Headphones,
-                contentDescription = "Monitor",
-                modifier = Modifier.size(18.dp),
-                tint = if (session.isMonitoring) MonitorBlue else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (showLabels) {
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    if (session.isMonitoring) "Monitoring" else "Monitor",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (session.isMonitoring) MonitorBlue else MaterialTheme.colorScheme.onSurface,
-                )
-            }
-        }
-        VerticalDivider(
-            modifier = Modifier.height(22.dp),
-            color = borderColor,
-        )
-        Box {
-            Row(
-                modifier = Modifier
-                    .clickable(enabled = outputDevices.isNotEmpty()) {
-                        onMonitorDeviceMenuOpen(true)
-                    }
-                    .padding(horizontal = 8.dp)
-                    .height(ToolbarControlHeight),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    Icons.Default.ArrowDropDown,
-                    contentDescription = "Monitor output",
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            DropdownMenu(expanded = monitorDeviceMenuOpen, onDismissRequest = { onMonitorDeviceMenuOpen(false) }) {
-                outputDevices.forEach { labeled ->
-                    DropdownMenuItem(
-                        text = { Text(labeled.label, maxLines = 2, style = MaterialTheme.typography.bodySmall) },
-                        onClick = {
-                            onMonitorDeviceMenuOpen(false)
-                            onSetMonitorOutput(labeled.device.id)
-                        },
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SoundcheckLoopInOutControls(
-    session: MixerSessionUiState,
-    showLabels: Boolean,
-    onLoopIn: () -> Unit,
-    onLoopOut: () -> Unit,
-) {
-    val enabled = session.selectedSoundcheckDir != null
-    ToolbarActionButton(onClick = onLoopIn, enabled = enabled) {
-        Text("In", style = MaterialTheme.typography.labelLarge)
-        if (showLabels) {
-            Spacer(Modifier.width(4.dp))
-            Text("Loop in", style = MaterialTheme.typography.labelSmall)
-        }
-    }
-    Spacer(Modifier.width(4.dp))
-    ToolbarActionButton(onClick = onLoopOut, enabled = enabled) {
-        Text("Out", style = MaterialTheme.typography.labelLarge)
-        if (showLabels) {
-            Spacer(Modifier.width(4.dp))
-            Text("Loop out", style = MaterialTheme.typography.labelSmall)
-        }
-    }
-}
-
-@Composable
-private fun SoundcheckLoopControl(
-    session: MixerSessionUiState,
-    showLabels: Boolean,
-    onToggleLoop: () -> Unit,
-) {
-    val hasRegion = session.soundcheckLoopStartSec != null && session.soundcheckLoopEndSec != null
-    val active = session.soundcheckLoopSelecting || (hasRegion && session.soundcheckLoopEnabled)
-    ToolbarActionButton(
-        onClick = onToggleLoop,
-        active = active,
-        activeColor = if (session.soundcheckLoopEnabled) SoloAmber else MonitorBlue,
-        enabled = session.selectedSoundcheckDir != null,
-    ) {
-        Icon(Icons.Default.Repeat, contentDescription = "Loop", modifier = Modifier.size(18.dp))
-        if (showLabels) {
-            Spacer(Modifier.width(6.dp))
-            Text(
-                when {
-                    session.soundcheckLoopSelecting -> "Tap start/end"
-                    hasRegion && session.soundcheckLoopEnabled -> "Loop on"
-                    hasRegion -> "Loop off"
-                    else -> "Loop"
-                },
-                style = MaterialTheme.typography.labelLarge,
-            )
-        }
-    }
-}
-
-@Composable
-private fun SoundcheckPlayControl(
-    session: MixerSessionUiState,
-    showLabels: Boolean,
-    onTogglePlay: () -> Unit,
-    onStop: () -> Unit,
-) {
-    val enabled = session.selectedSoundcheckDir != null && session.probe != null
-    if (session.isPlaying) {
-        ToolbarActionButton(
-            onClick = onStop,
-            active = true,
-            activeColor = MonitorBlue,
-        ) {
-            Icon(Icons.Default.Stop, contentDescription = "Stop playback", modifier = Modifier.size(18.dp))
-            if (showLabels) {
-                Spacer(Modifier.width(6.dp))
-                Text("Stop", style = MaterialTheme.typography.labelLarge)
-            }
-        }
-    } else {
-        ToolbarChip(
-            onClick = onTogglePlay,
-            enabled = enabled,
-        ) {
-            Icon(
-                Icons.Default.PlayArrow,
-                contentDescription = "Play to USB returns",
-                modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            if (showLabels) {
-                Spacer(Modifier.width(6.dp))
-                Text("Play", style = MaterialTheme.typography.labelLarge)
-            }
-        }
-    }
-}
-
-@Composable
-private fun RecordControl(
-    session: MixerSessionUiState,
-    showLabels: Boolean,
-    onStartRecord: () -> Unit,
-    onStopRecord: () -> Unit,
-) {
-    val enabled = session.probe != null && session.appMode == AppMode.MULTITRACK_RECORD
-    if (session.isRecording) {
-        ToolbarActionButton(
-            onClick = onStopRecord,
-            active = true,
-            activeColor = RecordRed,
-        ) {
-            Icon(Icons.Default.Stop, contentDescription = "Stop recording", modifier = Modifier.size(18.dp))
-            if (showLabels) {
-                Spacer(Modifier.width(6.dp))
-                Text("Stop", style = MaterialTheme.typography.labelLarge)
-            }
-        }
-    } else {
-        ToolbarChip(
-            onClick = onStartRecord,
-            enabled = enabled,
-        ) {
-            Icon(
-                Icons.Filled.FiberManualRecord,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = RecordRed,
-            )
-            if (showLabels) {
-                Spacer(Modifier.width(6.dp))
-                Text("Record", style = MaterialTheme.typography.labelLarge)
-            }
-        }
+        LogViewerSheet(onDismiss = onCloseLog)
     }
 }
 

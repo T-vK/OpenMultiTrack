@@ -1,9 +1,8 @@
 package org.openmultitrack.app.ui.daw
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -17,10 +16,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -30,19 +37,24 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import org.openmultitrack.app.R
+import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.domain.remote.RemoteConnectionState
 import org.openmultitrack.domain.session.AppMode
 
 private val ToolbarShape = RoundedCornerShape(8.dp)
 private val ToolbarControlHeight = 40.dp
 private val MixerNameMaxWidth = 160.dp
+private val RecordRed = Color(0xFFE53935)
+private val LoopAmber = Color(0xFFFFB300)
 
 @Composable
 internal fun ToolbarChip(
@@ -77,9 +89,13 @@ internal fun ToolbarChip(
 private fun MixerControlCluster(
     activeMixerName: String?,
     appMode: AppMode?,
+    session: MixerSessionUiState?,
     onOpenMixerPicker: () -> Unit,
     onOpenMixerSettings: () -> Unit,
     onToggleAppMode: () -> Unit,
+    onStartRecord: () -> Unit,
+    onStopRecord: () -> Unit,
+    onToggleSoundcheckPlayback: () -> Unit,
 ) {
     val border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
     Surface(
@@ -113,21 +129,15 @@ private fun MixerControlCluster(
                     )
                 }
             }
-            VerticalDivider(
-                modifier = Modifier.height(ToolbarControlHeight),
-                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
-            )
+            clusterDivider()
             IconButton(
                 onClick = onOpenMixerSettings,
                 modifier = Modifier.size(ToolbarControlHeight),
             ) {
-                Icon(Icons.Default.Settings, contentDescription = "Mixer settings")
+                Icon(Icons.Default.Tune, contentDescription = "Mixer settings")
             }
             if (appMode != null) {
-                VerticalDivider(
-                    modifier = Modifier.height(ToolbarControlHeight),
-                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
-                )
+                clusterDivider()
                 val recording = appMode == AppMode.MULTITRACK_RECORD
                 val modeLabel = if (recording) "Recording Mode" else "Virtual Soundcheck"
                 Surface(
@@ -152,7 +162,148 @@ private fun MixerControlCluster(
                         )
                     }
                 }
+                clusterDivider()
+                when (appMode) {
+                    AppMode.MULTITRACK_RECORD -> RecordClusterButton(
+                        session = session,
+                        onStartRecord = onStartRecord,
+                        onStopRecord = onStopRecord,
+                    )
+                    AppMode.VIRTUAL_SOUNDCHECK -> PlaybackClusterButton(
+                        session = session,
+                        onTogglePlayback = onToggleSoundcheckPlayback,
+                    )
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun clusterDivider() {
+    VerticalDivider(
+        modifier = Modifier.height(ToolbarControlHeight),
+        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
+    )
+}
+
+@Composable
+private fun RecordClusterButton(
+    session: MixerSessionUiState?,
+    onStartRecord: () -> Unit,
+    onStopRecord: () -> Unit,
+) {
+    val isRecording = session?.isRecording == true
+    val enabled = session?.probe != null
+    Surface(
+        onClick = { if (isRecording) onStopRecord() else onStartRecord() },
+        enabled = enabled || isRecording,
+        color = if (isRecording) RecordRed else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+        modifier = Modifier
+            .height(ToolbarControlHeight)
+            .widthIn(min = ToolbarControlHeight),
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 10.dp)) {
+            Icon(
+                imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
+                contentDescription = if (isRecording) "Stop recording" else "Record",
+                modifier = Modifier.size(20.dp),
+                tint = if (isRecording) Color.White else RecordRed,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PlaybackClusterButton(
+    session: MixerSessionUiState?,
+    onTogglePlayback: () -> Unit,
+) {
+    val isPlaying = session?.isPlaying == true
+    val enabled = session?.selectedSoundcheckDir != null && session.probe != null
+    Surface(
+        onClick = onTogglePlayback,
+        enabled = enabled,
+        color = if (isPlaying) {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+        } else {
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+        },
+        modifier = Modifier
+            .height(ToolbarControlHeight)
+            .widthIn(min = ToolbarControlHeight),
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 10.dp)) {
+            Icon(
+                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                contentDescription = if (isPlaying) "Pause playback" else "Play",
+                modifier = Modifier.size(22.dp),
+                tint = if (isPlaying) Color.White else MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LoopMenuButton(
+    session: MixerSessionUiState?,
+    onSetLoopIn: () -> Unit,
+    onSetLoopOut: () -> Unit,
+    onToggleLoop: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val hasSession = session?.selectedSoundcheckDir != null
+    val hasRegion = session?.soundcheckLoopStartSec != null && session.soundcheckLoopEndSec != null
+
+    Box {
+        IconButton(
+            onClick = { expanded = true },
+            enabled = hasSession,
+        ) {
+            Icon(
+                Icons.Default.Repeat,
+                contentDescription = "Loop",
+                tint = when {
+                    session?.soundcheckLoopEnabled == true -> LoopAmber
+                    session?.soundcheckLoopSelecting == true -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurface
+                },
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("Set loop in point") },
+                onClick = {
+                    expanded = false
+                    onSetLoopIn()
+                },
+                enabled = hasSession,
+            )
+            DropdownMenuItem(
+                text = { Text("Set loop out point") },
+                onClick = {
+                    expanded = false
+                    onSetLoopOut()
+                },
+                enabled = hasSession,
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        when {
+                            session?.soundcheckLoopSelecting == true -> "Cancel loop selection"
+                            session?.soundcheckLoopEnabled == true -> "Disable loop"
+                            hasRegion -> "Enable loop"
+                            else -> "Start loop region selection"
+                        },
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onToggleLoop()
+                },
+                enabled = hasSession,
+            )
         }
     }
 }
@@ -162,6 +313,7 @@ private fun MixerControlCluster(
 fun DawTopBar(
     activeMixerName: String?,
     appMode: AppMode?,
+    session: MixerSessionUiState?,
     showMixerCluster: Boolean,
     isRemoteClient: Boolean,
     remoteHostLabel: String?,
@@ -169,6 +321,12 @@ fun DawTopBar(
     onOpenMixerPicker: () -> Unit,
     onOpenMixerSettings: () -> Unit,
     onToggleAppMode: () -> Unit,
+    onStartRecord: () -> Unit,
+    onStopRecord: () -> Unit,
+    onToggleSoundcheckPlayback: () -> Unit,
+    onToggleSoundcheckLoop: () -> Unit,
+    onSetSoundcheckLoopIn: () -> Unit,
+    onSetSoundcheckLoopOut: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenRemoteControl: () -> Unit,
     onOpenMenu: () -> Unit = {},
@@ -189,18 +347,8 @@ fun DawTopBar(
         }
         CenterAlignedTopAppBar(
             navigationIcon = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onOpenMenu) {
-                        Icon(Icons.Default.Menu, contentDescription = "Menu")
-                    }
-                    Image(
-                        painter = painterResource(R.drawable.ic_app_logo),
-                        contentDescription = "OpenMultiTrack",
-                        modifier = Modifier
-                            .padding(end = 4.dp)
-                            .size(40.dp)
-                            .clip(CircleShape),
-                    )
+                IconButton(onClick = onOpenMenu) {
+                    Icon(Icons.Default.Menu, contentDescription = "Menu")
                 }
             },
             title = {
@@ -208,13 +356,25 @@ fun DawTopBar(
                     MixerControlCluster(
                         activeMixerName = activeMixerName,
                         appMode = appMode,
+                        session = session,
                         onOpenMixerPicker = onOpenMixerPicker,
                         onOpenMixerSettings = onOpenMixerSettings,
                         onToggleAppMode = onToggleAppMode,
+                        onStartRecord = onStartRecord,
+                        onStopRecord = onStopRecord,
+                        onToggleSoundcheckPlayback = onToggleSoundcheckPlayback,
                     )
                 }
             },
             actions = {
+                if (appMode == AppMode.VIRTUAL_SOUNDCHECK && showMixerCluster) {
+                    LoopMenuButton(
+                        session = session,
+                        onSetLoopIn = onSetSoundcheckLoopIn,
+                        onSetLoopOut = onSetSoundcheckLoopOut,
+                        onToggleLoop = onToggleSoundcheckLoop,
+                    )
+                }
                 val remoteActive = remoteConnectionState == RemoteConnectionState.CONNECTED
                 IconButton(onClick = onOpenRemoteControl) {
                     Icon(
@@ -228,7 +388,7 @@ fun DawTopBar(
                     )
                 }
                 IconButton(onClick = onOpenSettings) {
-                    Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    Icon(Icons.Default.Settings, contentDescription = "App settings")
                 }
             },
             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
