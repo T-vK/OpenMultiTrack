@@ -39,8 +39,8 @@ class Flow8VuMeterInstrumentedTest {
 
     @Test
     fun vuMetersWorkWithoutMonitorEnabled() = runBlocking {
-        withFlow8Controller { ctrl ->
-            ctrl.syncVuMeterCapture()
+        withFlow8Controller { ctrl, manager ->
+            manager.scheduleVuMeterSync()
             withTimeout(10_000) {
                 assertThat(ctrl.state.first { it.isVuMetering }.isVuMetering).isTrue()
             }
@@ -55,8 +55,8 @@ class Flow8VuMeterInstrumentedTest {
 
     @Test
     fun channel1ReadsHigherThanSilentChannel2() = runBlocking {
-        withFlow8Controller { ctrl ->
-            ctrl.syncVuMeterCapture()
+        withFlow8Controller { ctrl, manager ->
+            manager.scheduleVuMeterSync()
             withTimeout(10_000) {
                 assertThat(ctrl.state.first { it.isVuMetering }.isVuMetering).isTrue()
             }
@@ -102,7 +102,10 @@ class Flow8VuMeterInstrumentedTest {
     }
 
     private suspend fun withFlow8Controller(
-        block: suspend (org.openmultitrack.app.service.MixerSessionController) -> Unit,
+        block: suspend (
+            org.openmultitrack.app.service.MixerSessionController,
+            org.openmultitrack.app.service.MultiMixerSessionManager,
+        ) -> Unit,
     ) {
         val client = AudioSessionClient(usbAppProcessRule.appContext)
         val managerReady = CompletableDeferred<org.openmultitrack.app.service.MultiMixerSessionManager>()
@@ -135,8 +138,8 @@ class Flow8VuMeterInstrumentedTest {
             settings.showVuMeters = true
 
             val ctrl = manager.getOrCreate(mixerId)
-            block(ctrl)
-            ctrl.syncVuMeterCapture()
+            block(ctrl, manager)
+            manager.scheduleVuMeterSync()
             delay(300)
         } finally {
             manager.shutdownAll()

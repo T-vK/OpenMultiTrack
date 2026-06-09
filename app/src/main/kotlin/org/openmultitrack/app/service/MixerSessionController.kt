@@ -108,6 +108,7 @@ class MixerSessionController(
     private val enumerator: UsbAudioEnumerator,
     private val settings: AppSettingsStore,
     private val isActiveMixer: () -> Boolean = { true },
+    private val requestVuMeterSync: () -> Unit = {},
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val captureEngine = CaptureSessionEngine(mixerId)
@@ -659,30 +660,49 @@ class MixerSessionController(
     }
 
     fun syncVuMeterCapture() {
+        requestVuMeterSync()
+    }
+
+    suspend fun syncVuMeterCaptureLocked() {
         if (_state.value.appMode != AppMode.MULTITRACK_RECORD) {
             captureEngine.updateVuMetering(false)
             _state.update { it.copy(isVuMetering = false) }
             return
         }
-        scope.launch {
-            captureMutex.withLock {
-                val want = vuCaptureDesired()
-                captureEngine.updateVuMetering(want)
-                if (want) {
-                    val descriptor = activeDescriptor ?: return@withLock
-                    val probe = activeProbe ?: return@withLock
-                    withContext(Dispatchers.IO) {
-                        if (!captureEngine.isCaptureActive) {
-                            ensureCapture(descriptor, probe).getOrThrow()
+        captureMutex.withLock {
+            val want = vuCaptureDesired()
+            captureEngine.updateVuMetering(want)
+            if (want) {
+                val descriptor = activeDescriptor ?: return@withLock
+                val probe = activeProbe ?: return@withLock
+                withContext(Dispatchers.IO) {
+                    if (!captureEngine.isCaptureActive || !captureEngine.isNativeCaptureOwner()) {
+                        val result = ensureCapture(descriptor, probe)
+                        if (result.isFailure) {
+                            OmtLog.w(
+                                "VuMeter",
+                                "VU capture failed for $mixerId: ${result.exceptionOrNull()?.message}",
+                            )
+                            _state.update {
+                                it.copy(
+                                    isVuMetering = false,
+                                    warningMessage = result.exceptionOrNull()?.message,
+                                )
+                            }
+                            return@withContext
                         }
                     }
-                    _state.update { it.copy(isVuMetering = true) }
-                    startCaptureUiUpdates()
-                } else {
-                    _state.update { it.copy(isVuMetering = false) }
-                    stopWaveformUpdatesIfIdle()
-                    releaseCaptureIfIdleLocked()
                 }
+                if (!captureEngine.isCaptureActive) {
+                    _state.update { it.copy(isVuMetering = false) }
+                    return@withLock
+                }
+                _state.update { it.copy(isVuMetering = true, warningMessage = null) }
+                startCaptureUiUpdates()
+            } else {
+                _state.update { it.copy(isVuMetering = false) }
+                stopWaveformUpdatesIfIdle()
+                releaseCaptureIfIdleLocked()
             }
         }
     }

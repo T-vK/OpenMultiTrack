@@ -567,7 +567,7 @@ class MainViewModel(
         settings.showVuMeters = show
         _uiState.update { it.copy(showVuMeters = show) }
         sessionClient.withManager { mgr ->
-            mgr.mixerIds().forEach { mgr.getOrCreate(it).syncVuMeterCapture() }
+            mgr.scheduleVuMeterSync()
         }
     }
 

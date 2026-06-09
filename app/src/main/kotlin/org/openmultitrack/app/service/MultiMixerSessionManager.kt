@@ -1,6 +1,12 @@
 package org.openmultitrack.app.service
 
 import android.content.Context
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,6 +25,8 @@ class MultiMixerSessionManager(
     private val controllers = ConcurrentHashMap<String, MixerSessionController>()
     private val _activeMixerId = MutableStateFlow<String?>(null)
     val activeMixerId: StateFlow<String?> = _activeMixerId.asStateFlow()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val vuSyncMutex = Mutex()
 
     fun getOrCreate(mixerId: String): MixerSessionController =
         controllers.getOrPut(mixerId) {
@@ -28,6 +36,7 @@ class MultiMixerSessionManager(
                 enumerator = enumerator,
                 settings = settings,
                 isActiveMixer = { _activeMixerId.value == mixerId },
+                requestVuMeterSync = { scheduleVuMeterSync() },
             )
         }
 
@@ -38,7 +47,23 @@ class MultiMixerSessionManager(
 
     fun setActiveMixer(id: String) {
         _activeMixerId.value = id
-        controllers.values.forEach { it.syncVuMeterCapture() }
+        scheduleVuMeterSync()
+    }
+
+    /** Serializes VU capture handoff so inactive mixers release UAC2 before the active mixer acquires it. */
+    fun scheduleVuMeterSync() {
+        scope.launch {
+            vuSyncMutex.withLock {
+                syncAllVuMeterCaptureOrdered()
+            }
+        }
+    }
+
+    private suspend fun syncAllVuMeterCaptureOrdered() {
+        val activeId = _activeMixerId.value
+        controllers.values
+            .sortedBy { it.mixerId == activeId }
+            .forEach { it.syncVuMeterCaptureLocked() }
     }
 
     fun unregisterMixer(id: String) {
@@ -46,6 +71,7 @@ class MultiMixerSessionManager(
         if (_activeMixerId.value == id) {
             _activeMixerId.value = controllers.keys.firstOrNull()
         }
+        scheduleVuMeterSync()
     }
 
     fun mixerIds(): List<String> = controllers.keys.toList()
