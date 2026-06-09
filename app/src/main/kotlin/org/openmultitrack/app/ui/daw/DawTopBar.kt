@@ -94,17 +94,9 @@ internal fun ToolbarChip(
 private fun MixerControlCluster(
     activeMixerName: String?,
     appMode: AppMode?,
-    session: MixerSessionUiState?,
     onOpenMixerPicker: () -> Unit,
     onOpenMixerSettings: () -> Unit,
     onSetAppMode: (AppMode) -> Unit,
-    onStartRecord: () -> Unit,
-    onStopRecord: () -> Unit,
-    onToggleSoundcheckPlayback: () -> Unit,
-    onStopSoundcheck: () -> Unit,
-    onToggleSoundcheckLoop: () -> Unit,
-    onSetSoundcheckLoopIn: () -> Unit,
-    onSetSoundcheckLoopOut: () -> Unit,
 ) {
     val border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
     Surface(
@@ -154,24 +146,37 @@ private fun MixerControlCluster(
                     appMode = appMode,
                     onSetAppMode = onSetAppMode,
                 )
-                clusterDivider()
-                when {
-                    appMode == AppMode.MULTITRACK_RECORD -> RecordTransportCluster(
-                        session = session,
-                        onStartRecord = onStartRecord,
-                        onStopRecord = onStopRecord,
-                    )
-                    appMode.isPlaybackMode -> PlaybackTransportCluster(
-                        session = session,
-                        onTogglePlayback = onToggleSoundcheckPlayback,
-                        onStopPlayback = onStopSoundcheck,
-                        onToggleLoop = onToggleSoundcheckLoop,
-                        onSetLoopIn = onSetSoundcheckLoopIn,
-                        onSetLoopOut = onSetSoundcheckLoopOut,
-                    )
-                }
             }
         }
+    }
+}
+
+@Composable
+private fun TransportControlCluster(
+    appMode: AppMode,
+    session: MixerSessionUiState?,
+    onStartRecord: () -> Unit,
+    onStopRecord: () -> Unit,
+    onToggleSoundcheckPlayback: () -> Unit,
+    onStopSoundcheck: () -> Unit,
+    onToggleSoundcheckLoop: () -> Unit,
+    onSetSoundcheckLoopIn: () -> Unit,
+    onSetSoundcheckLoopOut: () -> Unit,
+) {
+    when {
+        appMode == AppMode.MULTITRACK_RECORD -> RecordTransportCluster(
+            session = session,
+            onStartRecord = onStartRecord,
+            onStopRecord = onStopRecord,
+        )
+        appMode.isPlaybackMode -> PlaybackTransportCluster(
+            session = session,
+            onTogglePlayback = onToggleSoundcheckPlayback,
+            onStopPlayback = onStopSoundcheck,
+            onToggleLoop = onToggleSoundcheckLoop,
+            onSetLoopIn = onSetSoundcheckLoopIn,
+            onSetLoopOut = onSetSoundcheckLoopOut,
+        )
     }
 }
 
@@ -181,8 +186,8 @@ private fun TransportButtonCluster(
 ) {
     Surface(
         shape = ToolbarShape,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.45f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
         modifier = Modifier.height(ToolbarControlHeight),
     ) {
         Row(
@@ -460,21 +465,31 @@ fun DawTopBar(
             },
             title = {
                 if (showMixerCluster) {
-                    MixerControlCluster(
-                        activeMixerName = activeMixerName,
-                        appMode = appMode,
-                        session = session,
-                        onOpenMixerPicker = onOpenMixerPicker,
-                        onOpenMixerSettings = onOpenMixerSettings,
-                        onSetAppMode = onSetAppMode,
-                        onStartRecord = onStartRecord,
-                        onStopRecord = onStopRecord,
-                        onToggleSoundcheckPlayback = onToggleSoundcheckPlayback,
-                        onStopSoundcheck = onStopSoundcheck,
-                        onToggleSoundcheckLoop = onToggleSoundcheckLoop,
-                        onSetSoundcheckLoopIn = onSetSoundcheckLoopIn,
-                        onSetSoundcheckLoopOut = onSetSoundcheckLoopOut,
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        MixerControlCluster(
+                            activeMixerName = activeMixerName,
+                            appMode = appMode,
+                            onOpenMixerPicker = onOpenMixerPicker,
+                            onOpenMixerSettings = onOpenMixerSettings,
+                            onSetAppMode = onSetAppMode,
+                        )
+                        appMode?.let { mode ->
+                            TransportControlCluster(
+                                appMode = mode,
+                                session = session,
+                                onStartRecord = onStartRecord,
+                                onStopRecord = onStopRecord,
+                                onToggleSoundcheckPlayback = onToggleSoundcheckPlayback,
+                                onStopSoundcheck = onStopSoundcheck,
+                                onToggleSoundcheckLoop = onToggleSoundcheckLoop,
+                                onSetSoundcheckLoopIn = onSetSoundcheckLoopIn,
+                                onSetSoundcheckLoopOut = onSetSoundcheckLoopOut,
+                            )
+                        }
+                    }
                 }
             },
             actions = {
