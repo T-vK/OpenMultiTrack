@@ -128,6 +128,7 @@ data class DawUiState(
     val promptLoadSoundcheckAfterRecord: Boolean = true,
     val showRecordingStorageInfoButton: Boolean = true,
     val autoShowRecordingStorageTooltip: Boolean = true,
+    val chapterSupportEnabled: Boolean = false,
     val recordWaveformNormalized: Boolean = false,
     val playbackWaveformNormalized: Boolean = false,
     val storageRootPath: String? = null,
@@ -178,6 +179,7 @@ class MainViewModel(
             promptLoadSoundcheckAfterRecord = settings.promptLoadSoundcheckAfterRecord,
             showRecordingStorageInfoButton = settings.showRecordingStorageInfoButton,
             autoShowRecordingStorageTooltip = settings.autoShowRecordingStorageTooltip,
+            chapterSupportEnabled = settings.chapterSupportEnabled,
             recordWaveformNormalized = settings.recordWaveformNormalized,
             playbackWaveformNormalized = settings.playbackWaveformNormalized,
             storageRootPath = settings.storageRootPath,
@@ -762,6 +764,26 @@ class MainViewModel(
     fun setAutoShowRecordingStorageTooltip(enabled: Boolean) {
         settings.autoShowRecordingStorageTooltip = enabled
         _uiState.update { it.copy(autoShowRecordingStorageTooltip = enabled) }
+    }
+
+    fun setChapterSupportEnabled(enabled: Boolean) {
+        settings.chapterSupportEnabled = enabled
+        _uiState.update { it.copy(chapterSupportEnabled = enabled) }
+        val mixerId = _uiState.value.activeMixerId ?: return
+        val sessionDir = _uiState.value.sessionByMixer[mixerId]?.selectedSoundcheckDir ?: return
+        sessionClient.withManager { it.getOrCreate(mixerId).selectSoundcheckSession(sessionDir) }
+    }
+
+    fun seekToPreviousTrackmark(mixerId: String) {
+        sessionClient.withManager { it.getOrCreate(mixerId).seekToPreviousTrackmark() }
+    }
+
+    fun seekToNextTrackmark(mixerId: String) {
+        sessionClient.withManager { it.getOrCreate(mixerId).seekToNextTrackmark() }
+    }
+
+    fun addTrackmark(mixerId: String, title: String, startSec: Float) {
+        sessionClient.withManager { it.getOrCreate(mixerId).addTrackmark(title, startSec) }
     }
 
     fun renameSoundcheckSession(mixerId: String, sessionDir: String, newTitle: String) {

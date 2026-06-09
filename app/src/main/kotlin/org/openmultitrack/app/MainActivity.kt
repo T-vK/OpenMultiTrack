@@ -237,6 +237,10 @@ class MainActivity : ComponentActivity() {
                         onDisconnectRemote = viewModel::disconnectRemote,
                         onExitRemoteMode = viewModel::exitRemoteMode,
                         onPrerequisiteAction = ::handlePrerequisiteAction,
+                        onChapterSupportEnabledChange = viewModel::setChapterSupportEnabled,
+                        onPreviousTrackmark = viewModel::seekToPreviousTrackmark,
+                        onNextTrackmark = viewModel::seekToNextTrackmark,
+                        onAddTrackmark = viewModel::addTrackmark,
                     )
                 }
             }

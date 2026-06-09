@@ -1,6 +1,7 @@
 package org.openmultitrack.app.ui.daw
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -10,17 +11,24 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Article
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.FormatListBulleted
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Menu
@@ -32,7 +40,7 @@ import androidx.compose.material.icons.filled.SdCard
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -148,7 +156,7 @@ internal fun computeToolbarLayout(
 }
 
 private fun AppMode.toolbarIcon(): ImageVector = when (this) {
-    AppMode.MULTITRACK_RECORD -> Icons.Default.FiberManualRecord
+    AppMode.MULTITRACK_RECORD -> Icons.Default.Album
     AppMode.VIRTUAL_SOUNDCHECK -> Icons.Default.GraphicEq
     AppMode.SIMPLE_PLAY -> Icons.Default.PlayCircle
 }
@@ -231,58 +239,47 @@ private fun MixerControlCluster(
     onOpenMixerSettings: () -> Unit,
     onSetAppMode: (AppMode) -> Unit,
 ) {
-    val border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
-    Surface(
-        shape = ToolbarShape,
-        border = border,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        modifier = Modifier.height(ToolbarControlHeight),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxHeight(),
-            verticalAlignment = Alignment.CenterVertically,
+    TransportActionRow {
+        Surface(
+            onClick = onOpenMixerPicker,
+            color = Color.Transparent,
+            modifier = Modifier.height(ToolbarControlHeight),
         ) {
-            Surface(
-                onClick = onOpenMixerPicker,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-                modifier = Modifier.height(ToolbarControlHeight),
+            Row(
+                Modifier.padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                Row(
-                    Modifier.padding(horizontal = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text(
-                        activeMixerName ?: "Select mixer",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = layout.mixerNameMaxWidth),
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                    Icon(
-                        Icons.Default.ArrowDropDown,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-            }
-            if (layout.showMixerSettingsInBar) {
-                clusterDivider()
-                IconButton(
-                    onClick = onOpenMixerSettings,
-                    modifier = Modifier.size(ToolbarControlHeight),
-                ) {
-                    Icon(Icons.Default.Tune, contentDescription = "Mixer settings")
-                }
-            }
-            if (layout.showModeInBar && appMode != null) {
-                clusterDivider()
-                AppModeDropdown(
-                    appMode = appMode,
-                    labelDensity = layout.modeLabelDensity,
-                    onSetAppMode = onSetAppMode,
+                Text(
+                    activeMixerName ?: "Select mixer",
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = layout.mixerNameMaxWidth),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                Icon(
+                    Icons.Default.ArrowDropDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
                 )
             }
+        }
+        if (layout.showMixerSettingsInBar) {
+            clusterDivider()
+            TransportBarIconButton(
+                onClick = onOpenMixerSettings,
+                enabled = true,
+                icon = Icons.Default.Tune,
+                contentDescription = "Mixer settings",
+            )
+        }
+        if (layout.showModeInBar && appMode != null) {
+            clusterDivider()
+            AppModeDropdown(
+                appMode = appMode,
+                labelDensity = layout.modeLabelDensity,
+                onSetAppMode = onSetAppMode,
+            )
         }
     }
 }
@@ -299,18 +296,18 @@ private fun AppModeDropdown(
     Box {
         Surface(
             onClick = { expanded = true },
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+            color = Color.Transparent,
             modifier = Modifier.height(ToolbarControlHeight),
         ) {
             Row(
-                Modifier.padding(horizontal = if (label == null) 8.dp else 10.dp),
+                Modifier.padding(horizontal = if (label == null) 6.dp else 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Icon(
                     modeIcon,
                     contentDescription = appMode.displayLabel,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(20.dp),
                     tint = when (appMode) {
                         AppMode.MULTITRACK_RECORD -> RecordRed
                         AppMode.VIRTUAL_SOUNDCHECK -> MaterialTheme.colorScheme.primary
@@ -364,47 +361,44 @@ private fun AppModeDropdown(
     }
 }
 
+/** Lightweight transport row that matches plain top-bar icon buttons. */
 @Composable
-private fun TransportButtonCluster(
+private fun TransportActionRow(
     content: @Composable RowScope.() -> Unit,
 ) {
-    Surface(
-        shape = ToolbarShape,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        modifier = Modifier.height(ToolbarControlHeight),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxHeight(),
-            verticalAlignment = Alignment.CenterVertically,
-            content = content,
-        )
-    }
+    Row(
+        modifier = Modifier
+            .height(ToolbarControlHeight)
+            .clip(ToolbarShape)
+            .border(
+                BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)),
+                ToolbarShape,
+            )
+            .padding(horizontal = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
 }
 
 @Composable
-private fun TransportIconButton(
+private fun TransportBarIconButton(
     onClick: () -> Unit,
     enabled: Boolean,
     icon: ImageVector,
     contentDescription: String,
-    tint: Color,
-    background: Color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+    tint: Color = MaterialTheme.colorScheme.onSurface,
 ) {
-    Surface(
+    IconButton(
         onClick = onClick,
         enabled = enabled,
-        color = background,
         modifier = Modifier.size(ToolbarControlHeight),
     ) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = icon,
-                contentDescription = contentDescription,
-                modifier = Modifier.size(20.dp),
-                tint = tint,
-            )
-        }
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            modifier = Modifier.size(22.dp),
+            tint = tint,
+        )
     }
 }
 
@@ -418,32 +412,21 @@ private fun RecordTransportCluster(
     val isRecording = session?.isRecording == true
     val hostReady = session?.probe != null || (isRemoteClient && session?.captureChannelCount?.let { it > 0 } == true)
     val elapsed = session?.recordElapsedSec ?: 0f
-    TransportButtonCluster {
-        TransportIconButton(
+    TransportActionRow {
+        TransportBarIconButton(
             onClick = if (isRecording) onStopRecord else onStartRecord,
             enabled = hostReady,
             icon = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
             contentDescription = if (isRecording) "Stop recording" else "Record",
-            tint = if (isRecording) Color.White else RecordRed,
-            background = if (isRecording) RecordRed else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+            tint = if (isRecording) RecordRed else RecordRed,
         )
-        clusterDivider()
-        Surface(
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-            modifier = Modifier.height(ToolbarControlHeight),
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = if (isRecording) formatAdaptiveTransportTime(elapsed) else "0:00",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (isRecording) RecordRed else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                )
-            }
-        }
+        Text(
+            text = if (isRecording) formatAdaptiveTransportTime(elapsed) else "0:00",
+            style = MaterialTheme.typography.labelLarge,
+            color = if (isRecording) RecordRed else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        )
     }
 }
 
@@ -451,35 +434,64 @@ private fun RecordTransportCluster(
 private fun PlaybackTransportCluster(
     session: MixerSessionUiState?,
     isRemoteClient: Boolean,
+    chaptersEnabled: Boolean,
     onTogglePlayback: () -> Unit,
     onStopPlayback: () -> Unit,
     onToggleLoop: () -> Unit,
     onSetLoopIn: () -> Unit,
     onSetLoopOut: () -> Unit,
+    onPreviousTrackmark: () -> Unit,
+    onNextTrackmark: () -> Unit,
+    onAddTrackmark: () -> Unit,
+    onShowTrackmarkList: () -> Unit,
 ) {
     val isPlaying = session?.isPlaying == true
     val hostReady = session?.probe != null ||
         (isRemoteClient && session?.captureChannelCount?.let { it > 0 } == true)
     val hasSession = session?.selectedSoundcheckDir != null && hostReady
     val canStop = hasSession && (isPlaying || (session?.playbackPositionSec ?: 0f) > 0.05f)
-    TransportButtonCluster {
-        TransportIconButton(
+    val hasTrackmarks = chaptersEnabled && session?.trackmarks?.isNotEmpty() == true
+    TransportActionRow {
+        if (chaptersEnabled) {
+            TransportBarIconButton(
+                onClick = onPreviousTrackmark,
+                enabled = hasTrackmarks,
+                icon = Icons.Default.SkipPrevious,
+                contentDescription = "Previous trackmark",
+            )
+        }
+        TransportBarIconButton(
             onClick = onTogglePlayback,
             enabled = hasSession,
             icon = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
             contentDescription = if (isPlaying) "Pause" else "Play",
-            tint = MaterialTheme.colorScheme.onSurface,
-            background = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
         )
-        clusterDivider()
-        TransportIconButton(
+        TransportBarIconButton(
             onClick = onStopPlayback,
             enabled = canStop,
             icon = Icons.Default.Stop,
             contentDescription = "Stop playback",
-            tint = MaterialTheme.colorScheme.onSurface,
-            background = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
         )
+        if (chaptersEnabled) {
+            TransportBarIconButton(
+                onClick = onNextTrackmark,
+                enabled = hasTrackmarks,
+                icon = Icons.Default.SkipNext,
+                contentDescription = "Next trackmark",
+            )
+            TransportBarIconButton(
+                onClick = onAddTrackmark,
+                enabled = hasSession,
+                icon = Icons.Default.Bookmark,
+                contentDescription = "Add trackmark",
+            )
+            TransportBarIconButton(
+                onClick = onShowTrackmarkList,
+                enabled = hasSession,
+                icon = Icons.Default.FormatListBulleted,
+                contentDescription = "Trackmark list",
+            )
+        }
         clusterDivider()
         LoopTransportButton(
             session = session,
@@ -506,7 +518,7 @@ private fun LoopTransportButton(
         else -> MaterialTheme.colorScheme.onSurface
     }
     Box {
-        TransportIconButton(
+        TransportBarIconButton(
             onClick = { expanded = true },
             enabled = hasSession,
             icon = Icons.Default.Repeat,
@@ -592,7 +604,10 @@ private fun RecordingStorageToolbarIcon(
                 }
             },
         ) {
-            RecordingStorageGlyph(tint = MaterialTheme.colorScheme.onSurface)
+            RecordingStorageGlyph(
+                tint = MaterialTheme.colorScheme.onSurface,
+                iconSize = 22.dp,
+            )
         }
     }
 }
@@ -633,6 +648,11 @@ internal fun DawTopBar(
     showRecordingStorageInfoButton: Boolean = false,
     storageTooltipOpen: Boolean = false,
     onStorageTooltipOpenChange: (Boolean) -> Unit = {},
+    chaptersEnabled: Boolean = false,
+    onPreviousTrackmark: () -> Unit = {},
+    onNextTrackmark: () -> Unit = {},
+    onAddTrackmark: () -> Unit = {},
+    onShowTrackmarkList: () -> Unit = {},
     onOpenSessionPicker: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
     onOpenRemoteControl: () -> Unit = {},
@@ -686,7 +706,7 @@ internal fun DawTopBar(
                 )
             }
         }
-        CenterAlignedTopAppBar(
+        TopAppBar(
             navigationIcon = {
                 IconButton(onClick = onOpenMenu) {
                     Icon(Icons.Default.Menu, contentDescription = "Menu")
@@ -695,7 +715,8 @@ internal fun DawTopBar(
             title = {
                 if (showMixerCluster) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         MixerControlCluster(
@@ -706,24 +727,34 @@ internal fun DawTopBar(
                             onOpenMixerSettings = onOpenMixerSettings,
                             onSetAppMode = onSetAppMode,
                         )
-                        if (showRecordTransport) {
-                            RecordTransportCluster(
-                                session = session,
-                                isRemoteClient = isRemoteClient,
-                                onStartRecord = onStartRecord,
-                                onStopRecord = onStopRecord,
-                            )
-                        }
-                        if (showPlaybackTransport) {
-                            PlaybackTransportCluster(
-                                session = session,
-                                isRemoteClient = isRemoteClient,
-                                onTogglePlayback = onToggleSoundcheckPlayback,
-                                onStopPlayback = onStopSoundcheck,
-                                onToggleLoop = onToggleSoundcheckLoop,
-                                onSetLoopIn = onSetSoundcheckLoopIn,
-                                onSetLoopOut = onSetSoundcheckLoopOut,
-                            )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (showRecordTransport) {
+                                RecordTransportCluster(
+                                    session = session,
+                                    isRemoteClient = isRemoteClient,
+                                    onStartRecord = onStartRecord,
+                                    onStopRecord = onStopRecord,
+                                )
+                            }
+                            if (showPlaybackTransport) {
+                                PlaybackTransportCluster(
+                                    session = session,
+                                    isRemoteClient = isRemoteClient,
+                                    chaptersEnabled = chaptersEnabled,
+                                    onTogglePlayback = onToggleSoundcheckPlayback,
+                                    onStopPlayback = onStopSoundcheck,
+                                    onToggleLoop = onToggleSoundcheckLoop,
+                                    onSetLoopIn = onSetSoundcheckLoopIn,
+                                    onSetLoopOut = onSetSoundcheckLoopOut,
+                                    onPreviousTrackmark = onPreviousTrackmark,
+                                    onNextTrackmark = onNextTrackmark,
+                                    onAddTrackmark = onAddTrackmark,
+                                    onShowTrackmarkList = onShowTrackmarkList,
+                                )
+                            }
                         }
                     }
                 }
@@ -734,6 +765,13 @@ internal fun DawTopBar(
                         enabled = openSessionEnabled,
                         showHint = showOpenSessionHint,
                         onClick = onOpenSessionPicker,
+                    )
+                }
+                if (layout.showStorageInBar && showRecordingStorageInfoButton) {
+                    RecordingStorageToolbarIcon(
+                        session = session,
+                        tooltipOpen = storageTooltipOpen,
+                        onTooltipOpenChange = onStorageTooltipOpenChange,
                     )
                 }
                 if (layout.showRemoteInBar) {
@@ -749,20 +787,13 @@ internal fun DawTopBar(
                         )
                     }
                 }
-                if (layout.showStorageInBar && showRecordingStorageInfoButton) {
-                    RecordingStorageToolbarIcon(
-                        session = session,
-                        tooltipOpen = storageTooltipOpen,
-                        onTooltipOpenChange = onStorageTooltipOpenChange,
-                    )
-                }
                 if (layout.showSettingsInBar) {
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "App settings")
                     }
                 }
             },
-            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+            colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = MaterialTheme.colorScheme.surface,
             ),
         )

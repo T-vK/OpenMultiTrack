@@ -67,6 +67,7 @@ private val TimeRulerHeight = 22.dp
 @Composable
 fun SoundcheckPanel(
     session: MixerSessionUiState,
+    showTrackmarks: Boolean = false,
     routing: MixerRoutingConfig = MixerRoutingConfig(),
     normalized: Boolean,
     showWaveforms: Boolean,
@@ -125,6 +126,7 @@ fun SoundcheckPanel(
                     strips = session.channelStrips.filter {
                         !routing.isHidden(it.index, soundcheckMode = true)
                     },
+                    trackmarks = if (showTrackmarks) session.trackmarks else emptyList(),
                     routing = routing,
                     appMode = session.appMode,
                     playbackChannelCount = session.playbackChannelCount,
@@ -172,6 +174,7 @@ private fun SoundcheckEmptyState(message: String = "No completed sessions yet. R
 @Composable
 private fun SoundcheckWaveformStripList(
     strips: List<ChannelStripState>,
+    trackmarks: List<org.openmultitrack.sessionio.session.SessionTrackmark> = emptyList(),
     routing: MixerRoutingConfig,
     appMode: AppMode,
     playbackChannelCount: Int,
@@ -366,6 +369,7 @@ private fun SoundcheckWaveformStripList(
                             viewStartSec = viewStart,
                             viewWindowSec = viewWindow,
                             contentDurationSec = duration,
+                            trackmarkStartsSec = trackmarks.map { it.startSec },
                         )
                     }
                     SoundcheckPlayheadOverlay(
@@ -631,10 +635,13 @@ private fun rememberViewportPeaks(
     }
 }
 
+private val TrackmarkRulerColor = Color(0xFFFFB300)
+
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTimeRuler(
     viewStartSec: Float,
     viewWindowSec: Float,
     contentDurationSec: Float,
+    trackmarkStartsSec: List<Float> = emptyList(),
 ) {
     val w = size.width
     val h = size.height
@@ -670,6 +677,16 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTimeRuler(
             textPaint,
         )
         t += tickStep
+    }
+    trackmarkStartsSec.forEach { markSec ->
+        if (markSec < viewStartSec || markSec > viewStartSec + viewWindowSec) return@forEach
+        val x = ((markSec - viewStartSec) / viewWindowSec) * w
+        drawLine(
+            color = TrackmarkRulerColor.copy(alpha = 0.85f),
+            start = Offset(x, 0f),
+            end = Offset(x, h),
+            strokeWidth = 2f,
+        )
     }
 }
 

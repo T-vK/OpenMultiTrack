@@ -37,7 +37,9 @@ import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.isPlaybackMode
 import org.openmultitrack.domain.session.TransportState
 import org.openmultitrack.sessionio.session.SessionLibrary
+import org.openmultitrack.sessionio.session.SessionCueFile
 import org.openmultitrack.sessionio.session.SessionMetadata
+import org.openmultitrack.sessionio.session.SessionTrackmark
 import org.openmultitrack.sessionio.session.SessionPlaybackDuration
 import org.openmultitrack.sessionio.wav.SessionWaveformCache
 import org.openmultitrack.sessionio.wav.SessionWaveformExtractor
@@ -106,6 +108,7 @@ data class MixerSessionUiState(
     val soundcheckLoopEnabled: Boolean = false,
     val soundcheckLoopSelecting: Boolean = false,
     val soundcheckMeterLevels: Map<Int, Float> = emptyMap(),
+    val trackmarks: List<SessionTrackmark> = emptyList(),
 )
 
 class MixerSessionController(
@@ -449,6 +452,55 @@ class MixerSessionController(
                     player.seekToFrame(frame)
                 }
             }
+        }
+    }
+
+    fun seekToPreviousTrackmark() {
+        val marks = _state.value.trackmarks.sortedBy { it.startSec }
+        if (marks.isEmpty()) return
+        val pos = _state.value.playbackPositionSec
+        val target = marks.lastOrNull { it.startSec < pos - 0.25f }?.startSec
+            ?: marks.first().startSec
+        seekSoundcheck(target)
+    }
+
+    fun seekToNextTrackmark() {
+        val marks = _state.value.trackmarks.sortedBy { it.startSec }
+        if (marks.isEmpty()) return
+        val pos = _state.value.playbackPositionSec
+        val target = marks.firstOrNull { it.startSec > pos + 0.25f }?.startSec
+            ?: marks.last().startSec
+        seekSoundcheck(target)
+    }
+
+    fun addTrackmark(title: String, startSec: Float) {
+        val sessionDir = _state.value.selectedSoundcheckDir ?: return
+        val duration = _state.value.playbackDurationSec
+        if (duration <= 0f) return
+        val clamped = startSec.coerceIn(0f, duration)
+        scope.launch {
+            val dir = File(sessionDir)
+            val metadata = withContext(Dispatchers.IO) {
+                SessionMetadata.read(dir)?.withResolvedChannels(dir)
+            } ?: return@launch
+            val existing = _state.value.trackmarks.toMutableList()
+            val nextIndex = (existing.maxOfOrNull { it.index } ?: 0) + 1
+            existing += SessionTrackmark(
+                index = nextIndex,
+                title = title.trim().ifBlank { "Track ${nextIndex.toString().padStart(2, '0')}" },
+                startSec = clamped,
+            )
+            val sorted = existing.sortedBy { it.startSec }
+                .mapIndexed { idx, mark -> mark.copy(index = idx + 1) }
+            withContext(Dispatchers.IO) {
+                SessionCueFile.write(
+                    dir,
+                    sorted,
+                    SessionCueFile.preferredAudioFileName(dir, metadata),
+                )
+            }
+            _state.update { it.copy(trackmarks = sorted) }
+            seekSoundcheck(clamped)
         }
     }
 
@@ -1077,11 +1129,17 @@ class MixerSessionController(
         val windowSec = settings.playbackWaveformWindowSec.coerceIn(30f, 600f)
         val channelTotal = metadata.channels.size
         val keepTransport = _state.value.isPlaying && _state.value.selectedSoundcheckDir == sessionDir
+        val trackmarks = if (settings.chapterSupportEnabled) {
+            SessionCueFile.read(File(sessionDir))
+        } else {
+            emptyList()
+        }
         _state.update {
             it.copy(
                 selectedSoundcheckDir = sessionDir,
                 playbackPositionSec = if (keepTransport) it.playbackPositionSec else 0f,
                 playbackDurationSec = durationSec,
+                trackmarks = trackmarks,
                 soundcheckSampleRate = metadata.sampleRate,
                 soundcheckWaveforms = SessionWaveformOverview(
                     peaksByChannel = emptyMap(),

@@ -97,6 +97,10 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_AUTO_SHOW_RECORDING_STORAGE_TOOLTIP, true)
         set(value) = prefs.edit().putBoolean(KEY_AUTO_SHOW_RECORDING_STORAGE_TOOLTIP, value).apply()
 
+    var chapterSupportEnabled: Boolean
+        get() = prefs.getBoolean(KEY_CHAPTER_SUPPORT_ENABLED, false)
+        set(value) = prefs.edit().putBoolean(KEY_CHAPTER_SUPPORT_ENABLED, value).apply()
+
     fun lastSelectedSoundcheckSession(mixerId: String): String? {
         val json = prefs.getString(KEY_LAST_SELECTED_SOUNDCHECK_BY_MIXER, null) ?: return null
         return runCatching {
@@ -272,6 +276,7 @@ class AppSettingsStore(context: Context) {
         private const val KEY_PROMPT_SOUNDCHECK_AFTER_RECORD = "prompt_soundcheck_after_record"
         private const val KEY_SHOW_RECORDING_STORAGE_INFO = "show_recording_storage_info_button"
         private const val KEY_AUTO_SHOW_RECORDING_STORAGE_TOOLTIP = "auto_show_recording_storage_tooltip"
+        private const val KEY_CHAPTER_SUPPORT_ENABLED = "chapter_support_enabled"
         private const val KEY_LAST_SELECTED_SOUNDCHECK_BY_MIXER = "last_selected_soundcheck_by_mixer"
         private const val KEY_SHOW_WAVEFORMS = "show_waveforms"
         private const val KEY_SHOW_VU_METERS = "show_vu_meters"

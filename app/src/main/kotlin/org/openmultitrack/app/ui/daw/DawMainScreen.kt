@@ -204,6 +204,10 @@ fun DawMainScreen(
     onDeleteSoundcheckSession: (String, String) -> Unit = { _, _ -> },
     lastSelectedSoundcheckSession: (String) -> String? = { null },
     onCloseSessionPicker: () -> Unit = {},
+    onChapterSupportEnabledChange: (Boolean) -> Unit = {},
+    onPreviousTrackmark: (String) -> Unit = {},
+    onNextTrackmark: (String) -> Unit = {},
+    onAddTrackmark: (String, String, Float) -> Unit = { _, _, _ -> },
 ) {
     val activeId = state.activeMixerId
     val session = activeId?.let { state.sessionByMixer[it] }
@@ -212,6 +216,8 @@ fun DawMainScreen(
     var storageTooltipOpen by remember { mutableStateOf(false) }
     var wasRecording by remember { mutableStateOf(false) }
     var playbackStripOverlay by remember { mutableStateOf<Int?>(null) }
+    var showAddTrackmarkDialog by remember { mutableStateOf(false) }
+    var showTrackmarkListDialog by remember { mutableStateOf(false) }
     val isRemoteClient = state.remoteRole == RemoteRole.CLIENT &&
         state.remoteConnectionState == RemoteConnectionState.CONNECTED
     val isRemoteHost = state.remoteRole == RemoteRole.HOST
@@ -258,6 +264,7 @@ fun DawMainScreen(
                 additionalLibraryRoots = state.additionalLibraryRoots,
                 autoScanRemovableMedia = state.autoScanRemovableMedia,
                 storageVolumeOptions = state.storageVolumeOptions,
+                chapterSupportEnabled = state.chapterSupportEnabled,
             ),
             monitorGain = monitorGain,
             onMonitorGainChange = onMonitorGainChange,
@@ -281,6 +288,7 @@ fun DawMainScreen(
             onAddAdditionalLibraryRoot = onAddAdditionalLibraryRoot,
             onRemoveAdditionalLibraryRoot = onRemoveAdditionalLibraryRoot,
             onAutoScanRemovableMediaChange = onAutoScanRemovableMediaChange,
+            onChapterSupportEnabledChange = onChapterSupportEnabledChange,
         )
         return
     }
@@ -444,6 +452,11 @@ fun DawMainScreen(
                             showRecordingStorageInfoButton = state.showRecordingStorageInfoButton,
                             storageTooltipOpen = storageTooltipOpen,
                             onStorageTooltipOpenChange = { storageTooltipOpen = it },
+                            chaptersEnabled = state.chapterSupportEnabled,
+                            onPreviousTrackmark = { activeId?.let(onPreviousTrackmark) },
+                            onNextTrackmark = { activeId?.let(onNextTrackmark) },
+                            onAddTrackmark = { showAddTrackmarkDialog = true },
+                            onShowTrackmarkList = { showTrackmarkListDialog = true },
                             onOpenSessionPicker = onOpenSessionPicker,
                             onOpenSettings = onOpenSettings,
                             onOpenRemoteControl = onOpenRemoteControl,
@@ -498,6 +511,7 @@ fun DawMainScreen(
                         session?.appMode?.isPlaybackMode == true -> session?.let { s ->
                             SoundcheckPanel(
                                 session = s,
+                                showTrackmarks = state.chapterSupportEnabled,
                                 routing = activeRouting,
                                 normalized = playbackWaveformNormalized,
                                 showWaveforms = state.showWaveforms,
@@ -609,6 +623,46 @@ fun DawMainScreen(
                 }
             },
         )
+    }
+
+    if (showAddTrackmarkDialog) {
+        val s = session
+        val id = activeId
+        if (s != null && id != null) {
+            val nextIndex = (s.trackmarks.maxOfOrNull { it.index } ?: 0) + 1
+            val defaultTitle = "Track ${nextIndex.toString().padStart(2, '0')}"
+            AddTrackmarkDialog(
+                initialPositionSec = s.playbackPositionSec,
+                defaultTitle = defaultTitle,
+                durationSec = s.playbackDurationSec,
+                onDismiss = { showAddTrackmarkDialog = false },
+                onConfirm = { title, startSec ->
+                    onAddTrackmark(id, title, startSec)
+                    showAddTrackmarkDialog = false
+                },
+            )
+        } else {
+            showAddTrackmarkDialog = false
+        }
+    }
+
+    if (showTrackmarkListDialog) {
+        val s = session
+        val id = activeId
+        if (s != null && id != null) {
+            TrackmarkListDialog(
+                trackmarks = s.trackmarks,
+                durationSec = s.playbackDurationSec,
+                currentPositionSec = s.playbackPositionSec,
+                onDismiss = { showTrackmarkListDialog = false },
+                onSelect = { sec ->
+                    onSeekSoundcheck(id, sec)
+                    showTrackmarkListDialog = false
+                },
+            )
+        } else {
+            showTrackmarkListDialog = false
+        }
     }
 
     playbackStripOverlay?.let { index ->
