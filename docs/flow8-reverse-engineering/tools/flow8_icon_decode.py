@@ -97,8 +97,6 @@ def resolve_preset_icon(input_type: int, preset: int) -> int | None:
     key = (input_type, preset)
     if key in PRESET_TO_MS_ICON:
         return PRESET_TO_MS_ICON[key]
-    if ICON_MIN <= preset <= ICON_MAX:
-        return preset
     return None
 
 
