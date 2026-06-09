@@ -493,6 +493,7 @@ internal fun ChannelStripControlDialog(
     onOutputTargetChange: (Int) -> Unit,
     onHiddenRecordChange: (Boolean) -> Unit,
     onHiddenSoundcheckChange: (Boolean) -> Unit,
+    hidePlaybackRouting: Boolean = false,
 ) {
     val hiddenRecord = strip.index in routing.hiddenRecord
     val hiddenSoundcheck = strip.index in routing.hiddenSoundcheck
@@ -600,7 +601,7 @@ internal fun ChannelStripControlDialog(
                         onSelect = onInputSourceChange,
                     )
                 }
-                if (controlMode == StripControlMode.PLAYBACK) {
+                if (controlMode == StripControlMode.PLAYBACK && !hidePlaybackRouting) {
                     Text(
                         "Routing",
                         style = MaterialTheme.typography.labelMedium,
@@ -611,6 +612,13 @@ internal fun ChannelStripControlDialog(
                         selectedUsbIndex = routing.outputTarget(strip.index),
                         usbChannelCount = usbPlaybackChannelCount.coerceAtLeast(1),
                         onSelect = onOutputTargetChange,
+                    )
+                }
+                if (controlMode == StripControlMode.PLAYBACK && hidePlaybackRouting) {
+                    Text(
+                        "Simple Play mixes all unmuted channels to USB outputs 1+2.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {

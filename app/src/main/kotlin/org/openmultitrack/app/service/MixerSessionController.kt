@@ -394,10 +394,19 @@ class MixerSessionController(
     }
 
     fun toggleSoundcheckPlayback() {
-        if (_state.value.isPlaying) {
-            pauseSoundcheckPlayback()
-        } else {
-            playSoundcheckPlayback()
+        scope.launch {
+            captureMutex.withLock {
+                if (player.isPlaying) {
+                    stopSoundcheckLocked()
+                } else {
+                    try {
+                        startSoundcheckPlaybackLockedFromCurrentPosition()
+                    } catch (e: Exception) {
+                        OmtLog.e("MixerSession", "toggleSoundcheckPlayback failed", e)
+                        _state.update { it.copy(statusMessage = e.message) }
+                    }
+                }
+            }
         }
     }
 
@@ -414,17 +423,23 @@ class MixerSessionController(
     fun playSoundcheckPlayback() {
         scope.launch {
             captureMutex.withLock {
-                val dir = _state.value.selectedSoundcheckDir ?: return@withLock
-                val metadata = SessionMetadata.read(File(dir)) ?: return@withLock
-                val frame = (_state.value.playbackPositionSec * metadata.sampleRate).toLong()
                 try {
-                    startSoundcheckPlaybackLocked(frame)
+                    startSoundcheckPlaybackLockedFromCurrentPosition()
                 } catch (e: Exception) {
                     OmtLog.e("MixerSession", "playSoundcheckPlayback failed", e)
                     _state.update { it.copy(statusMessage = e.message) }
                 }
             }
         }
+    }
+
+    private suspend fun startSoundcheckPlaybackLockedFromCurrentPosition() {
+        val dir = _state.value.selectedSoundcheckDir
+            ?: throw IllegalStateException("No soundcheck session selected")
+        val metadata = SessionMetadata.read(File(dir))
+            ?: throw IllegalStateException("Could not read session metadata")
+        val frame = (_state.value.playbackPositionSec * metadata.sampleRate).toLong()
+        startSoundcheckPlaybackLocked(frame)
     }
 
     private suspend fun prepareUsbForPlaybackLocked() {
@@ -475,7 +490,6 @@ class MixerSessionController(
                 mixContext = mixContext,
             ).getOrThrow()
         }
-        startPlaybackStatusUpdates(metadata.sampleRate)
         val statusMessage = when (_state.value.appMode) {
             AppMode.SIMPLE_PLAY -> "Playing stereo mix to USB 1+2"
             else -> "Playing to USB returns"
@@ -489,6 +503,7 @@ class MixerSessionController(
                 playbackChannelCount = maxPlaybackChannelsFromProbe(probe),
             )
         }
+        startPlaybackStatusUpdates(metadata.sampleRate)
     }
 
     private suspend fun restartSoundcheckPlaybackLocked() {
@@ -873,10 +888,21 @@ class MixerSessionController(
     private fun startPlaybackStatusUpdates(sampleRate: Int) {
         playbackStatusJob?.cancel()
         playbackStatusJob = scope.launch {
+            delay(120)
             var lastPosSec = -1f
+            var idleChecks = 0
             while (isActive) {
                 val st = player.status
                 if (st.state != TransportState.PLAYING) {
+                    if (player.isPlaying) {
+                        delay(50)
+                        continue
+                    }
+                    idleChecks++
+                    if (idleChecks < 3) {
+                        delay(50)
+                        continue
+                    }
                     _state.update {
                         it.copy(
                             isPlaying = false,
@@ -886,6 +912,7 @@ class MixerSessionController(
                     }
                     break
                 }
+                idleChecks = 0
                 val posSec = if (sampleRate > 0) st.positionFrames.toFloat() / sampleRate else 0f
                 val durSec = if (sampleRate > 0) st.durationFrames.toFloat() / sampleRate else 0f
                 val meters = player.meterLevelsSnapshot()

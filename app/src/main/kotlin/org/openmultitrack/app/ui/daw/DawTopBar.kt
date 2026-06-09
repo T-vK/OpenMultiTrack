@@ -173,6 +173,7 @@ private fun TransportControlCluster(
         )
         appMode.isPlaybackMode -> PlaybackTransportCluster(
             session = session,
+            isRemoteClient = isRemoteClient,
             onTogglePlayback = onToggleSoundcheckPlayback,
             onStopPlayback = onStopSoundcheck,
             onToggleLoop = onToggleSoundcheckLoop,
@@ -259,6 +260,7 @@ private fun RecordTransportCluster(
 @Composable
 private fun PlaybackTransportCluster(
     session: MixerSessionUiState?,
+    isRemoteClient: Boolean,
     onTogglePlayback: () -> Unit,
     onStopPlayback: () -> Unit,
     onToggleLoop: () -> Unit,
@@ -266,7 +268,9 @@ private fun PlaybackTransportCluster(
     onSetLoopOut: () -> Unit,
 ) {
     val isPlaying = session?.isPlaying == true
-    val hasSession = session?.selectedSoundcheckDir != null && session.probe != null
+    val hostReady = session?.probe != null ||
+        (isRemoteClient && session?.captureChannelCount?.let { it > 0 } == true)
+    val hasSession = session?.selectedSoundcheckDir != null && hostReady
     val canStop = hasSession && (isPlaying || (session?.playbackPositionSec ?: 0f) > 0.05f)
     TransportButtonCluster {
         TransportIconButton(

@@ -92,8 +92,25 @@ class RemoteCommandExecutor(
                 manager.getOrCreate(payload.getString("mixerId")).toggleSoundcheckPlayback()
                 null
             }
+            "play_playback" -> {
+                manager.getOrCreate(payload.getString("mixerId")).playSoundcheckPlayback()
+                null
+            }
+            "pause_playback" -> {
+                manager.getOrCreate(payload.getString("mixerId")).pauseSoundcheckPlayback()
+                null
+            }
             "stop_playback" -> {
                 manager.getOrCreate(payload.getString("mixerId")).stopSoundcheck()
+                null
+            }
+            "load_into_soundcheck" -> {
+                val mixerId = payload.getString("mixerId")
+                val sessionDir = payload.getString("sessionDir")
+                val ctrl = manager.getOrCreate(mixerId)
+                settings.setAppModeForMixer(mixerId, AppMode.VIRTUAL_SOUNDCHECK)
+                ctrl.setAppMode(AppMode.VIRTUAL_SOUNDCHECK)
+                ctrl.selectSoundcheckSession(sessionDir)
                 null
             }
             "seek" -> {

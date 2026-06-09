@@ -274,7 +274,8 @@ fun DawMainScreen(
                                 hideArm = state.hideArmButton,
                                 hideMonitor = state.hideMonitorButton,
                                 hideSolo = state.hideSoloButton,
-                                hideRoutingBadges = state.hideRoutingBadges,
+                                hideRoutingBadges = state.hideRoutingBadges ||
+                                    s.appMode == AppMode.SIMPLE_PLAY,
                                 onSelectSession = { onSelectSoundcheckSession(activeId!!, it) },
                                 onSeek = { onSeekSoundcheck(activeId!!, it) },
                                 onPanView = { onPanSoundcheckView(activeId!!, it) },
@@ -504,6 +505,7 @@ fun DawMainScreen(
             hideArm = true,
             hideMonitor = true,
             hideSolo = state.hideSoloButton,
+            hidePlaybackRouting = s.appMode == AppMode.SIMPLE_PLAY,
             onDismiss = { playbackStripOverlay = null },
             onSolo = { onToggleSolo(s.mixerId, strip.index) },
             onMute = { onToggleMute(s.mixerId, strip.index) },

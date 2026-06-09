@@ -165,6 +165,8 @@ class MainViewModel(
     private var pendingAudioAction: PendingAudioAction? = null
     private val lastSessionStatusByMixer = mutableMapOf<String, String?>()
     private val wasRecordingByMixer = mutableMapOf<String, Boolean>()
+    /** Mixer IDs where this device initiated stop-record and should show the soundcheck load prompt. */
+    private val soundcheckPromptPending = mutableSetOf<String>()
 
     init {
         sessionClient.onManagerLost {
@@ -236,10 +238,9 @@ class MainViewModel(
             var soundcheckPrompt: SoundcheckLoadPromptState? = ui.soundcheckLoadPrompt
             if (remoteState.role == RemoteRole.CLIENT && mirrorReady) {
                 remoteState.sessionByMixer.forEach { (mixerId, session) ->
-                    val wasRecording = wasRecordingByMixer[mixerId] == true
                     wasRecordingByMixer[mixerId] = session.isRecording
                     if (
-                        wasRecording &&
+                        soundcheckPromptPending.remove(mixerId) &&
                         !session.isRecording &&
                         settings.promptLoadSoundcheckAfterRecord &&
                         session.lastRecordingPath != null &&
@@ -317,6 +318,7 @@ class MainViewModel(
     fun disconnectRemote() {
         sessionClient.withRemoteControl { it.exitRemoteClientMode() }
         wasRecordingByMixer.clear()
+        soundcheckPromptPending.clear()
         loadMixers()
     }
 
@@ -623,6 +625,19 @@ class MainViewModel(
 
     fun loadRecordingIntoSoundcheck(mixerId: String, sessionDir: String) {
         dismissSoundcheckLoadPrompt()
+        if (isRemoteClient()) {
+            remoteCommand(
+                "load_into_soundcheck",
+                JSONObject()
+                    .put("mixerId", mixerId)
+                    .put("sessionDir", sessionDir),
+            )
+            return
+        }
+        loadRecordingIntoSoundcheckLocal(mixerId, sessionDir)
+    }
+
+    private fun loadRecordingIntoSoundcheckLocal(mixerId: String, sessionDir: String) {
         setAppMode(mixerId, AppMode.VIRTUAL_SOUNDCHECK)
         selectSoundcheckSession(mixerId, sessionDir)
         refreshSoundcheckLibrary(mixerId)
@@ -654,7 +669,11 @@ class MainViewModel(
 
     fun toggleSoundcheckPlayback(mixerId: String) {
         if (isRemoteClient()) {
-            remoteCommand("toggle_playback", JSONObject().put("mixerId", mixerId))
+            val playing = _uiState.value.sessionByMixer[mixerId]?.isPlaying == true
+            remoteCommand(
+                if (playing) "pause_playback" else "play_playback",
+                JSONObject().put("mixerId", mixerId),
+            )
             return
         }
         sessionClient.withManager { it.getOrCreate(mixerId).toggleSoundcheckPlayback() }
@@ -886,9 +905,11 @@ class MainViewModel(
 
     fun stopRecord(mixerId: String) {
         if (isRemoteClient()) {
+            soundcheckPromptPending.add(mixerId)
             remoteCommand("stop_record", JSONObject().put("mixerId", mixerId))
             return
         }
+        soundcheckPromptPending.add(mixerId)
         sessionClient.withManager { it.getOrCreate(mixerId).stopRecording() }
         clearInterruptedRecordingIfNeeded(mixerId)
     }
@@ -1280,13 +1301,12 @@ class MainViewModel(
         viewModelScope.launch {
             manager.getOrCreate(mixerId).state.collect { session ->
                 if (isRemoteClient()) return@collect
-                val wasRecording = wasRecordingByMixer[mixerId] == true
                 wasRecordingByMixer[mixerId] = session.isRecording
                 _uiState.update { ui ->
                     ui.copy(sessionByMixer = ui.sessionByMixer + (mixerId to session))
                 }
                 if (
-                    wasRecording &&
+                    soundcheckPromptPending.remove(mixerId) &&
                     !session.isRecording &&
                     settings.promptLoadSoundcheckAfterRecord &&
                     session.lastRecordingPath != null &&
