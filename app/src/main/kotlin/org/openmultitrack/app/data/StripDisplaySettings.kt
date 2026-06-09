@@ -2,9 +2,9 @@ package org.openmultitrack.app.data
 
 /** How channel index numbers appear on strips when scribble labels exist. */
 enum class StripNumberMode(val label: String) {
-    /** Show number and label (default). */
+    /** Show number and label. */
     BOTH("Number + label"),
-    /** Hide the channel number when a label is present. */
+    /** Hide the channel number when a label is present (default). */
     HIDE_WHEN_LABELED("Hide number when labeled"),
     /** Always show only the channel number, ignore labels in the strip text. */
     NUMBERS_ONLY("Numbers only"),

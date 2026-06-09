@@ -181,7 +181,7 @@ internal fun StripIdentityCell(
     hideRoutingBadges: Boolean,
     onClick: () -> Unit,
 ) {
-    val parsed = remember(strip.label, strip.displayName, strip.iconId) {
+    val parsed = remember(strip.label, strip.displayName, strip.iconId, numberMode, iconMode) {
         StripTextParts(strip, numberMode, iconMode)
     }
     val iconEmoji = parsed.iconEmoji

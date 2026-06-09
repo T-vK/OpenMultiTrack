@@ -15,9 +15,12 @@ fi
 version_name="$(grep '^VERSION_NAME=' "${root}/gradle/version.properties" | cut -d= -f2)"
 "${root}/scripts/prepare-fdroid-metadata.sh" "$version_name"
 "${root}/scripts/prepare-fdroid-config.sh"
+"${root}/scripts/prepare-fdroid-icons.sh" "$version_name"
 
 cd "${root}/fdroid"
 export FDROID_UPDATE_AUTOKEY=1
 fdroid update --pretty
+"${root}/scripts/verify-fdroid-index.sh" "${root}/fdroid/repo/index-v1.json"
+"${root}/scripts/verify-fdroid-icons.sh" "${root}/fdroid/repo/index-v1.json"
 
 rsync -a --delete "${root}/fdroid/repo/" "$site_repo/"

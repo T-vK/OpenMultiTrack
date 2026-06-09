@@ -136,9 +136,9 @@ jobs:
           path: |
             fdroid/repo
             site/fdroid/repo
-          key: fdroid-repo-contents-v2
+          key: fdroid-repo-contents-v3
           restore-keys: |
-            fdroid-repo-contents-v2
+            fdroid-repo-contents-v3
 
       - name: Build F-Droid repo and site
         shell: bash
@@ -151,11 +151,12 @@ jobs:
           cp dist/*.apk "fdroid/repo/org.openmultitrack_${VERSION}-debug.apk"
           export PATH="$HOME/.local/bin:$PATH"
           ./scripts/prepare-fdroid-config.sh
-          ./scripts/prepare-fdroid-icons.sh
           ./scripts/prepare-fdroid-metadata.sh "$VERSION"
+          ./scripts/prepare-fdroid-icons.sh "$VERSION"
           cd fdroid
           fdroid update --pretty
           ../scripts/verify-fdroid-index.sh repo/index-v1.json
+          ../scripts/verify-fdroid-icons.sh repo/index-v1.json
           rsync -a repo/ ../site/fdroid/repo/
 
       - name: Setup Pages

@@ -24,14 +24,16 @@ The publish **pages** job skips Android SDK setup (APK is verified in the build 
 
 ## Icons
 
-Regenerate launcher, fastlane, and F-Droid repo icons from `iconv2.png` (centered artwork on a circular background for adaptive-icon safe zones):
+Regenerate launcher, fastlane, and F-Droid repo icons from `iconv4.png` (centered artwork on a circular background for adaptive-icon safe zones):
 
 ```bash
 python3 scripts/generate-branding-icons.py
 ```
 
 The publish workflow runs `scripts/prepare-fdroid-icons.sh` before `fdroid update` so the
-repository icon (`fdroid/repo/icons/icon.png`) and app metadata icon are staged for F-Droid.
+repository icon (`fdroid/repo/icons/icon.png`), the in-repo app icon
+(`fdroid/repo/org.openmultitrack/en-US/icon.png`), and metadata graphics are staged.
+`scripts/verify-fdroid-icons.sh` fails the build if the generated index omits them.
 
 ## Semantic versioning (commit messages)
 

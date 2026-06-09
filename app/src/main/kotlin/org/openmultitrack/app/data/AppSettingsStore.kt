@@ -64,7 +64,9 @@ class AppSettingsStore(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_SHOW_VU_METERS, value).apply()
 
     var stripNumberMode: StripNumberMode
-        get() = StripNumberMode.entries.getOrElse(prefs.getInt(KEY_STRIP_NUMBER_MODE, 0)) { StripNumberMode.BOTH }
+        get() = StripNumberMode.entries.getOrElse(prefs.getInt(KEY_STRIP_NUMBER_MODE, 1)) {
+            StripNumberMode.HIDE_WHEN_LABELED
+        }
         set(value) = prefs.edit().putInt(KEY_STRIP_NUMBER_MODE, value.ordinal).apply()
 
     var stripIconMode: StripIconMode

@@ -93,7 +93,7 @@ data class DawUiState(
     val hideRoutingBadges: Boolean = false,
     val showWaveforms: Boolean = true,
     val showVuMeters: Boolean = true,
-    val stripNumberMode: StripNumberMode = StripNumberMode.BOTH,
+    val stripNumberMode: StripNumberMode = StripNumberMode.HIDE_WHEN_LABELED,
     val stripIconMode: StripIconMode = StripIconMode.SHOW,
     /** mixerId → sessionDir for recordings interrupted by an unexpected app exit. */
     val interruptedRecordings: Map<String, String> = emptyMap(),
@@ -224,7 +224,7 @@ class MainViewModel(
                     showWaveforms = settingsPatch?.showWaveforms ?: ui.showWaveforms,
                     showVuMeters = settingsPatch?.showVuMeters ?: ui.showVuMeters,
                     stripNumberMode = settingsPatch?.stripNumberMode?.let {
-                        StripNumberMode.entries.getOrElse(it) { StripNumberMode.BOTH }
+                        StripNumberMode.entries.getOrElse(it) { StripNumberMode.HIDE_WHEN_LABELED }
                     } ?: ui.stripNumberMode,
                     stripIconMode = settingsPatch?.stripIconMode?.let {
                         StripIconMode.entries.getOrElse(it) { StripIconMode.SHOW }

@@ -17,7 +17,7 @@ data class RemoteSettingsSnapshot(
     val showVuMeters: Boolean = true,
     val recordWaveformWindowSec: Float = 15f,
     val playbackWaveformWindowSec: Float = 180f,
-    val stripNumberMode: Int = 0,
+    val stripNumberMode: Int = 1,
     val stripIconMode: Int = 0,
     val monitorGainLinear: Float = 2.5f,
 )
