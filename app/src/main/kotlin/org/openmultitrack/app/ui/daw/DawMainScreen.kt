@@ -1002,15 +1002,26 @@ private fun WaveformView(
         val w = size.width
         val h = size.height
         if (w <= 0f || h <= 0f) return@Canvas
+        val pixelCount = w.toInt().coerceAtLeast(1)
+        val bars = if (displayPeaks.size <= pixelCount) {
+            displayPeaks
+        } else {
+            downsamplePeaksMax(displayPeaks, pixelCount)
+        }
+        if (bars.isEmpty()) return@Canvas
         val mid = h / 2f
-        val slotWidth = w / capacity
-        val stroke = (slotWidth * 0.75f).coerceIn(1f, 4f)
+        val drawSlotWidth = w / capacity.coerceAtLeast(bars.size)
+        val stroke = (drawSlotWidth * 0.85f).coerceIn(1f, 4f)
         val minBar = h * 0.06f
-        val startSlot = (capacity - displayPeaks.size).coerceAtLeast(0)
-        displayPeaks.forEachIndexed { i, peak ->
+        val startSlot = if (bars.size < capacity) {
+            (capacity - bars.size).coerceAtLeast(0)
+        } else {
+            0
+        }
+        bars.forEachIndexed { i, peak ->
             val amp = peak.coerceIn(0f, 1f)
             val barH = maxOf(amp * h * 0.9f, if (amp > 0.02f) minBar else 0f)
-            val x = (startSlot + i + 0.5f) * slotWidth
+            val x = (startSlot + i + 0.5f) * drawSlotWidth
             drawLine(
                 color = color.copy(alpha = 0.9f),
                 start = Offset(x, mid - barH / 2f),

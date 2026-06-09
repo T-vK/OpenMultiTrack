@@ -139,7 +139,7 @@ class SessionPlayer {
         playbackEpoch++
         val job = playbackJob
         playbackJob = null
-        job?.join()
+        job?.cancel()
         stopNative()
         status = TransportStatus(state = TransportState.IDLE)
     }
@@ -186,9 +186,9 @@ class SessionPlayer {
 
         val scratch = FloatArray(2048 * scratchChannels.coerceAtLeast(1))
         val backend = route.backend
+        previous?.cancel()
         playbackJob = scope.launch(Dispatchers.IO) {
             try {
-                previous?.join()
                 if (epoch != playbackEpoch) return@launch
                 run(scratch)
             } catch (e: Exception) {

@@ -136,6 +136,8 @@ class MixerSessionController(
     private var lastVuLogNs = 0L
     private var recordingWakeLock: PowerManager.WakeLock? = null
     private var routingConfig: MixerRoutingConfig = MixerRoutingConfig()
+    private var cachedSoundcheckDir: String? = null
+    private var cachedSoundcheckMetadata: SessionMetadata? = null
 
     private val storageResolver = RecordingStorageResolver(appContext, settings)
 
@@ -506,10 +508,25 @@ class MixerSessionController(
 
     fun toggleSoundcheckPlayback() {
         scope.launch {
-            captureMutex.withLock {
-                if (player.isPlaying) {
-                    stopSoundcheckLocked()
-                } else {
+            if (player.isPlaying || _state.value.isPlaying) {
+                stopPlaybackStatusUpdates()
+                _state.update {
+                    it.copy(
+                        isPlaying = false,
+                        transportState = TransportState.IDLE,
+                        soundcheckMeterLevels = emptyMap(),
+                    )
+                }
+                captureMutex.withLock { stopSoundcheckLocked() }
+            } else {
+                _state.update {
+                    it.copy(
+                        isPlaying = true,
+                        transportState = TransportState.PLAYING,
+                        warningMessage = null,
+                    )
+                }
+                captureMutex.withLock {
                     try {
                         startSoundcheckPlaybackLockedFromCurrentPosition()
                     } catch (e: Exception) {
@@ -563,7 +580,10 @@ class MixerSessionController(
     private suspend fun startSoundcheckPlaybackLockedFromCurrentPosition() {
         val dir = _state.value.selectedSoundcheckDir
             ?: throw IllegalStateException("No soundcheck session selected")
-        val metadata = SessionMetadata.read(File(dir))
+        val metadata = cachedSoundcheckMetadata?.takeIf { cachedSoundcheckDir == dir }
+            ?: withContext(Dispatchers.IO) {
+                SessionMetadata.read(File(dir))?.withResolvedChannels(File(dir))
+            }
             ?: throw IllegalStateException("Could not read session metadata")
         val frame = (_state.value.playbackPositionSec * metadata.sampleRate).toLong()
         startSoundcheckPlaybackLocked(frame)
@@ -589,20 +609,30 @@ class MixerSessionController(
         val sessionDir = _state.value.selectedSoundcheckDir
             ?: throw IllegalStateException("No soundcheck session selected")
         val dir = File(sessionDir)
-        val metadata = withContext(Dispatchers.IO) {
-            SessionMetadata.read(dir)?.withResolvedChannels(dir)
-        } ?: throw IllegalStateException("Could not read session metadata")
-        val durationFrames = withContext(Dispatchers.IO) {
-            SessionPlaybackDuration.durationFrames(dir, metadata)
-        }
+        val metadata = cachedSoundcheckMetadata?.takeIf { cachedSoundcheckDir == sessionDir }
+            ?: withContext(Dispatchers.IO) {
+                SessionMetadata.read(dir)?.withResolvedChannels(dir)
+            }
+            ?: throw IllegalStateException("Could not read session metadata")
+        val cachedDurationSec = _state.value.playbackDurationSec
+            .takeIf { it > 0f && _state.value.selectedSoundcheckDir == sessionDir }
+        val durationSec = cachedDurationSec
+            ?: withContext(Dispatchers.IO) { SessionPlaybackDuration.durationSec(dir, metadata) }
+        val durationFrames = (durationSec * metadata.sampleRate.coerceAtLeast(1)).toLong()
         if (durationFrames <= 0L) {
             throw IllegalStateException("Session has no playable audio on disk")
         }
         val clampedStart = startFrame.coerceIn(0L, (durationFrames - 1).coerceAtLeast(0L))
-        val durationSec = durationFrames.toFloat() / metadata.sampleRate.coerceAtLeast(1)
         withContext(Dispatchers.IO) {
-            prepareUsbForPlaybackLocked()
-            player.stopAndAwait()
+            if (_state.value.isMonitoring ||
+                _state.value.isVuMetering ||
+                (captureEngine.isCaptureActive && !_state.value.isRecording)
+            ) {
+                prepareUsbForPlaybackLocked()
+            }
+            if (player.isPlaying) {
+                player.stopAndAwait()
+            }
             val ui = _state.value
             val usbOutputs = maxPlaybackChannelsFromProbe(probe).coerceAtLeast(1)
             val route = ensurePlaybackLocked(descriptor, probe, usbOutputs).getOrThrow()
@@ -656,16 +686,14 @@ class MixerSessionController(
     }
 
     private suspend fun stopSoundcheckLocked() {
-        val sampleRate = _state.value.selectedSoundcheckDir
-            ?.let { SessionMetadata.read(File(it))?.sampleRate }
-            ?: 48_000
+        val sampleRate = _state.value.soundcheckSampleRate.takeIf { it > 0 } ?: 48_000
         val posSec = if (sampleRate > 0 && player.isPlaying) {
             player.status.positionFrames.toFloat() / sampleRate
         } else {
             _state.value.playbackPositionSec
         }
-        withContext(Dispatchers.IO) { player.stopAndAwait() }
         stopPlaybackStatusUpdates()
+        player.stop()
         _state.update {
             it.copy(
                 isPlaying = false,
@@ -725,7 +753,7 @@ class MixerSessionController(
     fun updateWaveformConfig() {
         captureEngine.setWaveformConfig(
             windowSec = settings.recordWaveformWindowSec,
-            peaksPerSecond = CaptureSessionEngine.DEFAULT_WAVEFORM_PEAKS_PER_SEC,
+            peaksPerSecond = CaptureSessionEngine.peaksPerSecondForWindow(settings.recordWaveformWindowSec),
         )
     }
 
@@ -1125,6 +1153,8 @@ class MixerSessionController(
         metadata: SessionMetadata,
         durationSec: Float,
     ) {
+        cachedSoundcheckDir = sessionDir
+        cachedSoundcheckMetadata = metadata
         restoreSoundcheckStripsFromMetadata(metadata)
         val windowSec = settings.playbackWaveformWindowSec.coerceIn(30f, 600f)
         val channelTotal = metadata.channels.size

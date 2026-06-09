@@ -786,7 +786,7 @@ internal fun visiblePeaksForViewport(
     return if (slice.size <= pixelWidth) slice else downsamplePeaksMax(slice, pixelWidth)
 }
 
-private fun downsamplePeaksMax(source: FloatArray, targetCount: Int): FloatArray {
+internal fun downsamplePeaksMax(source: FloatArray, targetCount: Int): FloatArray {
     if (source.size <= targetCount) return source
     val out = FloatArray(targetCount)
     val bucketSize = source.size.toFloat() / targetCount

@@ -146,9 +146,9 @@ class CaptureSessionEngine(
         usbDegraded = degraded
     }
 
-    fun setWaveformConfig(windowSec: Float, peaksPerSecond: Int = DEFAULT_WAVEFORM_PEAKS_PER_SEC) {
+    fun setWaveformConfig(windowSec: Float, peaksPerSecond: Int = peaksPerSecondForWindow(windowSec)) {
         waveformWindowSec = windowSec.coerceIn(5f, 120f)
-        waveformPeaksPerSecond = peaksPerSecond.coerceIn(10, 60)
+        waveformPeaksPerSecond = peaksPerSecond.coerceIn(10, 120)
         if (isCaptureActive) {
             allocateWaveformRings()
         }
@@ -699,8 +699,13 @@ class CaptureSessionEngine(
     companion object {
         const val DEFAULT_WAVEFORM_WINDOW_SEC = 15f
         const val DEFAULT_WAVEFORM_PEAKS_PER_SEC = 30
+        private const val TARGET_WAVEFORM_CAPACITY = 900
         private const val METER_DECAY_PER_UI_TICK = 0.88f
         private const val METER_OUTPUT_THRESHOLD = 1e-5f
+
+        /** Keep roughly constant peak count across window sizes so short windows stay sharp. */
+        fun peaksPerSecondForWindow(windowSec: Float): Int =
+            (TARGET_WAVEFORM_CAPACITY / windowSec.coerceIn(5f, 120f)).toInt().coerceIn(30, 120)
     }
 
     private fun ensureVirtualMicOutput(config: VirtualMicConfig) {
