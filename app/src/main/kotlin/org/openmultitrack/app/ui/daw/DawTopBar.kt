@@ -13,21 +13,21 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Cast
-import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,11 +36,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.openmultitrack.app.R
 import org.openmultitrack.domain.remote.RemoteConnectionState
-import org.openmultitrack.domain.remote.RemoteRole
 import org.openmultitrack.domain.session.AppMode
 
 private val ToolbarShape = RoundedCornerShape(8.dp)
-private val ToolbarControlHeight = 36.dp
+private val ToolbarControlHeight = 40.dp
+private val MixerClusterMaxWidth = 420.dp
 
 @Composable
 internal fun ToolbarChip(
@@ -71,15 +71,101 @@ internal fun ToolbarChip(
     }
 }
 
+@Composable
+private fun MixerControlCluster(
+    activeMixerName: String?,
+    appMode: AppMode?,
+    onOpenMixerPicker: () -> Unit,
+    onOpenMixerSettings: () -> Unit,
+    onToggleAppMode: () -> Unit,
+) {
+    val border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+    Surface(
+        shape = ToolbarShape,
+        border = border,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        modifier = Modifier
+            .widthIn(max = MixerClusterMaxWidth)
+            .height(ToolbarControlHeight),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+                onClick = onOpenMixerPicker,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(ToolbarControlHeight),
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        activeMixerName ?: "Select mixer",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                }
+            }
+            VerticalDivider(
+                modifier = Modifier.height(ToolbarControlHeight),
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
+            )
+            IconButton(
+                onClick = onOpenMixerSettings,
+                modifier = Modifier.size(ToolbarControlHeight),
+            ) {
+                Icon(Icons.Default.Settings, contentDescription = "Mixer settings")
+            }
+            if (appMode != null) {
+                VerticalDivider(
+                    modifier = Modifier.height(ToolbarControlHeight),
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
+                )
+                val recording = appMode == AppMode.MULTITRACK_RECORD
+                val modeLabel = if (recording) "Virtual Soundcheck" else "Record Mode"
+                Surface(
+                    onClick = onToggleAppMode,
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                    modifier = Modifier.height(ToolbarControlHeight),
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            if (recording) Icons.AutoMirrored.Filled.VolumeUp else Icons.Default.Mic,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            modeLabel,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DawTopBar(
     activeMixerName: String?,
     appMode: AppMode?,
+    showMixerCluster: Boolean,
     isRemoteClient: Boolean,
     remoteHostLabel: String?,
     remoteConnectionState: RemoteConnectionState,
     onOpenMixerPicker: () -> Unit,
+    onOpenMixerSettings: () -> Unit,
     onToggleAppMode: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenRemoteControl: () -> Unit,
@@ -99,59 +185,32 @@ fun DawTopBar(
                 )
             }
         }
-        TopAppBar(
+        CenterAlignedTopAppBar(
             navigationIcon = {
+                IconButton(onClick = onOpenMenu) {
+                    Icon(Icons.Default.Menu, contentDescription = "Menu")
+                }
+            },
+            title = {
+                if (showMixerCluster) {
+                    MixerControlCluster(
+                        activeMixerName = activeMixerName,
+                        appMode = appMode,
+                        onOpenMixerPicker = onOpenMixerPicker,
+                        onOpenMixerSettings = onOpenMixerSettings,
+                        onToggleAppMode = onToggleAppMode,
+                    )
+                }
+            },
+            actions = {
                 Image(
                     painter = painterResource(R.drawable.ic_app_logo),
                     contentDescription = "OpenMultiTrack",
                     modifier = Modifier
-                        .padding(start = 12.dp)
-                        .size(32.dp),
+                        .padding(end = 4.dp)
+                        .size(40.dp),
                 )
-            },
-            title = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    ToolbarChip(onClick = onOpenMixerPicker) {
-                        Icon(
-                            Icons.Default.GraphicEq,
-                            contentDescription = null,
-                            modifier = Modifier.padding(end = 4.dp),
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Text(
-                            activeMixerName ?: "Select mixer",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 160.dp),
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
-                    }
-                    if (appMode != null) {
-                        val recording = appMode == AppMode.MULTITRACK_RECORD
-                        ToolbarChip(onClick = onToggleAppMode, selected = true) {
-                            Icon(
-                                if (recording) Icons.Default.Mic else Icons.Default.VolumeUp,
-                                contentDescription = null,
-                                modifier = Modifier.padding(end = 4.dp),
-                            )
-                            Text(
-                                if (recording) "Record" else "Soundcheck",
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                        }
-                    }
-                }
-            },
-            actions = {
-                val remoteActive = isRemoteClient ||
-                    remoteConnectionState == RemoteConnectionState.CONNECTED
-                IconButton(onClick = onOpenMenu) {
-                    Icon(Icons.Default.Menu, contentDescription = "Menu")
-                }
+                val remoteActive = remoteConnectionState == RemoteConnectionState.CONNECTED
                 IconButton(onClick = onOpenRemoteControl) {
                     Icon(
                         Icons.Default.Cast,
@@ -167,7 +226,7 @@ fun DawTopBar(
                     Icon(Icons.Default.Settings, contentDescription = "Settings")
                 }
             },
-            colors = TopAppBarDefaults.topAppBarColors(
+            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                 containerColor = MaterialTheme.colorScheme.surface,
             ),
         )

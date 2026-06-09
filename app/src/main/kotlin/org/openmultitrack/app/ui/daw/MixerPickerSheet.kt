@@ -1,5 +1,6 @@
 package org.openmultitrack.app.ui.daw
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,7 +13,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.GraphicEq
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -46,7 +46,6 @@ fun MixerPickerSheet(
     onSelectMixer: (String) -> Unit,
     onAddNewDevice: () -> Unit,
     onLoadChannelNames: (String) -> Unit,
-    onOpenMixerSettings: (String) -> Unit,
     onRemoveMixer: (String) -> Unit,
 ) {
     var removeConfirm by remember { mutableStateOf<MixerProfile?>(null) }
@@ -92,6 +91,10 @@ fun MixerPickerSheet(
                         } else {
                             MaterialTheme.colorScheme.surface
                         },
+                        modifier = Modifier.clickable {
+                            onSelectMixer(mixer.id)
+                            onDismiss()
+                        },
                     ) {
                         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
                             Row(
@@ -120,7 +123,9 @@ fun MixerPickerSheet(
                                         tint = MaterialTheme.colorScheme.primary,
                                     )
                                 }
-                                IconButton(onClick = { removeConfirm = mixer }) {
+                                IconButton(
+                                    onClick = { removeConfirm = mixer },
+                                ) {
                                     Icon(
                                         Icons.Default.Delete,
                                         contentDescription = "Remove mixer",
@@ -128,35 +133,14 @@ fun MixerPickerSheet(
                                     )
                                 }
                             }
-                            Row(
-                                Modifier.fillMaxWidth().padding(top = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                if (!isActive) {
-                                    OutlinedButton(
-                                        onClick = {
-                                            onSelectMixer(mixer.id)
-                                            onDismiss()
-                                        },
-                                        modifier = Modifier.weight(1f),
-                                    ) {
-                                        Text("Select")
-                                    }
-                                }
-                                if (ScribbleImportSupport.supports(mixer)) {
-                                    OutlinedButton(
-                                        onClick = { onLoadChannelNames(mixer.id) },
-                                        modifier = Modifier.weight(1f),
-                                    ) {
-                                        Text("Load channel names")
-                                    }
-                                }
+                            if (ScribbleImportSupport.supports(mixer)) {
                                 OutlinedButton(
-                                    onClick = { onOpenMixerSettings(mixer.id) },
-                                    modifier = Modifier.weight(1f),
+                                    onClick = { onLoadChannelNames(mixer.id) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 8.dp),
                                 ) {
-                                    Icon(Icons.Default.Settings, contentDescription = null)
-                                    Text("Mixer settings", modifier = Modifier.padding(start = 4.dp))
+                                    Text("Sync channel names from mixer to app")
                                 }
                             }
                         }

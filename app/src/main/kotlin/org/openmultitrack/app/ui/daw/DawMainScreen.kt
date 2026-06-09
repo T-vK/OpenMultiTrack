@@ -188,10 +188,12 @@ fun DawMainScreen(
                 DawTopBar(
                     activeMixerName = activeProfile?.displayName,
                     appMode = session?.appMode,
+                    showMixerCluster = state.mixers.isNotEmpty(),
                     isRemoteClient = isRemoteClient,
                     remoteHostLabel = state.remoteHostName ?: state.remoteConnectedHost,
                     remoteConnectionState = state.remoteConnectionState,
                     onOpenMixerPicker = onOpenMixerPicker,
+                    onOpenMixerSettings = { activeId?.let(onOpenMixerSettings) },
                     onToggleAppMode = {
                         activeId?.let { id ->
                             val next = if (session?.appMode == AppMode.MULTITRACK_RECORD) {
@@ -382,7 +384,6 @@ fun DawMainScreen(
             onSelectMixer = onSelectMixer,
             onAddNewDevice = onAddMixer,
             onLoadChannelNames = onLoadScribbleStrip,
-            onOpenMixerSettings = onOpenMixerSettings,
             onRemoveMixer = onRemoveMixer,
         )
     }
@@ -393,7 +394,10 @@ fun DawMainScreen(
         if (profile != null) {
             MixerSettingsSheet(
                 mixerName = profile.displayName,
-                channelCount = sessionForSettings?.captureChannelCount ?: profile.channelStrips.size,
+                channelCount = sessionForSettings?.channelStrips?.size
+                    ?: profile.channelStrips.size,
+                usbChannelCount = sessionForSettings?.captureChannelCount ?: 0,
+                strips = sessionForSettings?.channelStrips ?: profile.channelStrips,
                 config = mixerRoutingById[settingsMixerId] ?: MixerRoutingConfig(),
                 onDismiss = onCloseMixerSettings,
                 onSave = { onSaveMixerRouting(settingsMixerId, it) },
