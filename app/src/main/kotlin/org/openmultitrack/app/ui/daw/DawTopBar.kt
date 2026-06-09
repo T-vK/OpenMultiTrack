@@ -14,26 +14,26 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GraphicEq
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.SdCard
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -41,23 +41,32 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.domain.remote.RemoteConnectionState
 import org.openmultitrack.domain.session.AppMode
@@ -79,6 +88,8 @@ private fun AppMode.toolbarIcon(): ImageVector = when (this) {
 
 private val RecordRed = Color(0xFFE53935)
 private val LoopAmber = Color(0xFFFFB300)
+
+private val RecordingStorageIcon: ImageVector = Icons.Default.SdCard
 
 @Composable
 internal fun ToolbarChip(
@@ -344,6 +355,63 @@ private fun LoopTransportButton(
 }
 
 @Composable
+private fun StandaloneToolbarIconButton(
+    onClick: () -> Unit,
+    icon: ImageVector,
+    contentDescription: String,
+    tint: Color,
+) {
+    val border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+    Surface(
+        onClick = onClick,
+        shape = ToolbarShape,
+        border = border,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        modifier = Modifier.size(ToolbarControlHeight),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                modifier = Modifier.size(20.dp),
+                tint = tint,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RecordingStorageButton(
+    session: MixerSessionUiState?,
+    onShowStorageInfo: () -> Unit,
+) {
+    val storageTooltipText = remember(session?.storageFreeBytes, session?.storageRecordEstimateSec) {
+        formatRecordingStorageInfo(
+            session?.storageFreeBytes ?: 0L,
+            session?.storageRecordEstimateSec ?: 0f,
+        )
+    }
+    val storageTooltipState = rememberTooltipState(isPersistent = true)
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = {
+            PlainTooltip {
+                Text(storageTooltipText)
+            }
+        },
+        state = storageTooltipState,
+    ) {
+        StandaloneToolbarIconButton(
+            onClick = onShowStorageInfo,
+            icon = RecordingStorageIcon,
+            contentDescription = "Recording storage and time remaining",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
 private fun clusterDivider() {
     VerticalDivider(
         modifier = Modifier.height(ToolbarControlHeight),
@@ -371,6 +439,8 @@ fun DawTopBar(
     onToggleSoundcheckLoop: () -> Unit,
     onSetSoundcheckLoopIn: () -> Unit,
     onSetSoundcheckLoopOut: () -> Unit,
+    showRecordingStorageInfoButton: Boolean = false,
+    onShowStorageInfo: () -> Unit = {},
     onOpenMenu: () -> Unit = {},
 ) {
     Column {
@@ -450,6 +520,12 @@ fun DawTopBar(
                                     onStopRecord = onStopRecord,
                                 )
                             }
+                            if (showRecordTransport && showRecordingStorageInfoButton) {
+                                RecordingStorageButton(
+                                    session = session,
+                                    onShowStorageInfo = onShowStorageInfo,
+                                )
+                            }
                             if (showPlaybackTransport) {
                                 PlaybackTransportCluster(
                                     session = session,
@@ -473,16 +549,14 @@ fun DawTopBar(
 }
 
 @Composable
-fun DawOverflowMenu(
-    open: Boolean,
-    onDismiss: () -> Unit,
+fun DawNavigationDrawer(
+    drawerState: DrawerState,
     appMode: AppMode?,
     session: MixerSessionUiState?,
     isRemoteClient: Boolean,
     isRemoteHost: Boolean,
     remoteConnectedClientCount: Int,
     remoteConnectionState: RemoteConnectionState,
-    showRecordingStorageInfoButton: Boolean,
     showOpenSessionHint: Boolean,
     mixerSettingsEnabled: Boolean,
     onOpenMixerSettings: () -> Unit,
@@ -492,129 +566,132 @@ fun DawOverflowMenu(
     onOpenSettings: () -> Unit,
     onOpenLog: () -> Unit,
 ) {
-    if (!open) return
-
-    var showStorageInfo by remember { mutableStateOf(false) }
-    val storageInfoText = remember(session?.storageFreeBytes, session?.storageRecordEstimateSec) {
-        formatRecordingStorageInfo(
-            session?.storageFreeBytes ?: 0L,
-            session?.storageRecordEstimateSec ?: 0f,
-        )
-    }
+    val scope = rememberCoroutineScope()
     val remoteHighlight = isRemoteClient ||
         (isRemoteHost && remoteConnectedClientCount > 0) ||
         remoteConnectionState == RemoteConnectionState.CONNECTING
     val openSessionEnabled = appMode?.isPlaybackMode == true &&
         session?.soundcheckSessions?.isNotEmpty() == true
+    val openSessionLabel = if (showOpenSessionHint) {
+        "Open recording (newer available)"
+    } else {
+        "Open recording"
+    }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Menu") },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                DawMenuItem(
-                    icon = Icons.Default.Tune,
-                    label = "Mixer settings",
-                    enabled = mixerSettingsEnabled,
-                    onClick = {
-                        onDismiss()
-                        onOpenMixerSettings()
+    fun closeAnd(action: () -> Unit) {
+        scope.launch {
+            drawerState.close()
+            action()
+        }
+    }
+
+    ModalDrawerSheet {
+        Text(
+            text = "OpenMultiTrack",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(horizontal = 28.dp, vertical = 24.dp),
+        )
+        NavigationDrawerItem(
+            icon = {
+                Icon(
+                    Icons.Default.Tune,
+                    contentDescription = null,
+                    tint = if (mixerSettingsEnabled) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                     },
                 )
-                HorizontalDivider(Modifier.padding(vertical = 6.dp))
-                Text(
-                    "Mode",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 2.dp),
-                )
-                AppMode.entries.forEach { mode ->
-                    DawMenuItem(
-                        icon = mode.toolbarIcon(),
-                        label = mode.displayLabel,
-                        selected = mode == appMode,
-                        iconTint = when (mode) {
-                            AppMode.MULTITRACK_RECORD -> RecordRed
-                            AppMode.VIRTUAL_SOUNDCHECK -> MaterialTheme.colorScheme.primary
-                            AppMode.SIMPLE_PLAY -> MaterialTheme.colorScheme.tertiary
-                        },
-                        onClick = {
-                            onDismiss()
-                            if (mode != appMode) onSetAppMode(mode)
-                        },
-                    )
+            },
+            label = { Text("Mixer settings") },
+            selected = false,
+            onClick = {
+                if (mixerSettingsEnabled) {
+                    closeAnd(onOpenMixerSettings)
                 }
-                HorizontalDivider(Modifier.padding(vertical = 6.dp))
-                if (showRecordingStorageInfoButton) {
-                    DawMenuItem(
-                        icon = Icons.Default.Info,
-                        label = "Storage info",
-                        onClick = { showStorageInfo = true },
+            },
+            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+        )
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp))
+        AppMode.entries.forEach { mode ->
+            val modeTint = when (mode) {
+                AppMode.MULTITRACK_RECORD -> RecordRed
+                AppMode.VIRTUAL_SOUNDCHECK -> MaterialTheme.colorScheme.primary
+                AppMode.SIMPLE_PLAY -> MaterialTheme.colorScheme.tertiary
+            }
+            NavigationDrawerItem(
+                icon = {
+                    Icon(
+                        imageVector = mode.toolbarIcon(),
+                        contentDescription = null,
+                        tint = modeTint,
                     )
-                }
-                if (appMode?.isPlaybackMode == true) {
-                    DawMenuItem(
-                        icon = Icons.Default.FolderOpen,
-                        label = if (showOpenSessionHint) {
-                            "Open recording (newer available)"
+                },
+                label = { Text(mode.displayLabel) },
+                selected = mode == appMode,
+                onClick = {
+                    closeAnd {
+                        if (mode != appMode) onSetAppMode(mode)
+                    }
+                },
+                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+            )
+        }
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp))
+        if (appMode?.isPlaybackMode == true) {
+            NavigationDrawerItem(
+                icon = {
+                    Icon(
+                        Icons.Default.FolderOpen,
+                        contentDescription = null,
+                        tint = if (openSessionEnabled) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
                         } else {
-                            "Open recording"
-                        },
-                        enabled = openSessionEnabled,
-                        onClick = {
-                            onDismiss()
-                            onOpenSessionPicker()
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                         },
                     )
-                }
-                DawMenuItem(
-                    icon = Icons.Default.Cast,
-                    label = "Remote control",
-                    iconTint = if (remoteHighlight) {
+                },
+                label = { Text(openSessionLabel) },
+                selected = false,
+                onClick = {
+                    if (openSessionEnabled) {
+                        closeAnd(onOpenSessionPicker)
+                    }
+                },
+                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+            )
+        }
+        NavigationDrawerItem(
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Cast,
+                    contentDescription = null,
+                    tint = if (remoteHighlight) {
                         MaterialTheme.colorScheme.primary
                     } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                    onClick = {
-                        onDismiss()
-                        onOpenRemoteControl()
+                        MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
-                DawMenuItem(
-                    icon = Icons.Default.Settings,
-                    label = "Settings",
-                    onClick = {
-                        onDismiss()
-                        onOpenSettings()
-                    },
-                )
-                HorizontalDivider(Modifier.padding(vertical = 6.dp))
-                DawMenuItem(
-                    icon = Icons.Default.Menu,
-                    label = "Log viewer",
-                    onClick = {
-                        onDismiss()
-                        onOpenLog()
-                    },
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
-        },
-    )
-
-    if (showStorageInfo) {
-        AlertDialog(
-            onDismissRequest = { showStorageInfo = false },
-            title = { Text("Storage") },
-            text = { Text(storageInfoText) },
-            confirmButton = {
-                TextButton(onClick = { showStorageInfo = false }) { Text("OK") }
             },
+            label = { Text("Remote control") },
+            selected = false,
+            onClick = { closeAnd(onOpenRemoteControl) },
+            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+        )
+        NavigationDrawerItem(
+            icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+            label = { Text("Settings") },
+            selected = false,
+            onClick = { closeAnd(onOpenSettings) },
+            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+        )
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp))
+        NavigationDrawerItem(
+            icon = { Icon(Icons.Default.Article, contentDescription = null) },
+            label = { Text("Log viewer") },
+            selected = false,
+            onClick = { closeAnd(onOpenLog) },
+            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
         )
     }
 }
@@ -642,49 +719,3 @@ fun RecordingStorageInfoDialog(
     )
 }
 
-@Composable
-private fun DawMenuItem(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-    selected: Boolean = false,
-    iconTint: Color = MaterialTheme.colorScheme.onSurface,
-) {
-    val background = if (selected) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-    } else {
-        Color.Transparent
-    }
-    Surface(
-        onClick = onClick,
-        enabled = enabled,
-        color = background,
-        shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(22.dp),
-                tint = if (enabled) iconTint else iconTint.copy(alpha = 0.38f),
-            )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (enabled) {
-                    MaterialTheme.colorScheme.onSurface
-                } else {
-                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                },
-            )
-        }
-    }
-}

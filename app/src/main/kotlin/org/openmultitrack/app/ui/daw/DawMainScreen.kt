@@ -44,8 +44,11 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -57,8 +60,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -200,7 +205,8 @@ fun DawMainScreen(
 ) {
     val activeId = state.activeMixerId
     val session = activeId?.let { state.sessionByMixer[it] }
-    var menuOpen by remember { mutableStateOf(false) }
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val drawerScope = rememberCoroutineScope()
     var storageInfoDialogOpen by remember { mutableStateOf(false) }
     var wasRecording by remember { mutableStateOf(false) }
     var playbackStripOverlay by remember { mutableStateOf<Int?>(null) }
@@ -364,32 +370,63 @@ fun DawMainScreen(
         return
     }
 
-    Scaffold(
-        topBar = {
-            Column {
-                DawTopBar(
-                    activeMixerName = activeProfile?.displayName,
-                    appMode = session?.appMode,
-                    session = session,
-                    showMixerCluster = state.mixers.isNotEmpty(),
-                    isRemoteClient = isRemoteClient,
-                    remoteHostLabel = state.remoteHostName ?: state.remoteConnectedHost,
-                    remoteConnectedClientCount = state.remoteConnectedClientCount,
-                    isRemoteHost = isRemoteHost,
-                    onExitRemoteMode = onExitRemoteMode,
-                    onOpenMixerPicker = onOpenMixerPicker,
-                    onStartRecord = { activeId?.let(onStartRecord) },
-                    onStopRecord = { activeId?.let(onStopRecord) },
-                    onToggleSoundcheckPlayback = { activeId?.let(onToggleSoundcheckPlayback) },
-                    onStopSoundcheck = { activeId?.let(onStopSoundcheck) },
-                    onToggleSoundcheckLoop = { activeId?.let(onToggleSoundcheckLoop) },
-                    onSetSoundcheckLoopIn = { activeId?.let(onSetSoundcheckLoopIn) },
-                    onSetSoundcheckLoopOut = { activeId?.let(onSetSoundcheckLoopOut) },
-                    onOpenMenu = { menuOpen = true },
-                )
-            }
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            DawNavigationDrawer(
+                drawerState = drawerState,
+                appMode = session?.appMode,
+                session = session,
+                isRemoteClient = isRemoteClient,
+                isRemoteHost = isRemoteHost,
+                remoteConnectedClientCount = state.remoteConnectedClientCount,
+                remoteConnectionState = state.remoteConnectionState,
+                showOpenSessionHint = activeId?.let { mixerId ->
+                    session?.let { s ->
+                        hasNewerRecordingThanSelected(
+                            s.soundcheckSessions,
+                            lastSelectedSoundcheckSession(mixerId),
+                        )
+                    }
+                } == true,
+                mixerSettingsEnabled = activeId != null,
+                onOpenMixerSettings = { activeId?.let(onOpenMixerSettings) },
+                onSetAppMode = { mode -> activeId?.let { id -> onSetAppMode(id, mode) } },
+                onOpenSessionPicker = onOpenSessionPicker,
+                onOpenRemoteControl = onOpenRemoteControl,
+                onOpenSettings = onOpenSettings,
+                onOpenLog = onOpenLog,
+            )
         },
-    ) { padding ->
+    ) {
+        Scaffold(
+            topBar = {
+                Column {
+                    DawTopBar(
+                        activeMixerName = activeProfile?.displayName,
+                        appMode = session?.appMode,
+                        session = session,
+                        showMixerCluster = state.mixers.isNotEmpty(),
+                        isRemoteClient = isRemoteClient,
+                        remoteHostLabel = state.remoteHostName ?: state.remoteConnectedHost,
+                        remoteConnectedClientCount = state.remoteConnectedClientCount,
+                        isRemoteHost = isRemoteHost,
+                        onExitRemoteMode = onExitRemoteMode,
+                        onOpenMixerPicker = onOpenMixerPicker,
+                        onStartRecord = { activeId?.let(onStartRecord) },
+                        onStopRecord = { activeId?.let(onStopRecord) },
+                        onToggleSoundcheckPlayback = { activeId?.let(onToggleSoundcheckPlayback) },
+                        onStopSoundcheck = { activeId?.let(onStopSoundcheck) },
+                        onToggleSoundcheckLoop = { activeId?.let(onToggleSoundcheckLoop) },
+                        onSetSoundcheckLoopIn = { activeId?.let(onSetSoundcheckLoopIn) },
+                        onSetSoundcheckLoopOut = { activeId?.let(onSetSoundcheckLoopOut) },
+                        showRecordingStorageInfoButton = state.showRecordingStorageInfoButton,
+                        onShowStorageInfo = { storageInfoDialogOpen = true },
+                        onOpenMenu = { drawerScope.launch { drawerState.open() } },
+                    )
+                }
+            },
+        ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -491,6 +528,7 @@ fun DawMainScreen(
                 onDismiss = onDismissStatusToast,
             )
         }
+        }
     }
 
     if (state.showAddMixerDialog) {
@@ -537,33 +575,6 @@ fun DawMainScreen(
             },
         )
     }
-
-    DawOverflowMenu(
-        open = menuOpen,
-        onDismiss = { menuOpen = false },
-        appMode = session?.appMode,
-        session = session,
-        isRemoteClient = isRemoteClient,
-        isRemoteHost = isRemoteHost,
-        remoteConnectedClientCount = state.remoteConnectedClientCount,
-        remoteConnectionState = state.remoteConnectionState,
-        showRecordingStorageInfoButton = state.showRecordingStorageInfoButton,
-        showOpenSessionHint = activeId?.let { mixerId ->
-            session?.let { s ->
-                hasNewerRecordingThanSelected(
-                    s.soundcheckSessions,
-                    lastSelectedSoundcheckSession(mixerId),
-                )
-            }
-        } == true,
-        mixerSettingsEnabled = activeId != null,
-        onOpenMixerSettings = { activeId?.let(onOpenMixerSettings) },
-        onSetAppMode = { mode -> activeId?.let { id -> onSetAppMode(id, mode) } },
-        onOpenSessionPicker = onOpenSessionPicker,
-        onOpenRemoteControl = onOpenRemoteControl,
-        onOpenSettings = onOpenSettings,
-        onOpenLog = onOpenLog,
-    )
 
     RecordingStorageInfoDialog(
         open = storageInfoDialogOpen,
