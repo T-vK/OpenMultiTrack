@@ -8,6 +8,8 @@ object RemoteProtocol {
     const val DISCOVER_REQUEST = "OMT_DISCOVER"
     const val DISCOVER_REPLY = "OMT_ANNOUNCE"
     const val DELTA_INTERVAL_MS = 50L
-    const val LIVE_WAVEFORM_TAIL = 64
+    /** Matches [org.openmultitrack.app.audio.CaptureSessionEngine.DEFAULT_WAVEFORM_PEAKS_PER_SEC]. */
+    const val LIVE_WAVEFORM_PEAKS_PER_SEC = 30
+    const val LIVE_WAVEFORM_TAIL = 48
     const val MAX_WAVEFORM_POINTS = 400
 }

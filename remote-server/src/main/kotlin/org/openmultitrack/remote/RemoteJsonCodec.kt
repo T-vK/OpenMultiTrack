@@ -17,10 +17,15 @@ object RemoteJsonCodec {
 
     fun decodeCommand(json: String): Pair<String, JSONObject> = RemoteJson.decodeCommand(json)
 
-    fun encodeWaveformChunk(channel: Int, startSec: Float, peaks: FloatArray): String =
-        RemoteJson.encodeWaveformChunk(channel, startSec, peaks)
+    fun encodeWaveformChunk(
+        mixerId: String,
+        sessionDir: String,
+        channel: Int,
+        startSec: Float,
+        peaks: FloatArray,
+    ): String = RemoteJson.encodeWaveformChunk(mixerId, sessionDir, channel, startSec, peaks)
 
-    fun decodeWaveformChunk(json: String): Triple<Int, Float, FloatArray> =
+    fun decodeWaveformChunk(json: String): WaveformChunkMessage =
         RemoteJson.decodeWaveformChunk(json)
 
     fun encodeWaveformRequest(

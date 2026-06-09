@@ -50,6 +50,7 @@ data class RemoteControlUiState(
     val activeMixerId: String? = null,
     val sessionByMixer: Map<String, MixerSessionUiState> = emptyMap(),
     val uiSettings: RemoteUiSettings? = null,
+    val connectedClientCount: Int = 0,
 )
 
 class RemoteControlManager(
@@ -73,7 +74,9 @@ class RemoteControlManager(
     private var clientMirror: RemoteMirrorSnapshot? = null
     private val clientLivePeaks = mutableMapOf<String, MutableMap<Int, LiveWaveformSnapshot>>()
     private val clientSoundcheckPeaks = mutableMapOf<String, MutableMap<Int, FloatArray>>()
+    private val pendingSoundcheckChannelCount = mutableMapOf<String, Int>()
     private var lastSoundcheckWaveformRequestKey: String? = null
+    private var lastSoundcheckLoadingByMixer = mutableMapOf<String, Boolean>()
     private var snapshotWaitJob: Job? = null
     private var lastConnectHostId: String? = null
     @Volatile
@@ -140,6 +143,9 @@ class RemoteControlManager(
             if (target != null && !pin.isNullOrBlank()) {
                 OmtLog.i("Remote", "Connecting to ${target.name} at ${target.host}:${target.port} paired=${target.isPaired}")
                 connectToHost(target)
+            } else if (hosts.isEmpty() && mixerStore.listMixers().isNotEmpty()) {
+                OmtLog.w("Remote", "No remote host found but local mixers exist — exiting client mode")
+                exitRemoteClientMode()
             }
         }
     }
@@ -226,26 +232,40 @@ class RemoteControlManager(
 
     fun disconnect() {
         when (_state.value.role) {
-            RemoteRole.CLIENT -> stopClient()
+            RemoteRole.CLIENT -> {
+                stopClient()
+                settings.remoteRole = RemoteRole.OFF
+            }
             RemoteRole.HOST -> stopHost()
             RemoteRole.OFF -> Unit
         }
         _state.update {
             it.copy(
+                role = if (it.role == RemoteRole.CLIENT) RemoteRole.OFF else it.role,
                 connectionState = RemoteConnectionState.DISCONNECTED,
                 connectedHost = null,
                 sessionByMixer = emptyMap(),
                 mixers = emptyList(),
                 activeMixerId = null,
+                connectedClientCount = 0,
             )
         }
+    }
+
+    fun exitRemoteClientMode() {
+        OmtLog.i("Remote", "Exiting remote client mode")
+        disconnect()
     }
 
     fun isRemoteClientConnected(): Boolean =
         _state.value.role == RemoteRole.CLIENT && clientSocketOpen && clientMirror != null
 
     fun sendCommand(command: String, payload: JSONObject = JSONObject()) {
-        if (!isRemoteClientConnected()) return
+        if (!isRemoteClientConnected()) {
+            OmtLog.w("Remote", "Dropping command $command — client not synced yet")
+            return
+        }
+        OmtLog.i("Remote", "Sending command $command payload=$payload")
         client?.send(RemoteJsonCodec.encodeCommand(command, payload))
     }
 
@@ -298,6 +318,7 @@ class RemoteControlManager(
                 hostDeviceId = hostId,
                 pairingPin = pin,
                 pairingUri = RemotePairing.buildPairingUri(hostId, pin, hostName),
+                connectedClientCount = 0,
             )
         }
         startHostSyncLoop()
@@ -375,6 +396,7 @@ class RemoteControlManager(
                 "Sending snapshot to client: mixers=${snapshot.mixers.size} sessions=${snapshot.sessions.size}",
             )
             sendToClient(payload)
+            updateConnectedClientCount()
         }
 
         override fun onClientMessage(json: String, sendToClient: (String) -> Unit) {
@@ -401,16 +423,33 @@ class RemoteControlManager(
             val result = executor.execute(command, payload)
             result.onSuccess { waveform ->
                 waveform?.let {
-                    sendToClient(RemoteJsonCodec.encodeWaveformChunk(it.channel, it.startSec, it.peaks))
+                    sendToClient(
+                        RemoteJsonCodec.encodeWaveformChunk(
+                            it.mixerId,
+                            it.sessionDir,
+                            it.channel,
+                            it.startSec,
+                            it.peaks,
+                        ),
+                    )
                 }
                 sendToClient(RemoteHostServer.encodeAck(command, true))
                 pushFullSnapshot()
             }.onFailure { e ->
+                OmtLog.w("Remote", "Command failed: $command — ${e.message}")
                 sendToClient(RemoteHostServer.encodeAck(command, false, e.message))
             }
         }
 
-        override fun onClientDisconnected() = Unit
+        override fun onClientDisconnected() {
+            updateConnectedClientCount()
+        }
+    }
+
+    private fun updateConnectedClientCount() {
+        val count = hostServer?.clientCount() ?: 0
+        _state.update { it.copy(connectedClientCount = count) }
+        OmtLog.i("Remote", "Connected remote clients: $count")
     }
 
     private val clientListener = object : RemoteClient.Listener {
@@ -449,6 +488,7 @@ class RemoteControlManager(
                     val delta = RemoteJsonCodec.decodeDelta(json)
                     val base = clientMirror ?: return
                     clientMirror = RemoteSnapshotMapper.applyDelta(base, delta, clientLivePeaks)
+                    checkSoundcheckLoadingTransitions(clientMirror?.sessions.orEmpty())
                     publishClientMirror()
                     maybeRequestSoundcheckWaveforms()
                 }
@@ -460,13 +500,16 @@ class RemoteControlManager(
                     }
                 }
                 "waveform_chunk" -> {
-                    val (channel, startSec, peaks) = RemoteJsonCodec.decodeWaveformChunk(json)
-                    val mixerId = _state.value.activeMixerId ?: return
-                    val sessionDir = clientMirror?.sessions?.get(mixerId)?.selectedSoundcheckDir ?: return
-                    val key = "$mixerId|$sessionDir"
+                    val chunk = RemoteJsonCodec.decodeWaveformChunk(json)
+                    val key = "${chunk.mixerId}|${chunk.sessionDir}"
                     val channels = clientSoundcheckPeaks.getOrPut(key) { mutableMapOf() }
-                    channels[channel] = peaks
-                    mergeSoundcheckWaveforms(mixerId, sessionDir)
+                    channels[chunk.channel] = chunk.peaks
+                    OmtLog.d(
+                        "Remote",
+                        "Soundcheck chunk mixer=${chunk.mixerId} ch=${chunk.channel} " +
+                            "points=${chunk.peaks.size} total=${channels.size}",
+                    )
+                    mergeSoundcheckWaveforms(chunk.mixerId, chunk.sessionDir)
                 }
             }
         }
@@ -498,8 +541,10 @@ class RemoteControlManager(
         clientSocketOpen = false
         stopClient()
         OmtLog.e("Remote", "Client connection failed: $error")
+        settings.remoteRole = RemoteRole.OFF
         _state.update {
             it.copy(
+                role = RemoteRole.OFF,
                 connectionState = RemoteConnectionState.ERROR,
                 errorMessage = error,
                 sessionByMixer = emptyMap(),
@@ -528,6 +573,7 @@ class RemoteControlManager(
         if (previousDir != newDir) {
             lastSoundcheckWaveformRequestKey = null
         }
+        checkSoundcheckLoadingTransitions(snapshot.sessions)
         publishClientMirror()
         maybeRequestSoundcheckWaveforms()
     }
@@ -546,12 +592,19 @@ class RemoteControlManager(
             meta.channelCount,
         ).joinToString("|")
         if (requestKey == lastSoundcheckWaveformRequestKey) return
+        if (meta.loading) {
+            OmtLog.d("Remote", "Soundcheck waveforms still loading on host for $mixerId")
+            return
+        }
         lastSoundcheckWaveformRequestKey = requestKey
-        clientSoundcheckPeaks.remove("$mixerId|$dir")
+        val key = "$mixerId|$dir"
+        clientSoundcheckPeaks.remove(key)
+        val channelCount = meta.channelCount.coerceAtLeast(session.captureChannelCount)
+        pendingSoundcheckChannelCount[key] = channelCount
         requestSoundcheckWaveforms(
             mixerId = mixerId,
             sessionDir = dir,
-            channelCount = meta.channelCount.coerceAtLeast(session.captureChannelCount),
+            channelCount = channelCount,
             startSec = session.soundcheckViewStartSec,
             windowSec = session.soundcheckViewWindowSec,
         )
@@ -563,6 +616,12 @@ class RemoteControlManager(
         val meta = remote.soundcheckWaveformMeta ?: return
         val key = "$mixerId|$sessionDir"
         val peaks = clientSoundcheckPeaks[key] ?: return
+        val expected = pendingSoundcheckChannelCount[key]
+            ?: meta.channelCount.coerceAtLeast(1)
+        if (peaks.size < expected) {
+            OmtLog.d("Remote", "Waiting for soundcheck chunks ${peaks.size}/$expected for $key")
+            return
+        }
         val overview = SessionWaveformOverview(
             peaksByChannel = peaks.mapValues { it.value.copyOf() },
             peaksPerSec = meta.peaksPerSec.toFloat(),
@@ -574,7 +633,20 @@ class RemoteControlManager(
         clientMirror = mirror.copy(
             sessions = mirror.sessions + (mixerId to updatedRemote),
         )
+        pendingSoundcheckChannelCount.remove(key)
         publishClientMirror(overviewOverrides = mapOf(mixerId to overview))
+    }
+
+    private fun checkSoundcheckLoadingTransitions(sessions: Map<String, org.openmultitrack.remote.RemoteMixerSnapshot>) {
+        sessions.forEach { (mixerId, session) ->
+            val meta = session.soundcheckWaveformMeta ?: return@forEach
+            val wasLoading = lastSoundcheckLoadingByMixer[mixerId] == true
+            lastSoundcheckLoadingByMixer[mixerId] = meta.loading
+            if (wasLoading && !meta.loading) {
+                OmtLog.i("Remote", "Host finished loading soundcheck waveforms for $mixerId — re-requesting")
+                lastSoundcheckWaveformRequestKey = null
+            }
+        }
     }
 
     private fun publishClientMirror(overviewOverrides: Map<String, SessionWaveformOverview> = emptyMap()) {
@@ -603,7 +675,7 @@ class RemoteControlManager(
         val activeMixerId = mirror.activeMixerId
             ?: mixers.firstOrNull()?.id
             ?: _state.value.activeMixerId
-        OmtLog.i(
+        OmtLog.d(
             "Remote",
             "Mirror updated: mixers=${mixers.size} sessions=${sessions.size} active=$activeMixerId",
         )
@@ -639,7 +711,9 @@ class RemoteControlManager(
         clientMirror = null
         clientLivePeaks.clear()
         clientSoundcheckPeaks.clear()
+        pendingSoundcheckChannelCount.clear()
         lastSoundcheckWaveformRequestKey = null
+        lastSoundcheckLoadingByMixer.clear()
     }
 
     private fun stopAll() {

@@ -163,6 +163,7 @@ fun DawMainScreen(
     onConnectRemoteHost: (RemoteDiscoveredHost) -> Unit = {},
     onConnectRemoteManual: (String, String) -> Unit = { _, _ -> },
     onDisconnectRemote: () -> Unit = {},
+    onExitRemoteMode: () -> Unit = {},
     onScanRemoteQr: () -> Unit = {},
     onEnableRemoteHosting: () -> Unit = {},
     mixerRoutingById: Map<String, MixerRoutingConfig> = emptyMap(),
@@ -185,11 +186,12 @@ fun DawMainScreen(
     var menuOpen by remember { mutableStateOf(false) }
     var playbackStripOverlay by remember { mutableStateOf<Int?>(null) }
     val isRemoteClient = state.remoteRole == RemoteRole.CLIENT &&
-        (state.remoteConnectionState == RemoteConnectionState.CONNECTED ||
-            state.remoteConnectionState == RemoteConnectionState.CONNECTING)
-    val isRemoteSyncing = isRemoteClient &&
-        state.mixers.isEmpty() &&
-        state.remoteConnectionState != RemoteConnectionState.DISCONNECTED
+        state.remoteConnectionState == RemoteConnectionState.CONNECTED
+    val isRemoteHost = state.remoteRole == RemoteRole.HOST
+    val isRemoteSyncing = state.remoteRole == RemoteRole.CLIENT &&
+        (state.remoteConnectionState == RemoteConnectionState.CONNECTING ||
+            state.remoteConnectionState == RemoteConnectionState.DISCOVERING) &&
+        state.mixers.isEmpty()
 
     val activeProfile = activeId?.let { id -> state.mixers.firstOrNull { it.id == id } }
     val activeRouting = activeId?.let { mixerRoutingById[it] } ?: MixerRoutingConfig()
@@ -205,6 +207,9 @@ fun DawMainScreen(
                     isRemoteClient = isRemoteClient,
                     remoteHostLabel = state.remoteHostName ?: state.remoteConnectedHost,
                     remoteConnectionState = state.remoteConnectionState,
+                    remoteConnectedClientCount = state.remoteConnectedClientCount,
+                    isRemoteHost = isRemoteHost,
+                    onExitRemoteMode = onExitRemoteMode,
                     onOpenMixerPicker = onOpenMixerPicker,
                     onOpenMixerSettings = { activeId?.let(onOpenMixerSettings) },
                     onSetAppMode = { mode ->
@@ -479,6 +484,7 @@ fun DawMainScreen(
             onConnectManual = onConnectRemoteManual,
             onScanQr = onScanRemoteQr,
             onEnableHosting = onEnableRemoteHosting,
+            connectedClientCount = state.remoteConnectedClientCount,
         )
     }
 

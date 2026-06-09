@@ -81,6 +81,7 @@ object RemoteSnapshotMapper {
         }
         delta.liveWaveforms.forEach { (mixerId, channels) ->
             val mixerPeaks = livePeaks.getOrPut(mixerId) { mutableMapOf() }
+            val recordElapsedSec = sessions[mixerId]?.recordElapsedSec
             channels.forEach { (ch, tail) ->
                 val decoded = RemoteWaveformUtil.decodeTail(tail.peaksU8)
                 val merged = RemoteWaveformUtil.mergeLiveWaveformTail(
@@ -92,6 +93,9 @@ object RemoteSnapshotMapper {
                     peaks = merged,
                     capacity = waveformCapacity,
                 )
+            }
+            if (recordElapsedSec != null && recordElapsedSec > 0f) {
+                alignLiveWaveformChannels(mixerPeaks, recordElapsedSec, waveformCapacity)
             }
         }
         return snapshot.copy(
@@ -155,6 +159,7 @@ object RemoteSnapshotMapper {
             soundcheckLoopEndSec = remote.soundcheckLoopEndSec,
             soundcheckLoopEnabled = remote.soundcheckLoopEnabled,
             soundcheckMeterLevels = remote.soundcheckMeterLevels,
+            lastRecordingPath = remote.lastRecordingPath,
         )
 
     fun remoteSettingsToUi(settings: RemoteSettingsSnapshot): RemoteUiSettings =
@@ -178,15 +183,28 @@ object RemoteSnapshotMapper {
     ): Map<String, Map<Int, RemoteLiveWaveformTail>> =
         buildMap {
             sessions.forEach { (mixerId, session) ->
+                if (session.waveformPeaks.isEmpty()) return@forEach
                 val mixerGen = previousGen.getOrPut(mixerId) { mutableMapOf() }
                 val mixerPrev = previousTails.getOrPut(mixerId) { mutableMapOf() }
-                val channels = buildMap<Int, RemoteLiveWaveformTail> {
-                    session.waveformPeaks.forEach { (ch, snap) ->
-                        if (snap.peaks.isEmpty()) return@forEach
-                        val tail = RemoteWaveformUtil.quantizeTail(snap.peaks)
-                        val prev = mixerPrev[ch]
-                        if (prev != null && prev.contentEquals(tail)) return@forEach
+                val changedChannels = mutableSetOf<Int>()
+                session.waveformPeaks.forEach { (ch, snap) ->
+                    if (snap.peaks.isEmpty()) return@forEach
+                    val tail = RemoteWaveformUtil.quantizeTail(snap.peaks)
+                    val prev = mixerPrev[ch]
+                    if (prev == null || !prev.contentEquals(tail)) {
                         mixerPrev[ch] = tail
+                        changedChannels.add(ch)
+                    }
+                }
+                if (changedChannels.isEmpty()) return@forEach
+                val channelsToEmit = if (session.isRecording) {
+                    session.waveformPeaks.keys
+                } else {
+                    changedChannels
+                }
+                val channels = buildMap<Int, RemoteLiveWaveformTail> {
+                    channelsToEmit.forEach { ch ->
+                        val tail = mixerPrev[ch] ?: return@forEach
                         val gen = (mixerGen[ch] ?: 0) + 1
                         mixerGen[ch] = gen
                         put(ch, RemoteLiveWaveformTail(gen, tail))
@@ -236,15 +254,7 @@ object RemoteSnapshotMapper {
                 )
             },
             selectedSoundcheckDir = session.selectedSoundcheckDir,
-            soundcheckWaveformMeta = session.soundcheckWaveforms?.let { overview ->
-                RemoteSoundcheckWaveformMeta(
-                    durationSec = overview.durationSec,
-                    peaksPerSec = overview.peaksPerSec.toInt(),
-                    channelCount = session.soundcheckWaveformChannelsTotal.coerceAtLeast(overview.peaksByChannel.size),
-                    loading = session.soundcheckWaveformsLoading,
-                    progress = session.soundcheckWaveformProgress,
-                )
-            },
+            soundcheckWaveformMeta = buildSoundcheckWaveformMeta(session),
             soundcheckViewStartSec = session.soundcheckViewStartSec,
             soundcheckViewWindowSec = session.soundcheckViewWindowSec,
             soundcheckLoopStartSec = session.soundcheckLoopStartSec,
@@ -252,6 +262,8 @@ object RemoteSnapshotMapper {
             soundcheckLoopEnabled = session.soundcheckLoopEnabled,
             statusMessage = session.statusMessage,
             warningMessage = session.warningMessage,
+            lastRecordingPath = session.lastRecordingPath,
+            hostMixerReady = session.probe != null,
         )
 
     private fun mixerDelta(prev: RemoteMixerSnapshot?, current: RemoteMixerSnapshot): RemoteMixerDelta? {
@@ -295,6 +307,8 @@ object RemoteSnapshotMapper {
             soundcheckLoopEnabled = changed(prev?.soundcheckLoopEnabled, current.soundcheckLoopEnabled),
             statusMessage = optionalStringChanged(prev?.statusMessage, current.statusMessage),
             warningMessage = optionalStringChanged(prev?.warningMessage, current.warningMessage),
+            lastRecordingPath = optionalStringChanged(prev?.lastRecordingPath, current.lastRecordingPath),
+            hostMixerReady = changed(prev?.hostMixerReady, current.hostMixerReady),
         )
         return if (delta == RemoteMixerDelta(mixerId = current.mixerId)) null else delta
     }
@@ -323,6 +337,8 @@ object RemoteSnapshotMapper {
             soundcheckLoopEnabled = delta.soundcheckLoopEnabled ?: base.soundcheckLoopEnabled,
             statusMessage = applyOptionalString(delta.statusMessage, base.statusMessage),
             warningMessage = applyOptionalString(delta.warningMessage, base.warningMessage),
+            lastRecordingPath = applyOptionalString(delta.lastRecordingPath, base.lastRecordingPath),
+            hostMixerReady = delta.hostMixerReady ?: base.hostMixerReady,
         )
 
     private fun stripToRemote(strip: ChannelStripState): RemoteChannelStripSnapshot =
@@ -352,7 +368,53 @@ object RemoteSnapshotMapper {
         )
 
     private fun liveWaveformCapacity(recordWindowSec: Float): Int =
-        kotlin.math.max(10, (recordWindowSec * 50f).toInt())
+        kotlin.math.max(10, (recordWindowSec * RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC).toInt())
+
+    private fun alignLiveWaveformChannels(
+        mixerPeaks: MutableMap<Int, LiveWaveformSnapshot>,
+        recordElapsedSec: Float,
+        capacity: Int,
+    ) {
+        val targetLen = (recordElapsedSec * RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC)
+            .toInt()
+            .coerceIn(0, capacity)
+        if (targetLen <= 0) return
+        mixerPeaks.keys.toList().forEach { ch ->
+            val snap = mixerPeaks[ch] ?: return@forEach
+            val peaks = snap.peaks
+            val aligned = when {
+                peaks.size == targetLen -> peaks
+                peaks.size > targetLen -> peaks.copyOfRange(peaks.size - targetLen, peaks.size)
+                else -> peaks
+            }
+            mixerPeaks[ch] = snap.copy(peaks = aligned, capacity = capacity)
+        }
+    }
+
+    private fun buildSoundcheckWaveformMeta(session: MixerSessionUiState): RemoteSoundcheckWaveformMeta? {
+        val overview = session.soundcheckWaveforms
+        if (overview != null) {
+            return RemoteSoundcheckWaveformMeta(
+                durationSec = overview.durationSec,
+                peaksPerSec = overview.peaksPerSec.toInt(),
+                channelCount = session.soundcheckWaveformChannelsTotal.coerceAtLeast(overview.peaksByChannel.size),
+                loading = session.soundcheckWaveformsLoading,
+                progress = session.soundcheckWaveformProgress,
+            )
+        }
+        if (session.selectedSoundcheckDir == null) return null
+        val channelCount = session.soundcheckWaveformChannelsTotal
+            .coerceAtLeast(session.captureChannelCount)
+            .coerceAtLeast(session.channelStrips.size)
+        if (channelCount <= 0 && !session.soundcheckWaveformsLoading) return null
+        return RemoteSoundcheckWaveformMeta(
+            durationSec = session.playbackDurationSec,
+            peaksPerSec = 30,
+            channelCount = channelCount.coerceAtLeast(1),
+            loading = session.soundcheckWaveformsLoading,
+            progress = session.soundcheckWaveformProgress,
+        )
+    }
 
     /** Empty string means "cleared"; null means "unchanged". */
     private fun optionalStringChanged(prev: String?, current: String?): String? =

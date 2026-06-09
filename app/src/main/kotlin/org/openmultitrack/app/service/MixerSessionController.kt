@@ -601,6 +601,9 @@ class MixerSessionController(
         syncVuMeterCapture()
     }
 
+    fun canStartRecording(): Boolean =
+        activeDescriptor != null && activeProbe != null && profile != null
+
     fun startRecording() {
         val descriptor = activeDescriptor ?: return
         val probe = activeProbe ?: return

@@ -213,6 +213,7 @@ class MainActivity : ComponentActivity() {
                         onDiscoverRemoteHosts = viewModel::discoverRemoteHosts,
                         onConnectRemoteHost = viewModel::connectRemoteHost,
                         onDisconnectRemote = viewModel::disconnectRemote,
+                        onExitRemoteMode = viewModel::exitRemoteMode,
                         onPrerequisiteAction = ::handlePrerequisiteAction,
                     )
                 }

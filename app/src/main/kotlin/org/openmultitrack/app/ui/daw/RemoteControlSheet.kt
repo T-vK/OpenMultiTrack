@@ -51,11 +51,13 @@ fun RemoteControlSheet(
     onConnectManual: (host: String, pin: String) -> Unit,
     onScanQr: () -> Unit,
     onEnableHosting: () -> Unit,
+    connectedClientCount: Int = 0,
 ) {
     var manualHost by remember { mutableStateOf("") }
     var manualPin by remember { mutableStateOf("") }
     val isRemoteClient = role == RemoteRole.CLIENT &&
         connectionState == RemoteConnectionState.CONNECTED
+    val isRemoteHost = role == RemoteRole.HOST
 
     ExpandedBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -71,12 +73,19 @@ fun RemoteControlSheet(
 
             if (isRemoteClient) {
                 Text(
-                    "Controlling ${hostName ?: connectedHost}",
+                    "REMOTE MODE — controlling ${hostName ?: connectedHost}",
                     modifier = Modifier.padding(vertical = 8.dp),
                     style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
                 )
-                OutlinedButton(onClick = onDisconnect, modifier = Modifier.fillMaxWidth()) {
-                    Text("Disconnect")
+                Text(
+                    "Transport, mixers, and soundcheck are mirrored from the host device.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                Button(onClick = onDisconnect, modifier = Modifier.fillMaxWidth()) {
+                    Text("Exit remote mode")
                 }
             } else {
                 Text(
@@ -95,11 +104,20 @@ fun RemoteControlSheet(
                     }
                 }
 
-                if (role == RemoteRole.HOST) {
+                if (isRemoteHost) {
                     Text(
-                        "This device is hosting on ${localHostIp ?: "…"}:8765",
+                        "HOST MODE — accepting remotes on ${localHostIp ?: "…"}:8765",
                         style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
                     )
+                    if (connectedClientCount > 0) {
+                        Text(
+                            "$connectedClientCount remote device(s) connected",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(vertical = 4.dp),
+                        )
+                    }
                     pairingPin?.let { pin ->
                         Text("Pairing PIN: $pin", style = MaterialTheme.typography.titleMedium)
                     }

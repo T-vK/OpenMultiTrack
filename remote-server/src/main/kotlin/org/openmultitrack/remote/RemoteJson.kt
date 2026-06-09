@@ -94,20 +94,34 @@ internal object RemoteJson {
         return root.getString("command") to root.getJSONObject("payload")
     }
 
-    fun encodeWaveformChunk(channel: Int, startSec: Float, peaks: FloatArray): String =
+    fun encodeWaveformChunk(
+        mixerId: String,
+        sessionDir: String,
+        channel: Int,
+        startSec: Float,
+        peaks: FloatArray,
+    ): String =
         JSONObject().apply {
             put("type", "waveform_chunk")
+            put("mixerId", mixerId)
+            put("sessionDir", sessionDir)
             put("channel", channel)
             put("startSec", startSec.toDouble())
             put("peaks", JSONArray().apply { peaks.forEach { put(it.toDouble()) } })
         }.toString()
 
-    fun decodeWaveformChunk(json: String): Triple<Int, Float, FloatArray> {
+    fun decodeWaveformChunk(json: String): WaveformChunkMessage {
         val root = JSONObject(json)
         require(root.getString("type") == "waveform_chunk")
         val arr = root.getJSONArray("peaks")
         val peaks = FloatArray(arr.length()) { i -> arr.getDouble(i).toFloat() }
-        return Triple(root.getInt("channel"), root.getFloat("startSec"), peaks)
+        return WaveformChunkMessage(
+            mixerId = root.optString("mixerId", ""),
+            sessionDir = root.optString("sessionDir", ""),
+            channel = root.getInt("channel"),
+            startSec = root.getFloat("startSec"),
+            peaks = peaks,
+        )
     }
 
     fun encodeWaveformRequest(
@@ -203,6 +217,8 @@ internal object RemoteJson {
             put("soundcheckLoopEnabled", s.soundcheckLoopEnabled)
             s.statusMessage?.let { put("statusMessage", it) }
             s.warningMessage?.let { put("warningMessage", it) }
+            s.lastRecordingPath?.let { put("lastRecordingPath", it) }
+            put("hostMixerReady", s.hostMixerReady)
         }
 
     private fun decodeMixerSnapshot(mixerId: String, obj: JSONObject): RemoteMixerSnapshot {
@@ -238,6 +254,8 @@ internal object RemoteJson {
             soundcheckLoopEnabled = obj.optBoolean("soundcheckLoopEnabled"),
             statusMessage = obj.optString("statusMessage").takeIf { it.isNotBlank() },
             warningMessage = obj.optString("warningMessage").takeIf { it.isNotBlank() },
+            lastRecordingPath = obj.optString("lastRecordingPath").takeIf { it.isNotBlank() },
+            hostMixerReady = obj.optBoolean("hostMixerReady"),
         )
     }
 
@@ -267,6 +285,8 @@ internal object RemoteJson {
             d.soundcheckLoopEnabled?.let { put("soundcheckLoopEnabled", it) }
             if (d.statusMessage != null) put("statusMessage", d.statusMessage)
             if (d.warningMessage != null) put("warningMessage", d.warningMessage)
+            if (d.lastRecordingPath != null) put("lastRecordingPath", d.lastRecordingPath)
+            d.hostMixerReady?.let { put("hostMixerReady", it) }
         }
 
     private fun decodeMixerDelta(mixerId: String, obj: JSONObject): RemoteMixerDelta {
@@ -324,6 +344,8 @@ internal object RemoteJson {
             soundcheckLoopEnabled = if (obj.has("soundcheckLoopEnabled")) obj.getBoolean("soundcheckLoopEnabled") else null,
             statusMessage = if (obj.has("statusMessage")) obj.optString("statusMessage") else null,
             warningMessage = if (obj.has("warningMessage")) obj.optString("warningMessage") else null,
+            lastRecordingPath = if (obj.has("lastRecordingPath")) obj.optString("lastRecordingPath") else null,
+            hostMixerReady = if (obj.has("hostMixerReady")) obj.getBoolean("hostMixerReady") else null,
         )
     }
 

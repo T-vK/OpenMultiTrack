@@ -117,6 +117,7 @@ data class DawUiState(
     val remotePairingPin: String? = null,
     val remoteHostDeviceId: String? = null,
     val remoteError: String? = null,
+    val remoteConnectedClientCount: Int = 0,
     val soundcheckLoadPrompt: SoundcheckLoadPromptState? = null,
     val promptLoadSoundcheckAfterRecord: Boolean = true,
 )
@@ -215,6 +216,7 @@ class MainViewModel(
     }
 
     private fun applyRemoteState(remoteState: org.openmultitrack.app.remote.RemoteControlUiState) {
+        val previousRole = _uiState.value.remoteRole
         _uiState.update { ui ->
             val base = ui.copy(
                 remoteRole = remoteState.role,
@@ -228,8 +230,28 @@ class MainViewModel(
                 remotePairingPin = remoteState.pairingPin,
                 remoteHostDeviceId = remoteState.hostDeviceId,
                 remoteError = remoteState.errorMessage,
+                remoteConnectedClientCount = remoteState.connectedClientCount,
             )
             val mirrorReady = remoteState.mixers.isNotEmpty() || remoteState.sessionByMixer.isNotEmpty()
+            var soundcheckPrompt: SoundcheckLoadPromptState? = ui.soundcheckLoadPrompt
+            if (remoteState.role == RemoteRole.CLIENT && mirrorReady) {
+                remoteState.sessionByMixer.forEach { (mixerId, session) ->
+                    val wasRecording = wasRecordingByMixer[mixerId] == true
+                    wasRecordingByMixer[mixerId] = session.isRecording
+                    if (
+                        wasRecording &&
+                        !session.isRecording &&
+                        settings.promptLoadSoundcheckAfterRecord &&
+                        session.lastRecordingPath != null &&
+                        session.appMode == AppMode.MULTITRACK_RECORD
+                    ) {
+                        soundcheckPrompt = SoundcheckLoadPromptState(
+                            mixerId = mixerId,
+                            sessionDir = session.lastRecordingPath,
+                        )
+                    }
+                }
+            }
             when {
                 remoteState.role == RemoteRole.CLIENT && mirrorReady -> {
                     val settingsPatch = remoteState.uiSettings
@@ -255,6 +277,7 @@ class MainViewModel(
                         stripIconMode = settingsPatch?.stripIconMode?.let {
                             StripIconMode.entries.getOrElse(it) { StripIconMode.SHOW }
                         } ?: ui.stripIconMode,
+                        soundcheckLoadPrompt = soundcheckPrompt,
                     )
                 }
                 remoteState.role == RemoteRole.CLIENT &&
@@ -268,6 +291,10 @@ class MainViewModel(
                 }
                 else -> base
             }
+        }
+        if (previousRole == RemoteRole.CLIENT && remoteState.role == RemoteRole.OFF) {
+            wasRecordingByMixer.clear()
+            loadMixers()
         }
     }
 
@@ -288,9 +315,12 @@ class MainViewModel(
     }
 
     fun disconnectRemote() {
-        sessionClient.withRemoteControl { it.disconnect() }
+        sessionClient.withRemoteControl { it.exitRemoteClientMode() }
+        wasRecordingByMixer.clear()
         loadMixers()
     }
+
+    fun exitRemoteMode() = disconnectRemote()
 
     fun showMixerPicker(show: Boolean) {
         _uiState.update { it.copy(showMixerPicker = show) }
@@ -313,10 +343,12 @@ class MainViewModel(
     }
 
     fun enableRemoteHosting() {
+        wasRecordingByMixer.clear()
         sessionClient.withRemoteControl {
             it.applyRole(RemoteRole.HOST)
             it.refreshPairingState()
         }
+        loadMixers()
     }
 
     fun pairRemoteFromQr(uri: String) {

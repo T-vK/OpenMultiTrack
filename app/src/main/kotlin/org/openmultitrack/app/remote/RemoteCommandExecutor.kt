@@ -66,8 +66,12 @@ class RemoteCommandExecutor(
             }
             "start_record" -> {
                 val mixerId = payload.getString("mixerId")
+                val ctrl = manager.getOrCreate(mixerId)
+                check(ctrl.canStartRecording()) {
+                    "Mixer not ready on host — check USB connection"
+                }
                 check(promoteForeground("Recording")) { "Could not start foreground service" }
-                manager.getOrCreate(mixerId).startRecording()
+                ctrl.startRecording()
                 null
             }
             "stop_record" -> {
@@ -194,11 +198,13 @@ class RemoteCommandExecutor(
             windowSec = windowSec,
             maxPoints = maxPoints,
         )
-        return WaveformChunkReply(channel, startSec, sliced)
+        return WaveformChunkReply(mixerId, sessionDir, channel, startSec, sliced)
     }
 }
 
 data class WaveformChunkReply(
+    val mixerId: String,
+    val sessionDir: String,
     val channel: Int,
     val startSec: Float,
     val peaks: FloatArray,

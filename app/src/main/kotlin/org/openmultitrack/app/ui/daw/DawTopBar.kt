@@ -155,6 +155,7 @@ private fun MixerControlCluster(
 private fun TransportControlCluster(
     appMode: AppMode,
     session: MixerSessionUiState?,
+    isRemoteClient: Boolean,
     onStartRecord: () -> Unit,
     onStopRecord: () -> Unit,
     onToggleSoundcheckPlayback: () -> Unit,
@@ -166,6 +167,7 @@ private fun TransportControlCluster(
     when {
         appMode == AppMode.MULTITRACK_RECORD -> RecordTransportCluster(
             session = session,
+            isRemoteClient = isRemoteClient,
             onStartRecord = onStartRecord,
             onStopRecord = onStopRecord,
         )
@@ -227,11 +229,13 @@ private fun TransportIconButton(
 @Composable
 private fun RecordTransportCluster(
     session: MixerSessionUiState?,
+    isRemoteClient: Boolean,
     onStartRecord: () -> Unit,
     onStopRecord: () -> Unit,
 ) {
     val isRecording = session?.isRecording == true
-    val canRecord = session?.probe != null && !isRecording
+    val hostReady = session?.probe != null || (isRemoteClient && session?.captureChannelCount?.let { it > 0 } == true)
+    val canRecord = hostReady && !isRecording
     TransportButtonCluster {
         TransportIconButton(
             onClick = onStartRecord,
@@ -429,6 +433,9 @@ fun DawTopBar(
     isRemoteClient: Boolean,
     remoteHostLabel: String?,
     remoteConnectionState: RemoteConnectionState,
+    remoteConnectedClientCount: Int = 0,
+    isRemoteHost: Boolean = false,
+    onExitRemoteMode: () -> Unit = {},
     onOpenMixerPicker: () -> Unit,
     onOpenMixerSettings: () -> Unit,
     onSetAppMode: (AppMode) -> Unit,
@@ -449,11 +456,38 @@ fun DawTopBar(
                 color = MaterialTheme.colorScheme.primaryContainer,
                 modifier = Modifier.fillMaxWidth(),
             ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "REMOTE CONTROL — $remoteHostLabel",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.weight(1f),
+                    )
+                    ToolbarChip(onClick = onExitRemoteMode) {
+                        Text(
+                            "Exit",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
+                }
+            }
+        } else if (isRemoteHost && remoteConnectedClientCount > 0) {
+            Surface(
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Text(
-                    "Remote → $remoteHostLabel",
+                    "Remote connected ($remoteConnectedClientCount)",
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
                 )
             }
         }
@@ -480,6 +514,7 @@ fun DawTopBar(
                             TransportControlCluster(
                                 appMode = mode,
                                 session = session,
+                                isRemoteClient = isRemoteClient,
                                 onStartRecord = onStartRecord,
                                 onStopRecord = onStopRecord,
                                 onToggleSoundcheckPlayback = onToggleSoundcheckPlayback,
@@ -493,12 +528,14 @@ fun DawTopBar(
                 }
             },
             actions = {
-                val remoteActive = remoteConnectionState == RemoteConnectionState.CONNECTED
+                val remoteHighlight = isRemoteClient ||
+                    (isRemoteHost && remoteConnectedClientCount > 0) ||
+                    remoteConnectionState == RemoteConnectionState.CONNECTING
                 IconButton(onClick = onOpenRemoteControl) {
                     Icon(
                         Icons.Default.Cast,
                         contentDescription = "Remote control",
-                        tint = if (remoteActive) {
+                        tint = if (remoteHighlight) {
                             MaterialTheme.colorScheme.primary
                         } else {
                             MaterialTheme.colorScheme.onSurface

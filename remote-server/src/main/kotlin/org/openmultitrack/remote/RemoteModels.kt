@@ -75,6 +75,8 @@ data class RemoteMixerSnapshot(
     val soundcheckLoopEnabled: Boolean = false,
     val statusMessage: String? = null,
     val warningMessage: String? = null,
+    val lastRecordingPath: String? = null,
+    val hostMixerReady: Boolean = false,
 )
 
 data class RemoteMirrorSnapshot(
@@ -90,6 +92,33 @@ data class RemoteMixerProfileSnapshot(
     val id: String,
     val displayName: String,
 )
+
+data class WaveformChunkMessage(
+    val mixerId: String,
+    val sessionDir: String,
+    val channel: Int,
+    val startSec: Float,
+    val peaks: FloatArray,
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is WaveformChunkMessage) return false
+        return mixerId == other.mixerId &&
+            sessionDir == other.sessionDir &&
+            channel == other.channel &&
+            startSec == other.startSec &&
+            peaks.contentEquals(other.peaks)
+    }
+
+    override fun hashCode(): Int {
+        var result = mixerId.hashCode()
+        result = 31 * result + sessionDir.hashCode()
+        result = 31 * result + channel
+        result = 31 * result + startSec.hashCode()
+        result = 31 * result + peaks.contentHashCode()
+        return result
+    }
+}
 
 data class RemoteLiveWaveformTail(
     val generation: Int,
@@ -135,4 +164,6 @@ data class RemoteMixerDelta(
     val soundcheckLoopEnabled: Boolean? = null,
     val statusMessage: String? = null,
     val warningMessage: String? = null,
+    val lastRecordingPath: String? = null,
+    val hostMixerReady: Boolean? = null,
 )
