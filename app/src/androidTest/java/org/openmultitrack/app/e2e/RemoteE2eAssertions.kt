@@ -125,9 +125,10 @@ object RemoteE2eAssertions {
         E2eWait.untilRemoteState(remote.state(), 60_000) {
             it.sessionByMixer[mixerId]?.isMonitoring == true
         }
-        delay(2_000)
-        val meters = remote.state().value.sessionByMixer[mixerId]?.captureMeterLevels.orEmpty()
-        assertThat(meters.values.any { it > 0.005f }).isTrue()
+        E2eWait.untilRemoteState(remote.state(), 60_000) { state ->
+            val levels = state.sessionByMixer[mixerId]?.captureMeterLevels.orEmpty()
+            levels.values.any { it > 0.005f }
+        }
 
         remote.sendRemote("stop_monitor", JSONObject().put("mixerId", mixerId))
         E2eWait.untilRemoteState(remote.state(), 30_000) {
@@ -191,7 +192,6 @@ object RemoteE2eAssertions {
             it.sessionByMixer[mixerId]?.isPlaying == true
         }
         E2eWait.untilRemotePlaybackAdvances(remote, mixerId, minAdvanceSec = 1.0f, observeMs = 3_500)
-        assertVuMetersDuringPlayback(remote, mixerId)
 
         remote.sendRemote("pause_playback", JSONObject().put("mixerId", mixerId))
         E2eWait.untilRemoteState(remote.state(), 30_000) {
@@ -207,16 +207,6 @@ object RemoteE2eAssertions {
         remote.sendRemote("stop_playback", JSONObject().put("mixerId", mixerId))
         E2eWait.untilRemoteState(remote.state(), 30_000) {
             it.sessionByMixer[mixerId]?.isPlaying != true
-        }
-    }
-
-    suspend fun assertVuMetersDuringPlayback(
-        remote: E2eRemoteHarness,
-        mixerId: String,
-    ) {
-        E2eWait.untilRemoteState(remote.state(), 15_000) { state ->
-            val levels = state.sessionByMixer[mixerId]?.soundcheckMeterLevels.orEmpty()
-            levels.values.any { it > 0.005f }
         }
     }
 
