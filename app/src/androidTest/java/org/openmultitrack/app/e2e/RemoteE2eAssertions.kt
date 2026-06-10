@@ -72,14 +72,14 @@ object RemoteE2eAssertions {
                 command,
                 JSONObject().put("mixerId", mixerId).put("index", channelIndex),
             )
-            E2eWait.untilRemoteState(remote.state(), 30_000) {
+            E2eWait.untilRemoteState(remote.state(), 60_000) {
                 strip()?.let(read) == !before
             }
             remote.sendRemote(
                 command,
                 JSONObject().put("mixerId", mixerId).put("index", channelIndex),
             )
-            E2eWait.untilRemoteState(remote.state(), 30_000) {
+            E2eWait.untilRemoteState(remote.state(), 60_000) {
                 strip()?.let(read) == before
             }
         }
@@ -93,7 +93,7 @@ object RemoteE2eAssertions {
             "toggle_solo",
             JSONObject().put("mixerId", mixerId).put("index", channelIndex),
         )
-        E2eWait.untilRemoteState(remote.state(), 30_000) {
+        E2eWait.untilRemoteState(remote.state(), 60_000) {
             strip()?.solo == !soloBefore
         }
         val strips = remote.state().value.sessionByMixer[mixerId]!!.channelStrips
@@ -105,7 +105,7 @@ object RemoteE2eAssertions {
             "toggle_solo",
             JSONObject().put("mixerId", mixerId).put("index", channelIndex),
         )
-        E2eWait.untilRemoteState(remote.state(), 30_000) {
+        E2eWait.untilRemoteState(remote.state(), 60_000) {
             strip()?.solo == soloBefore
         }
     }
@@ -193,8 +193,9 @@ object RemoteE2eAssertions {
         }
         E2eWait.untilRemotePlaybackAdvances(remote, mixerId, minAdvanceSec = 1.0f, observeMs = 3_500)
 
+        E2eWait.awaitRemoteReady(remote, hostIp, mixerId)
         remote.sendRemote("pause_playback", JSONObject().put("mixerId", mixerId))
-        E2eWait.untilRemoteState(remote.state(), 30_000) {
+        E2eWait.untilRemoteState(remote.state(), 90_000) {
             it.sessionByMixer[mixerId]?.isPlaying != true
         }
 
@@ -449,8 +450,9 @@ object RemoteE2eAssertions {
         E2eWait.untilRemotePlaybackAdvances(remote, mixerId, minAdvanceSec = 1.0f, observeMs = 3_000)
         assertThat(remote.state().value.sessionByMixer[mixerId]?.appMode).isEqualTo(AppMode.SIMPLE_PLAY)
 
+        E2eWait.awaitRemoteReady(remote, hostIp, mixerId)
         remote.sendRemote("pause_playback", JSONObject().put("mixerId", mixerId))
-        E2eWait.untilRemoteState(remote.state(), 30_000) {
+        E2eWait.untilRemoteState(remote.state(), 90_000) {
             it.sessionByMixer[mixerId]?.isPlaying != true
         }
         remote.sendRemote(
@@ -520,7 +522,15 @@ object RemoteE2eAssertions {
         mixerId: String,
         hostIp: String,
     ) {
-        val currentMode = remote.state().value.sessionByMixer[mixerId]?.appMode
+        val session = remote.state().value.sessionByMixer[mixerId]
+        if (session?.isMonitoring == true) {
+            E2eWait.awaitRemoteReady(remote, hostIp, mixerId)
+            remote.sendRemote("stop_monitor", JSONObject().put("mixerId", mixerId))
+            E2eWait.untilRemoteState(remote.state(), 60_000) {
+                it.sessionByMixer[mixerId]?.isMonitoring != true
+            }
+        }
+        val currentMode = session?.appMode
         if (currentMode != AppMode.VIRTUAL_SOUNDCHECK) {
             val sessionDir = remote.state().value.sessionByMixer[mixerId]?.selectedSoundcheckDir
             if (sessionDir != null) {

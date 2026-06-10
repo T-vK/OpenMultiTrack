@@ -51,7 +51,6 @@ class RemoteE2eClientTest {
         RemoteE2eAssertions.assertSettingsMirrored(remote.state())
         RemoteE2eAssertions.assertRoutingMirrored(remote, mixerId)
         RemoteE2eAssertions.assertSoundcheckWaveformsOnRemote(remote, mixerId)
-        RemoteE2eAssertions.assertStripControlsFromRemote(remote, mixerId, hostIp)
         RemoteE2eAssertions.assertPlaybackTransport(remote, mixerId, hostIp)
         RemoteE2eAssertions.assertSoundcheckViewPanAndSet(remote, mixerId, hostIp)
         RemoteE2eAssertions.assertSettingsChangeFromRemote(remote, mixerId, hostIp)
@@ -66,6 +65,7 @@ class RemoteE2eClientTest {
         RemoteE2eAssertions.assertRoutingChangeFromRemote(remote, mixerId, hostIp)
         RemoteE2eAssertions.assertSimplePlayFromRemote(remote, mixerId, hostIp, primarySessionDir)
         RemoteE2eAssertions.assertBroaderSettingsSync(remote, mixerId, hostIp)
+        RemoteE2eAssertions.assertStripControlsFromRemote(remote, mixerId, hostIp)
         RemoteE2eAssertions.assertMonitorModeFromRemote(remote, mixerId, hostIp)
         RemoteE2eAssertions.assertLiveWaveformsDuringRecording(remote, mixerId, hostIp)
 
