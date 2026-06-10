@@ -9,7 +9,6 @@ import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.openmultitrack.domain.session.AppMode
 import kotlin.math.abs
 
 /**
