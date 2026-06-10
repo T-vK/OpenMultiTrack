@@ -90,7 +90,7 @@ class RemoteE2eClientTest {
         hostIp: String,
         mixerId: String,
     ) {
-        assertThat(remote.state().value.connectionState.name).isEqualTo("CONNECTED")
+        E2eWait.awaitRemoteReady(remote, hostIp, mixerId)
         remote.disconnectClient()
         delay(2_000)
         remote.connectClient(hostIp)
