@@ -13,6 +13,7 @@
 #   --host SERIAL       adb serial for USB host tablet
 #   --client SERIAL     adb serial for remote client tablet
 #   --skip-build        Use existing debug + androidTest APKs
+#   --remote-only       Run only dual-device remote e2e (skip other host tests)
 #   -h, --help
 
 set -euo pipefail
@@ -27,6 +28,7 @@ ADB="$SDK/platform-tools/adb"
 HOST_SERIAL=""
 CLIENT_SERIAL=""
 SKIP_BUILD=false
+REMOTE_ONLY=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -41,8 +43,9 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --skip-build) SKIP_BUILD=true; shift ;;
+    --remote-only) REMOTE_ONLY=true; shift ;;
     -h|--help)
-      sed -n '2,18p' "$0"
+      sed -n '2,19p' "$0"
       exit 0
       ;;
     -*)
@@ -198,37 +201,41 @@ COMMON_ARGS=(
   -e host_ip "$HOST_IP"
 )
 
-log "Running host zoom e2e on $HOST_SERIAL (fresh USB)..."
-run_instrument "$HOST_SERIAL" \
-  -e class org.openmultitrack.app.e2e.HostZoomE2eTest \
-  "${COMMON_ARGS[@]}" \
-  || die "HostZoomE2eTest failed"
+if [[ "$REMOTE_ONLY" != true ]]; then
+  log "Running host zoom e2e on $HOST_SERIAL (fresh USB)..."
+  run_instrument "$HOST_SERIAL" \
+    -e class org.openmultitrack.app.e2e.HostZoomE2eTest \
+    "${COMMON_ARGS[@]}" \
+    || die "HostZoomE2eTest failed"
 
-log "Running host-local e2e on $HOST_SERIAL..."
-"$ADB" -s "$HOST_SERIAL" shell am force-stop org.openmultitrack 2>/dev/null || true
-"$ADB" -s "$HOST_SERIAL" shell am force-stop org.openmultitrack.test 2>/dev/null || true
-sleep 5
-run_instrument "$HOST_SERIAL" \
-  -e class org.openmultitrack.app.e2e.HostLocalE2eTest \
-  "${COMMON_ARGS[@]}" \
-  || die "HostLocalE2eTest failed"
+  log "Running host-local e2e on $HOST_SERIAL..."
+  "$ADB" -s "$HOST_SERIAL" shell am force-stop org.openmultitrack 2>/dev/null || true
+  "$ADB" -s "$HOST_SERIAL" shell am force-stop org.openmultitrack.test 2>/dev/null || true
+  sleep 5
+  run_instrument "$HOST_SERIAL" \
+    -e class org.openmultitrack.app.e2e.HostLocalE2eTest \
+    "${COMMON_ARGS[@]}" \
+    || die "HostLocalE2eTest failed"
 
-log "Running interrupted-recording prep on $HOST_SERIAL..."
-run_instrument "$HOST_SERIAL" \
-  -e class org.openmultitrack.app.e2e.InterruptedRecordingPrepE2eTest \
-  "${COMMON_ARGS[@]}" \
-  || die "InterruptedRecordingPrepE2eTest failed"
+  log "Running interrupted-recording prep on $HOST_SERIAL..."
+  run_instrument "$HOST_SERIAL" \
+    -e class org.openmultitrack.app.e2e.InterruptedRecordingPrepE2eTest \
+    "${COMMON_ARGS[@]}" \
+    || die "InterruptedRecordingPrepE2eTest failed"
 
-log "Force-stopping host app mid-recording..."
-"$ADB" -s "$HOST_SERIAL" shell am force-stop org.openmultitrack.test 2>/dev/null || true
-"$ADB" -s "$HOST_SERIAL" shell am force-stop org.openmultitrack 2>/dev/null || true
-sleep 5
+  log "Force-stopping host app mid-recording..."
+  "$ADB" -s "$HOST_SERIAL" shell am force-stop org.openmultitrack.test 2>/dev/null || true
+  "$ADB" -s "$HOST_SERIAL" shell am force-stop org.openmultitrack 2>/dev/null || true
+  sleep 5
 
-log "Running interrupted-recording resume on $HOST_SERIAL..."
-run_instrument "$HOST_SERIAL" \
-  -e class org.openmultitrack.app.e2e.InterruptedRecordingResumeE2eTest \
-  "${COMMON_ARGS[@]}" \
-  || die "InterruptedRecordingResumeE2eTest failed"
+  log "Running interrupted-recording resume on $HOST_SERIAL..."
+  run_instrument "$HOST_SERIAL" \
+    -e class org.openmultitrack.app.e2e.InterruptedRecordingResumeE2eTest \
+    "${COMMON_ARGS[@]}" \
+    || die "InterruptedRecordingResumeE2eTest failed"
+else
+  log "Skipping non-remote e2e (--remote-only)"
+fi
 
 log "Running dual-device remote e2e (host + client in parallel)..."
 HOST_LOG="$(mktemp)"
