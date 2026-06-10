@@ -207,6 +207,7 @@ class MixerSessionController(
     }
 
     fun setAppMode(mode: AppMode) {
+        if (_state.value.appMode == mode) return
         if (mode.isPlaybackMode && _state.value.isRecording) {
             scope.launch { stopRecording() }
         }

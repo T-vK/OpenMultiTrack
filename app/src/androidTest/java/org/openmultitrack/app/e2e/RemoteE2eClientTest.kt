@@ -91,10 +91,7 @@ class RemoteE2eClientTest {
     }
 
     private suspend fun awaitSoundcheckReady(remote: E2eRemoteHarness, mixerId: String) {
-        E2eWait.untilRemoteState(remote.state(), 120_000) { state ->
-            val session = state.sessionByMixer[mixerId] ?: return@untilRemoteState false
-            session.playbackDurationSec > 1f && !session.soundcheckWaveformsLoading
-        }
+        RemoteE2eAssertions.assertSoundcheckWaveformsOnRemote(remote, mixerId)
     }
 
     private suspend fun testUnexpectedDisconnectRecovery(

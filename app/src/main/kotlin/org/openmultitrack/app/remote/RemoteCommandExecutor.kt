@@ -24,12 +24,10 @@ class RemoteCommandExecutor(
             "set_app_mode" -> {
                 val mixerId = payload.getString("mixerId")
                 val mode = AppMode.entries[payload.getInt("mode")]
-                settings.setAppModeForMixer(mixerId, mode)
                 val ctrl = manager.getOrCreate(mixerId)
+                if (ctrl.state.value.appMode == mode) return@runCatching null
+                settings.setAppModeForMixer(mixerId, mode)
                 ctrl.setAppMode(mode)
-                if (mode.isPlaybackMode) {
-                    ctrl.refreshSoundcheckLibrary()
-                }
                 null
             }
             "toggle_arm" -> {

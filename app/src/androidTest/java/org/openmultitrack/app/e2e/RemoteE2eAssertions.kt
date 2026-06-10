@@ -85,14 +85,17 @@ object RemoteE2eAssertions {
         remote: E2eRemoteHarness,
         mixerId: String,
     ) {
-        remote.sendRemote(
-            "set_app_mode",
-            JSONObject().put("mixerId", mixerId).put("mode", AppMode.VIRTUAL_SOUNDCHECK.ordinal),
-        )
-        E2eWait.untilRemoteState(remote.state(), 15_000) {
-            it.sessionByMixer[mixerId]?.appMode == AppMode.VIRTUAL_SOUNDCHECK
+        val currentMode = remote.state().value.sessionByMixer[mixerId]?.appMode
+        if (currentMode != AppMode.VIRTUAL_SOUNDCHECK) {
+            remote.sendRemote(
+                "set_app_mode",
+                JSONObject().put("mixerId", mixerId).put("mode", AppMode.VIRTUAL_SOUNDCHECK.ordinal),
+            )
+            E2eWait.untilRemoteState(remote.state(), 15_000) {
+                it.sessionByMixer[mixerId]?.appMode == AppMode.VIRTUAL_SOUNDCHECK
+            }
+            assertSoundcheckWaveformsOnRemote(remote, mixerId)
         }
-        assertSoundcheckWaveformsOnRemote(remote, mixerId)
 
         remote.sendRemote("play_playback", JSONObject().put("mixerId", mixerId))
         E2eWait.untilRemoteState(remote.state(), 60_000) {

@@ -794,11 +794,36 @@ class RemoteControlManager(
             val meta = session.soundcheckWaveformMeta ?: return@forEach
             val wasLoading = lastSoundcheckLoadingByMixer[mixerId] == true
             lastSoundcheckLoadingByMixer[mixerId] = meta.loading
+            if (!wasLoading && meta.loading) {
+                session.selectedSoundcheckDir?.let { dir ->
+                    val key = "$mixerId|$dir"
+                    clientSoundcheckPeaks.remove(key)
+                    pendingSoundcheckChannelCount.remove(key)
+                }
+                lastSoundcheckWaveformRequestKey = null
+            }
             if (wasLoading && !meta.loading) {
                 OmtLog.i("Remote", "Host finished loading soundcheck waveforms for $mixerId — re-requesting")
                 lastSoundcheckWaveformRequestKey = null
             }
         }
+    }
+
+    private fun cachedSoundcheckOverview(
+        mixerId: String,
+        remote: org.openmultitrack.remote.RemoteMixerSnapshot,
+    ): SessionWaveformOverview? {
+        val dir = remote.selectedSoundcheckDir ?: return null
+        val meta = remote.soundcheckWaveformMeta ?: return null
+        val key = "$mixerId|$dir"
+        val peaks = clientSoundcheckPeaks[key] ?: return null
+        val expected = pendingSoundcheckChannelCount[key] ?: meta.channelCount.coerceAtLeast(1)
+        if (peaks.size < expected) return null
+        return SessionWaveformOverview(
+            peaksByChannel = peaks.mapValues { it.value.copyOf() },
+            peaksPerSec = meta.peaksPerSec.toFloat(),
+            durationSec = meta.durationSec,
+        )
     }
 
     private fun publishClientMirror(overviewOverrides: Map<String, SessionWaveformOverview> = emptyMap()) {
@@ -809,8 +834,9 @@ class RemoteControlManager(
                 remote,
                 clientLivePeaks[id] ?: emptyMap(),
             )
-            overviewOverrides[id]?.let { overview ->
-                session.copy(soundcheckWaveforms = overview, soundcheckWaveformsLoading = false)
+            val overview = overviewOverrides[id] ?: cachedSoundcheckOverview(id, remote)
+            overview?.let {
+                session.copy(soundcheckWaveforms = it, soundcheckWaveformsLoading = false)
             } ?: session
         }
         val mixers = mirror.mixers.map { profile ->
