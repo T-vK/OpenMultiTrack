@@ -193,20 +193,50 @@ reconnect_wireless_adb() {
   return 1
 }
 
+client_can_reach_host() {
+  local serial="$1"
+  local host_ip="$2"
+  "$ADB" -s "$serial" shell ping -c 1 -W 3 "$host_ip" 2>/dev/null | grep -qE '1 (packets )?received'
+}
+
+client_wlan_up() {
+  local serial="$1"
+  ! "$ADB" -s "$serial" shell ip link show wlan0 2>/dev/null | grep -qE 'state DOWN|NO-CARRIER'
+}
+
+LAST_CLIENT_WIFI_RESTART=0
+
 # USB client tablets sometimes drop wlan0 during long runs; rooted builds can bounce Wi-Fi.
 restart_client_wifi_if_needed() {
   local serial="$1"
   local host_ip="$2"
   is_wireless_serial "$serial" && return 0
-  if "$ADB" -s "$serial" shell ping -c 1 -W 2 "$host_ip" 2>/dev/null | grep -q '1 received'; then
+  if client_can_reach_host "$serial" "$host_ip"; then
     return 0
+  fi
+  # wlan0 down: recover immediately; otherwise require repeated ping loss (transient drops happen).
+  if client_wlan_up "$serial"; then
+    local attempt
+    for attempt in 1 2; do
+      sleep 3
+      if client_can_reach_host "$serial" "$host_ip"; then
+        return 0
+      fi
+    done
+  fi
+  local now
+  now="$(date +%s)"
+  if (( now - LAST_CLIENT_WIFI_RESTART < 90 )); then
+    log "Skipping client Wi-Fi restart (cooldown; last ${now - LAST_CLIENT_WIFI_RESTART}s ago)"
+    return 1
   fi
   log "Client $serial lost LAN reachability to $host_ip — restarting Wi-Fi (su)"
   "$ADB" -s "$serial" shell su -c 'svc wifi disable ; svc wifi enable' 2>/dev/null || true
+  LAST_CLIENT_WIFI_RESTART="$now"
   local i
   for ((i = 1; i <= 12; i++)); do
     sleep 5
-    if "$ADB" -s "$serial" shell ping -c 1 -W 2 "$host_ip" 2>/dev/null | grep -q '1 received'; then
+    if client_can_reach_host "$serial" "$host_ip"; then
       log "Client Wi-Fi restored after ${i}x5s"
       return 0
     fi
@@ -295,7 +325,7 @@ cleanup_remote_bridge() {
 }
 
 setup_remote_bridge_if_needed() {
-  if "$ADB" -s "$CLIENT_SERIAL" shell ping -c 1 -W 2 "$HOST_IP" 2>/dev/null | grep -q '1 received'; then
+  if client_can_reach_host "$CLIENT_SERIAL" "$HOST_IP"; then
     log "Client reaches host directly on LAN"
     return 0
   fi
@@ -393,6 +423,7 @@ set -e
 ADB_KEEPALIVE_PID=""
 start_adb_keepalive() {
   (
+    sleep 45
     while kill -0 "$CLIENT_PID" 2>/dev/null || kill -0 "$HOST_PID" 2>/dev/null; do
       reconnect_wireless_adb "$HOST_SERIAL" || true
       restart_client_wifi_if_needed "$CLIENT_SERIAL" "$HOST_IP" || true

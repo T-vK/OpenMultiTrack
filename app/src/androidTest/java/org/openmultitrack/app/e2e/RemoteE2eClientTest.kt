@@ -36,7 +36,7 @@ class RemoteE2eClientTest {
         remote.bindSession()
         remote.connectClient(hostIp)
 
-        val mixerId = E2eWait.untilRemoteState(remote.state(), 60_000) { state ->
+        val mixerId = E2eWait.untilRemoteState(remote.state(), 120_000) { state ->
             state.sessionByMixer.isNotEmpty()
         }.let { state ->
             state.activeMixerId ?: state.sessionByMixer.keys.first()
