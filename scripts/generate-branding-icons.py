@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate launcher, fastlane, and F-Droid repo icons from iconv2.png."""
+"""Generate launcher, fastlane, and F-Droid repo icons from iconv4.png."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,7 +7,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "iconv2.png"
+SOURCE = ROOT / "iconv4.png"
 BRANDING = ROOT / "branding"
 APP_RES = ROOT / "app" / "src" / "main" / "res"
 APP_LOGO_DRAWABLE = APP_RES / "drawable-nodpi" / "ic_app_logo.png"
@@ -97,7 +97,7 @@ def main() -> None:
         out_dir = APP_RES / folder
         save_png(out_dir / "ic_launcher_foreground.png", compose_adaptive_foreground(master, size))
 
-    print("Generated circular branding icons from iconv2.png:")
+    print("Generated circular branding icons from iconv4.png:")
     print(f"  {BRANDING / 'icon-512.png'}")
     print(f"  {FASTLANE_ICON}")
     print(f"  {FDROID_REPO_ICON}")
