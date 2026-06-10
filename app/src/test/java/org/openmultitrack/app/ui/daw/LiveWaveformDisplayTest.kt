@@ -8,7 +8,7 @@ class LiveWaveformDisplayTest {
 
     @Test
     fun growthPhase_fillsFromLeft_oneSecondIsOneFifteenth() {
-        val peaks = FloatArray(600) { 0.8f }
+        val peaks = FloatArray(30) { 0.8f }
         val slots = liveWaveformSlotPeaks(
             peaks = peaks,
             windowSec = 15f,
@@ -21,7 +21,7 @@ class LiveWaveformDisplayTest {
 
     @Test
     fun growthPhase_twoSecondsIsTwoFifteenths() {
-        val peaks = FloatArray(300) { 0.5f }
+        val peaks = FloatArray(60) { 0.5f }
         val slots = liveWaveformSlotPeaks(
             peaks = peaks,
             windowSec = 15f,
@@ -76,6 +76,38 @@ class LiveWaveformDisplayTest {
         )
         assertThat(after[0]).isWithin(0.001f).of(before[0])
         assertThat(after[30]).isWithin(0.001f).of(0.9f)
+    }
+
+    @Test
+    fun growthPhase_pixelColumnsDoNotShiftAsRecordingGrows() {
+        assertThat(findGrowthColumnStabilityViolation()).isEqualTo(-1)
+    }
+
+    @Test
+    fun growthPhase_rightmostColumnOnlyMovesRight() {
+        var previousRightmost = -1
+        for (frame in 1..90) {
+            val peaks = FloatArray(frame) { 0.6f }
+            val slots = liveWaveformSlotPeaks(
+                peaks = peaks,
+                windowSec = 15f,
+                elapsedSec = frame / 30f,
+                peaksPerSec = 30,
+            )
+            val columns = liveWaveformPixelColumns(slots, pixels)
+            val rightmost = liveWaveformRightmostFilledColumn(columns)
+            if (previousRightmost >= 0) {
+                assertThat(rightmost).isAtLeast(previousRightmost)
+            }
+            previousRightmost = rightmost
+        }
+    }
+
+    @Test
+    fun growthPhase_slotAnchorDoesNotDependOnPeakCount() {
+        val width = 400f
+        val anchor = liveWaveformSlotAnchorX(slot = 15, capacitySlots = 450, widthPx = width)
+        assertThat(anchor).isWithin(0.01f).of(15f / 450f * width)
     }
 
     @Test

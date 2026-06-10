@@ -444,26 +444,21 @@ object RemoteSnapshotMapper {
         capacity: Int,
         windowSec: Float,
     ) {
+        if (capacity <= 0) return
         val rolling = recordElapsedSec > windowSec
-        val targetLen = if (rolling) {
-            capacity
-        } else {
-            (recordElapsedSec * RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC)
-                .toInt()
-                .coerceIn(0, capacity)
-        }
-        if (targetLen <= 0) return
         mixerPeaks.keys.toList().forEach { ch ->
             val snap = mixerPeaks[ch] ?: return@forEach
             val peaks = snap.peaks
-            val aligned = when {
-                peaks.size == targetLen -> peaks
-                peaks.size > targetLen -> if (rolling) {
-                    peaks.copyOfRange(peaks.size - targetLen, peaks.size)
-                } else {
-                    peaks.copyOfRange(0, targetLen)
+            if (peaks.size <= capacity) {
+                if (snap.capacity != capacity) {
+                    mixerPeaks[ch] = snap.copy(capacity = capacity)
                 }
-                else -> peaks
+                return@forEach
+            }
+            val aligned = if (rolling) {
+                peaks.copyOfRange(peaks.size - capacity, peaks.size)
+            } else {
+                peaks.copyOfRange(0, capacity)
             }
             mixerPeaks[ch] = snap.copy(peaks = aligned, capacity = capacity)
         }

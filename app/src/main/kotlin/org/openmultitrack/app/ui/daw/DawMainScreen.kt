@@ -964,8 +964,8 @@ private fun ChannelStripRow(
             height = colorBarHeight,
         )
         if (showWaveform) {
-            WaveformView(
-                waveform = waveform,
+            LiveWaveformStrip(
+                peaks = waveform?.peaks ?: floatArrayOf(),
                 windowSec = recordWaveformWindowSec,
                 elapsedSec = recordElapsedSec,
                 peaksPerSec = RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC,
@@ -974,67 +974,10 @@ private fun ChannelStripRow(
                 modifier = Modifier
                     .weight(1f)
                     .height(colorBarHeight)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(MaterialTheme.colorScheme.surface),
+                    .clip(RoundedCornerShape(3.dp)),
             )
         } else {
             Spacer(Modifier.weight(1f))
-        }
-    }
-}
-
-@Composable
-private fun WaveformView(
-    waveform: LiveWaveformSnapshot?,
-    windowSec: Float,
-    elapsedSec: Float,
-    peaksPerSec: Int,
-    color: Color,
-    normalized: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val data = waveform?.peaks
-    if (data == null || data.isEmpty() || windowSec <= 0f || elapsedSec <= 0f) {
-        Box(
-            modifier = modifier.border(
-                width = 0.5.dp,
-                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f),
-                shape = RoundedCornerShape(3.dp),
-            ),
-        )
-        return
-    }
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        if (w <= 0f || h <= 0f) return@Canvas
-        val scaledPeaks = scalePeaksForDisplay(data, normalized)
-        val slotPeaks = liveWaveformSlotPeaks(
-            peaks = scaledPeaks,
-            windowSec = windowSec,
-            elapsedSec = elapsedSec,
-            peaksPerSec = peaksPerSec,
-        )
-        if (slotPeaks.isEmpty()) return@Canvas
-        val capacitySlots = slotPeaks.size
-        val slotWidth = w / capacitySlots
-        val mid = h / 2f
-        val minBar = h * 0.06f
-        val barColor = color.copy(alpha = 0.9f)
-        val inset = slotWidth * 0.04f
-        slotPeaks.forEachIndexed { slot, peak ->
-            val amp = peak.coerceIn(0f, 1f)
-            if (amp <= 0.01f) return@forEachIndexed
-            val barH = maxOf(amp * h * 0.9f, minBar)
-            val x = slot * slotWidth
-            drawRect(
-                color = barColor,
-                topLeft = Offset(x + inset, mid - barH / 2f),
-                size = Size(
-                    (slotWidth - inset * 2f).coerceAtLeast(1f),
-                    barH,
-                ),
-            )
         }
     }
 }
