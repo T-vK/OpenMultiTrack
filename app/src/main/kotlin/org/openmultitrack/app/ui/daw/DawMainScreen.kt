@@ -498,7 +498,13 @@ fun DawMainScreen(
                         errorMessage = state.remoteError,
                     )
                 } else if (state.mixers.isEmpty()) {
-                    EmptyMixersPrompt(onAddMixer = onAddMixer)
+                    WelcomeEmptyState(
+                        pairedHostName = state.remotePairedHosts.firstOrNull()?.displayName,
+                        onAddMixer = onAddMixer,
+                        onScanRemoteQr = onScanRemoteQr,
+                        onReconnectRemote = onEnterRemoteClientMode,
+                        onOpenRemoteControl = onOpenRemoteControl,
+                    )
                 } else {
                     activeId?.let { id ->
                         val showInterrupted = state.interruptedRecordings[id] != null &&
@@ -721,25 +727,6 @@ private fun RemoteSyncingPrompt(hostLabel: String?, errorMessage: String?) {
                 color = MaterialTheme.colorScheme.error,
             )
         }
-    }
-}
-
-@Composable
-private fun EmptyMixersPrompt(onAddMixer: () -> Unit) {
-    Column(
-        Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("Add an audio interface to begin", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Plug in a mixer, then open the mixer list and choose Add new device.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(16.dp))
-        TextButton(onClick = onAddMixer) { Text("Add mixer") }
     }
 }
 
