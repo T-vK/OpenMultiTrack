@@ -1,5 +1,7 @@
 # Development conventions
 
+Contributor onboarding summary: [../../CONTRIBUTING.md](../../CONTRIBUTING.md)
+
 ## Module boundaries
 
 1. **`domain` is pure Kotlin** — no `android.*`, no JNI, no networking implementations.

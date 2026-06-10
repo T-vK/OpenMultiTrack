@@ -57,6 +57,7 @@ Connect the mixer via **USB OTG** (powered hub recommended). Grant USB permissio
 | Audience | Start here |
 |----------|------------|
 | **Users** (install, hardware) | This README |
+| **Contributors** | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | **Developers** | [**docs/README.md**](docs/README.md) |
 | **AI coding agents** | [docs/AGENTS.md](docs/AGENTS.md) |
 

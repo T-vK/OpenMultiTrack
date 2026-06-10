@@ -9,7 +9,7 @@ For end-user install and build instructions, see the [project README](../README.
 
 | Audience | Start with |
 |----------|------------|
-| **New contributor** | [development/getting-started.md](development/getting-started.md) → [development/codebase-map.md](development/codebase-map.md) |
+| **New contributor** | [../CONTRIBUTING.md](../CONTRIBUTING.md) → [development/getting-started.md](development/getting-started.md) |
 | **AI coding agent** | [AGENTS.md](AGENTS.md) |
 | **Architect / tech lead** | [architecture/overview.md](architecture/overview.md) → [architecture/modules.md](architecture/modules.md) |
 | **Product / UX** | [product/overview.md](product/overview.md) → [product/ui-daw.md](product/ui-daw.md) |
@@ -26,6 +26,7 @@ For end-user install and build instructions, see the [project README](../README.
 | [architecture/overview.md](architecture/overview.md) | Purpose, license rationale, high-level diagram |
 | [architecture/modules.md](architecture/modules.md) | Gradle modules, dependency graph, boundaries |
 | [architecture/data-flows.md](architecture/data-flows.md) | Record, playback, monitor, remote sync, OSC |
+| [architecture/operational-flows.md](architecture/operational-flows.md) | USB dropout recovery, LAN remote sync (sequence diagrams) |
 | [architecture/threading.md](architecture/threading.md) | Real-time threads, ring buffers, backpressure |
 | [architecture/decisions.md](architecture/decisions.md) | Key architectural decisions (ADR-style) |
 

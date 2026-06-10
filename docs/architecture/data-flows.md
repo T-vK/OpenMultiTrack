@@ -19,7 +19,7 @@ Mixer ADC
 
 **Channel selection:** Only **armed** channels are written. Unarmed channels may still contribute to VU meters and live waveform rings.
 
-**USB dropout:** On detach, the service writes silence at the native sample rate to preserve timeline alignment; debounced reattach resumes append to the same session files. See [../product/roadmap.md](../product/roadmap.md#usb-dropout-behavior).
+**USB dropout:** On detach, the service writes silence at the native sample rate to preserve timeline alignment; debounced reattach resumes append to the same session files. See [operational-flows.md](operational-flows.md#usb-dropout-recovery-recording) and [../product/roadmap.md](../product/roadmap.md#usb-dropout-behavior).
 
 ## Monitor path
 
@@ -99,7 +99,8 @@ Remote device                    Host device (at mixer)
 The Host owns USB, files, and the audio engine. The Remote never opens a competing USB capture stream.
 
 Protocol constants: `domain/remote/RemoteProtocol.kt`  
-Full spec: [../remote-control.md](../remote-control.md)
+Full spec: [../remote-control.md](../remote-control.md)  
+Sequence diagrams: [operational-flows.md](operational-flows.md#lan-remote-sync-host--remote)
 
 ## Session directory flow
 

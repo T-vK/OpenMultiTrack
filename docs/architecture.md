@@ -10,6 +10,7 @@
 | System purpose and diagram | [architecture/overview.md](architecture/overview.md) |
 | Gradle modules and boundaries | [architecture/modules.md](architecture/modules.md) |
 | Record, playback, remote, OSC flows | [architecture/data-flows.md](architecture/data-flows.md) |
+| USB dropout + LAN remote sequences | [architecture/operational-flows.md](architecture/operational-flows.md) |
 | Threads, rings, backpressure | [architecture/threading.md](architecture/threading.md) |
 | ADR-style decisions | [architecture/decisions.md](architecture/decisions.md) |
 | Per-module reference | [modules/](modules/) |
