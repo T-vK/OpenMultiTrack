@@ -42,7 +42,7 @@ object RemoteSnapshotMapper {
             settings = settingsToRemote(settings),
             mixers = mixers.map { RemoteMixerProfileSnapshot(it.id, it.displayName) },
             sessions = sessions.mapValues { (id, session) ->
-                sessionToRemote(session, routingByMixer[id])
+                sessionToRemote(session, routingByMixer[id] ?: MixerRoutingConfig())
             },
         )
 
@@ -292,7 +292,7 @@ object RemoteSnapshotMapper {
 
     private fun sessionToRemote(
         session: MixerSessionUiState,
-        routing: MixerRoutingConfig? = null,
+        routing: MixerRoutingConfig,
     ): RemoteMixerSnapshot =
         RemoteMixerSnapshot(
             mixerId = session.mixerId,
@@ -329,7 +329,7 @@ object RemoteSnapshotMapper {
             warningMessage = session.warningMessage,
             lastRecordingPath = session.lastRecordingPath,
             hostMixerReady = session.probe != null,
-            routing = routing?.let(::routingToRemote),
+            routing = routingToRemote(routing),
         )
 
     private fun mixerDelta(prev: RemoteMixerSnapshot?, current: RemoteMixerSnapshot): RemoteMixerDelta? {

@@ -43,9 +43,11 @@ object RemoteE2eAssertions {
     suspend fun assertRoutingMirrored(
         remote: E2eRemoteHarness,
         mixerId: String,
+        timeoutMs: Long = 30_000,
     ) {
-        val routing = remote.state().value.mixerRoutingById[mixerId]
-        assertThat(routing).isNotNull()
+        E2eWait.untilRemoteState(remote.state(), timeoutMs) { state ->
+            state.mixerRoutingById.containsKey(mixerId)
+        }
     }
 
     suspend fun assertStripControlsFromRemote(

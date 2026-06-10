@@ -844,9 +844,11 @@ class RemoteControlManager(
         val activeMixerId = mirror.activeMixerId
             ?: mixers.firstOrNull()?.id
             ?: _state.value.activeMixerId
-        val routingByMixer = mirror.sessions.mapNotNull { (id, remote) ->
-            remote.routing?.let { id to RemoteSnapshotMapper.routingFromRemote(it) }
-        }.toMap()
+        val routingByMixer = mirror.sessions.mapValues { (_, remote) ->
+            RemoteSnapshotMapper.routingFromRemote(
+                remote.routing ?: org.openmultitrack.remote.RemoteRoutingSnapshot(),
+            )
+        }
         OmtLog.d(
             "Remote",
             "Mirror updated: mixers=${mixers.size} sessions=${sessions.size} active=$activeMixerId",
