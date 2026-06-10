@@ -28,22 +28,27 @@ internal fun liveWaveformColumnsForPixels(
     if (elapsedSlots <= 0) return out
 
     val rolling = elapsedSec > windowSec
-    val activeSlots = if (rolling) capacitySlots else elapsedSlots.coerceAtMost(capacitySlots)
+    val activeSlots = if (rolling) {
+        capacitySlots
+    } else {
+        // Tie horizontal extent to both wall clock and available peaks so the strip
+        // only grows rightward as new samples arrive.
+        minOf(elapsedSlots, peaks.size).coerceAtMost(capacitySlots)
+    }
 
     val samples = if (rolling) {
         val count = minOf(peaks.size, capacitySlots)
         peaks.copyOfRange(peaks.size - count, peaks.size)
     } else {
-        val count = minOf(peaks.size, activeSlots)
-        peaks.copyOfRange(0, count)
+        peaks.copyOfRange(0, activeSlots)
     }
 
     for (px in 0 until pixelCount) {
         val slotLo = px * capacitySlots / pixelCount
         val slotHi = (px + 1) * capacitySlots / pixelCount
+        if (!rolling && slotLo >= activeSlots) continue
         var maxPeak = 0f
         for (slot in slotLo until slotHi) {
-            if (!rolling && slot >= activeSlots) continue
             val sampleIdx = if (rolling) {
                 slot - (capacitySlots - samples.size)
             } else {
@@ -56,4 +61,23 @@ internal fun liveWaveformColumnsForPixels(
         out[px] = maxPeak
     }
     return out
+}
+
+/**
+ * Scales live peaks for display using a session [peakHold] that only ratchets upward.
+ * Prevents already-drawn bars from jumping when a later sample is louder.
+ */
+internal fun scaleLivePeaksForDisplay(
+    peaks: FloatArray,
+    normalized: Boolean,
+    peakHold: Float,
+): FloatArray {
+    if (peaks.isEmpty()) return peaks
+    val hold = peakHold.coerceAtLeast(1e-6f)
+    return if (normalized) {
+        FloatArray(peaks.size) { (peaks[it] / hold).coerceIn(0f, 1f) }
+    } else {
+        val gain = if (hold < 0.15f) 1f / hold else 1f
+        FloatArray(peaks.size) { (peaks[it] * gain).coerceIn(0f, 1f) }
+    }
 }

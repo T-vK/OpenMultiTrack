@@ -63,6 +63,37 @@ class LiveWaveformDisplayTest {
     }
 
     @Test
+    fun growthPhase_existingColumnsStayStableWhenNewPeakArrives() {
+        val before = liveWaveformColumnsForPixels(
+            peaks = floatArrayOf(0.4f),
+            windowSec = 15f,
+            elapsedSec = 1f / 30f,
+            peaksPerSec = 30,
+            pixelCount = pixels,
+        )
+        val laterPeaks = FloatArray(31)
+        laterPeaks[0] = 0.4f
+        laterPeaks[30] = 0.9f
+        val after = liveWaveformColumnsForPixels(
+            peaks = laterPeaks,
+            windowSec = 15f,
+            elapsedSec = 31f / 30f,
+            peaksPerSec = 30,
+            pixelCount = pixels,
+        )
+        assertThat(after[0]).isWithin(0.001f).of(before[0])
+    }
+
+    @Test
+    fun scaleLivePeaksForDisplay_usesFrozenHoldSoOlderBarsDoNotJump() {
+        val hold = 0.03f
+        val first = scaleLivePeaksForDisplay(floatArrayOf(0.02f, 0.03f), normalized = false, peakHold = hold)
+        val second = scaleLivePeaksForDisplay(floatArrayOf(0.02f, 0.03f, 0.08f), normalized = false, peakHold = hold)
+        assertThat(first[0]).isWithin(0.001f).of(second[0])
+        assertThat(first[1]).isWithin(0.001f).of(second[1])
+    }
+
+    @Test
     fun rollingPhase_usesFullWidth() {
         val peaks = FloatArray(600) { 0.6f }
         val columns = liveWaveformColumnsForPixels(
