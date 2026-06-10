@@ -35,7 +35,11 @@ Full toolchain pins and IDE notes: [docs/development/getting-started.md](docs/de
 - **No** external CDNs in bundled assets
 - **No** blocking work on Oboe/UAC2 audio callback threads
 
-CI enforces several of these automatically. Details: [docs/development/conventions.md](docs/development/conventions.md#foss-and-compliance-non-negotiable)
+CI enforces several of these automatically. Details:
+
+- [docs/development/fdroid-compliance.md](docs/development/fdroid-compliance.md) — full F-Droid / license guide
+- [docs/development/conventions.md](docs/development/conventions.md) — short FOSS table
+- [.cursor/rules/](.cursor/rules/) — Cursor AI rules (same policies for agents)
 
 ## Where to put code
 

@@ -10,7 +10,7 @@ For end-user install and build instructions, see the [project README](../README.
 | Audience | Start with |
 |----------|------------|
 | **New contributor** | [../CONTRIBUTING.md](../CONTRIBUTING.md) → [development/getting-started.md](development/getting-started.md) |
-| **AI coding agent** | [AGENTS.md](AGENTS.md) |
+| **AI coding agent** | [AGENTS.md](AGENTS.md) + [.cursor/rules/](../.cursor/rules/) |
 | **Architect / tech lead** | [architecture/overview.md](architecture/overview.md) → [architecture/modules.md](architecture/modules.md) |
 | **Product / UX** | [product/overview.md](product/overview.md) → [product/ui-daw.md](product/ui-daw.md) |
 | **Current status** | [PROJECT_STATUS.md](PROJECT_STATUS.md) |
@@ -39,6 +39,7 @@ Legacy single-file overview (redirects here): [architecture.md](architecture.md)
 | [development/getting-started.md](development/getting-started.md) | Prerequisites, build, run, submodules |
 | [development/codebase-map.md](development/codebase-map.md) | Packages, key types, where to look |
 | [development/conventions.md](development/conventions.md) | Module rules, commits, FOSS constraints |
+| [development/fdroid-compliance.md](development/fdroid-compliance.md) | F-Droid policy, allowed licenses, forbidden deps |
 | [development/testing.md](development/testing.md) | Unit, instrumented, hardware, E2E tests |
 
 ### Product & UX

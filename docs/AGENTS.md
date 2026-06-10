@@ -1,6 +1,6 @@
 # AI Agent Guide — OpenMultiTrack
 
-**Read this file first** before making changes. For the full documentation tree, see [README.md](README.md).
+**Read this file first** before making changes. Cursor also loads [.cursor/rules/](../.cursor/rules/) automatically. For the full documentation tree, see [README.md](README.md).
 
 | If you need… | Read |
 |--------------|------|
@@ -32,7 +32,7 @@ Target: F-Droid compliance, GPLv3, no Google proprietary stack.
 | Rule | Enforcement |
 |------|-------------|
 | No Play Services / Firebase / GMS / ads / telemetry | CI greps `:app:dependencies` |
-| FOSS-only dependencies | Apache-2.0 / MIT / BSD / GPL-compatible |
+| FOSS-only dependencies | [development/fdroid-compliance.md](development/fdroid-compliance.md) |
 | No binary blobs | Oboe submodule + vendored libusb built from source |
 | No external CDNs in bundled assets | Self-contained APK |
 | License GPLv3-or-later | [LICENSE](../LICENSE) |

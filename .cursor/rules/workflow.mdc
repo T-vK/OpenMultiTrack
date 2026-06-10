@@ -1,0 +1,54 @@
+---
+description: Commits, testing, documentation, and finish checklist
+alwaysApply: true
+---
+
+# Workflow
+
+## Git
+
+- Commit directly to **`main`** — do **not** use `cursor/*` branches (rejected by hooks)
+- **Conventional Commits** — subject must start with `feat: ` or `fix: ` (hooks enforce)
+- `feat:` → minor semver · `fix:` → patch · `BREAKING CHANGE` / `!:` → major
+- Install hooks: `./scripts/install-git-hooks.sh`
+- No co-author trailers unless user requests
+
+Examples:
+
+```
+feat: add loop region export to session cues
+fix: prevent crash when USB detaches during monitor
+```
+
+## Test your work
+
+Run applicable tests **before** pushing:
+
+```bash
+./scripts/run-uac2-native-tests.sh   # if touching audio-engine/uac2
+./gradlew :domain:test :mixer-behringer:test :session-io:test \
+  :usb-audio:testDebugUnitTest :remote-server:test :app:testDebugUnitTest
+```
+
+Add tests in the **lowest** layer that can express the behavior. Device/hardware tests are optional locally; document if manual validation needed.
+
+## Update documentation when necessary
+
+| Change | Update |
+|--------|--------|
+| User-visible feature status | `docs/PROJECT_STATUS.md` |
+| Architecture / protocol / module API | relevant file under `docs/` |
+| New hardware assumption | `docs/hardware-assumptions.md` (mark UNVERIFIED) |
+| New dependency with compliance notes | `docs/development/fdroid-compliance.md` if non-obvious |
+
+Avoid line numbers in docs; link to packages and file paths. User-facing install → root `README.md`.
+
+## Finish checklist
+
+1. Tests pass (or explain what could not be run)
+2. Docs updated if behavior/contracts changed
+3. No FOSS violations
+4. Conventional commit message
+5. Push to `main`
+
+See also [CONTRIBUTING.md](../../CONTRIBUTING.md).

@@ -1,0 +1,32 @@
+---
+description: F-Droid and FOSS compliance — non-negotiable for all changes
+alwaysApply: true
+---
+
+# F-Droid / FOSS compliance
+
+Full guide: [docs/development/fdroid-compliance.md](../../docs/development/fdroid-compliance.md)
+
+## Never add without explicit approval
+
+- Google Play Services, Firebase, GMS, Crashlytics, ads, analytics
+- Proprietary USB/audio SDKs or binary blobs
+- Dependencies with unknown, NC, or “free for development only” licenses
+- Runtime-loaded assets from external CDNs
+
+## Allowed licenses (typical)
+
+Apache-2.0, MIT, BSD, ISC, GPL-compatible, LGPL (source vendored — e.g. libusb).
+
+## Before merging a new dependency
+
+```bash
+./gradlew :app:dependencies --configuration debugRuntimeClasspath | tee /tmp/deps.txt
+# CI fails if gms|firebase|play-services appear
+```
+
+Confirm license in upstream repo. Native code must build from source in this tree (submodule or vendored).
+
+## App license
+
+Contributions are **GPL-3.0-or-later** ([LICENSE](../../LICENSE)).

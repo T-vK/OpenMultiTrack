@@ -1,0 +1,34 @@
+---
+description: OpenMultiTrack project context — read first for any task
+alwaysApply: true
+---
+
+# OpenMultiTrack context
+
+FOSS Android multitrack recorder + virtual soundcheck for Behringer/Midas USB mixers. GPLv3-or-later, F-Droid target.
+
+## Read before non-trivial work
+
+1. [docs/AGENTS.md](../../docs/AGENTS.md) — mission, pitfalls, module map
+2. [docs/README.md](../../docs/README.md) — documentation index
+3. [docs/PROJECT_STATUS.md](../../docs/PROJECT_STATUS.md) — what is done vs missing
+
+## Modules (7)
+
+`app` · `domain` · `usb-audio` · `audio-engine` · `session-io` · `mixer-behringer` · `remote-server`
+
+Dependency rule: `app` → libraries; `domain` has **no** Android imports.
+
+## Submodule required
+
+```bash
+git submodule update --init --recursive
+```
+
+Oboe lives in `third_party/oboe`.
+
+## Do not assume outdated docs
+
+- `remote-server` **exists** (NanoHTTPD LAN sync — not Ktor browser UI)
+- Per-channel WAV sessions + DAW UI are shipped
+- [control-api.md](../../docs/control-api.md) is superseded by [remote-control.md](../../docs/remote-control.md)

@@ -1,0 +1,33 @@
+---
+description: Real-time audio rules for native engine (Oboe / UAC2)
+globs: "audio-engine/**/*"
+alwaysApply: false
+---
+
+# Native audio (`audio-engine`)
+
+Real-time path: C++17 Oboe + optional UAC2/libusb isoch. Kotlin JNI facades in `org.openmultitrack.audio`.
+
+## Callback thread rules (non-negotiable)
+
+On Oboe / UAC2 callback threads:
+
+- ✅ Copy samples in/out of **SPSC** ring buffers (`spsc_ring_buffer.h`)
+- ✅ Fixed-stack meter taps
+- ❌ No `malloc` / `new`, locks, mutexes, file I/O, logging floods
+- ❌ No JNI upcalls that allocate
+
+Disk writers and readers run on **separate** Kotlin/native threads.
+
+## Dual backend
+
+`usb-audio` `AudioEngineRouter` picks `OBOE` vs `UAC2`. Do not bypass the router from `app`.
+
+## Testing
+
+- Descriptor/unit: `./scripts/run-uac2-native-tests.sh`
+- Device: `audio-engine/src/androidTest/`, hardware scripts under `scripts/`
+
+## Docs
+
+[docs/modules/audio-engine.md](../../docs/modules/audio-engine.md) · [docs/architecture/threading.md](../../docs/architecture/threading.md)

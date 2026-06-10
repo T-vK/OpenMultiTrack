@@ -11,6 +11,8 @@ Contributor onboarding summary: [../../CONTRIBUTING.md](../../CONTRIBUTING.md)
 
 ## FOSS and compliance (non-negotiable)
 
+**Full guide:** [fdroid-compliance.md](fdroid-compliance.md) · **Cursor rule:** `.cursor/rules/foss-fdroid.mdc`
+
 | Rule | Enforcement |
 |------|-------------|
 | No Play Services / Firebase / GMS / ads / telemetry | CI greps `:app:dependencies` |

@@ -1,0 +1,33 @@
+---
+description: Kotlin module boundaries and Android patterns
+globs: "**/*.kt"
+alwaysApply: false
+---
+
+# Kotlin conventions
+
+## Module boundaries
+
+| Module | Rule |
+|--------|------|
+| `domain` | Pure Kotlin — no `android.*`, no JNI |
+| `session-io`, `mixer-behringer` | JVM libraries — no Android APIs |
+| `usb-audio`, `remote-server` | Android libraries — no Compose |
+| `app` | Composition root — UI, service, wiring only |
+
+Never import `app` from a library module.
+
+## Patterns
+
+- Shared state for UI + remote → add types in `domain` first
+- Long-running audio → `AudioSessionService` / `MixerSessionController`, not Activity lifecycle alone
+- USB probe channel count → `RecordingChannels` (max `AudioConstants.MAX_CHANNELS`, 64) — do not hardcode 2 or 18
+- Coroutines for I/O and OSC; never block the Oboe callback thread from Kotlin
+
+## Scope
+
+- Match existing naming and style in the file you edit
+- No drive-by refactors in unrelated modules
+- Minimal diff — solve the task, don't reorganize
+
+Map: [docs/development/codebase-map.md](../../docs/development/codebase-map.md)
