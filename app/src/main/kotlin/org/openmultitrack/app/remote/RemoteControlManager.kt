@@ -678,8 +678,10 @@ class RemoteControlManager(
                 uiSettings = null,
             )
         }
-        if (needsRepair) return
-        skipRememberedHostOnce = true
+        if (needsRepair) {
+            skipRememberedHostOnce = true
+            return
+        }
         scheduleReconnect()
     }
 

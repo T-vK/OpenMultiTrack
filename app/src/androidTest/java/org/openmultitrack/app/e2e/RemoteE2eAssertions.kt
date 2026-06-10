@@ -68,6 +68,7 @@ object RemoteE2eAssertions {
     suspend fun assertPlaybackTransport(
         remote: E2eRemoteHarness,
         mixerId: String,
+        hostIp: String,
     ) {
         val currentMode = remote.state().value.sessionByMixer[mixerId]?.appMode
         if (currentMode != AppMode.VIRTUAL_SOUNDCHECK) {
@@ -81,12 +82,15 @@ object RemoteE2eAssertions {
             assertSoundcheckWaveformsOnRemote(remote, mixerId)
         }
 
+        E2eWait.awaitRemoteReady(remote, hostIp, mixerId)
         remote.sendRemote("play_playback", JSONObject().put("mixerId", mixerId))
         E2eWait.untilRemoteState(remote.state(), 60_000) {
             it.sessionByMixer[mixerId]?.isPlaying == true
         }
-        delay(1_500)
-        val posWhilePlaying = remote.state().value.sessionByMixer[mixerId]!!.playbackPositionSec
+        val posWhilePlaying = E2eWait.untilRemoteState(remote.state(), 30_000) { state ->
+            val session = state.sessionByMixer[mixerId] ?: return@untilRemoteState false
+            session.playbackPositionSec > 0.05f
+        }.sessionByMixer[mixerId]!!.playbackPositionSec
         assertThat(posWhilePlaying).isGreaterThan(0.05f)
 
         remote.sendRemote("pause_playback", JSONObject().put("mixerId", mixerId))
@@ -94,8 +98,9 @@ object RemoteE2eAssertions {
             it.sessionByMixer[mixerId]?.isPlaying != true
         }
 
+        E2eWait.awaitRemoteReady(remote, hostIp, mixerId)
         remote.sendRemote("toggle_playback", JSONObject().put("mixerId", mixerId))
-        E2eWait.untilRemoteState(remote.state(), 60_000) {
+        E2eWait.untilRemoteState(remote.state(), 90_000) {
             it.sessionByMixer[mixerId]?.isPlaying == true
         }
 

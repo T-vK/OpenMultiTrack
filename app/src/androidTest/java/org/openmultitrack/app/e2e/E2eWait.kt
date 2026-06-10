@@ -8,10 +8,10 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.InetSocketAddress
 import java.net.Socket
+import org.openmultitrack.app.remote.RemoteControlUiState
 import org.openmultitrack.app.service.MixerSessionController
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.domain.remote.RemoteConnectionState
-import org.openmultitrack.app.remote.RemoteControlUiState
 import kotlin.math.abs
 
 object E2eWait {
@@ -133,6 +133,50 @@ object E2eWait {
                 }
             }.isSuccess
         }
+
+    /**
+     * Wait until the remote client mirror is usable again after a brief socket drop.
+     * Gives auto-reconnect time to finish before opening a second connection.
+     */
+    suspend fun awaitRemoteReady(
+        remote: E2eRemoteHarness,
+        hostIp: String,
+        mixerId: String? = null,
+        timeoutMs: Long = 120_000,
+    ) {
+        withTimeout(timeoutMs) {
+            while (true) {
+                val state = remote.state().value
+                val sessionOk = mixerId == null || state.sessionByMixer[mixerId] != null
+                if (state.connectionState == RemoteConnectionState.CONNECTED &&
+                    state.uiSettings != null &&
+                    state.sessionByMixer.isNotEmpty() &&
+                    sessionOk
+                ) {
+                    return@withTimeout
+                }
+                when (state.connectionState) {
+                    RemoteConnectionState.CONNECTING -> delay(500)
+                    RemoteConnectionState.DISCONNECTED, RemoteConnectionState.ERROR -> {
+                        val deadline = System.currentTimeMillis() + 10_000
+                        while (System.currentTimeMillis() < deadline) {
+                            val current = remote.state().value.connectionState
+                            if (current == RemoteConnectionState.CONNECTED) break
+                            if (current == RemoteConnectionState.CONNECTING) {
+                                delay(500)
+                                continue
+                            }
+                            delay(500)
+                        }
+                        if (remote.state().value.connectionState != RemoteConnectionState.CONNECTED) {
+                            remote.connectClient(hostIp)
+                        }
+                    }
+                    else -> delay(500)
+                }
+            }
+        }
+    }
 
     /** Wait until the host remote server is up (UDP sync or TCP probe). */
     suspend fun awaitHostRemoteReady(hostIp: String, timeoutMs: Long = 180_000) {

@@ -193,6 +193,28 @@ reconnect_wireless_adb() {
   return 1
 }
 
+# USB client tablets sometimes drop wlan0 during long runs; rooted builds can bounce Wi-Fi.
+restart_client_wifi_if_needed() {
+  local serial="$1"
+  local host_ip="$2"
+  is_wireless_serial "$serial" && return 0
+  if "$ADB" -s "$serial" shell ping -c 1 -W 2 "$host_ip" 2>/dev/null | grep -q '1 received'; then
+    return 0
+  fi
+  log "Client $serial lost LAN reachability to $host_ip — restarting Wi-Fi (su)"
+  "$ADB" -s "$serial" shell su -c 'svc wifi disable ; svc wifi enable' 2>/dev/null || true
+  local i
+  for ((i = 1; i <= 12; i++)); do
+    sleep 5
+    if "$ADB" -s "$serial" shell ping -c 1 -W 2 "$host_ip" 2>/dev/null | grep -q '1 received'; then
+      log "Client Wi-Fi restored after ${i}x5s"
+      return 0
+    fi
+  done
+  log "WARNING: client still cannot reach $host_ip after Wi-Fi restart"
+  return 1
+}
+
 require_device_online() {
   local serial="$1"
   local label="$2"
@@ -337,6 +359,7 @@ fi
 log "Running dual-device remote e2e (host + client in parallel)..."
 require_device_online "$HOST_SERIAL" "Host"
 require_device_online "$CLIENT_SERIAL" "Client"
+restart_client_wifi_if_needed "$CLIENT_SERIAL" "$HOST_IP"
 setup_remote_bridge_if_needed
 CLIENT_ARGS=(
   -e pairing_pin 424242
@@ -347,9 +370,19 @@ HOST_LOG="$(mktemp)"
 CLIENT_LOG="$(mktemp)"
 trap 'cleanup_remote_bridge; rm -f "$HOST_LOG" "$CLIENT_LOG"' EXIT
 
-# Start the client first — it blocks in @Before until the host signals HOST_READY.
-# The host tablet is busy with USB OTG recording; starting the lightweight client
-# process first avoids racing wireless adb on the remote-only tablet.
+# Start the host first (records + soundcheck before opening remote port).
+# The client test blocks on awaitHostRemoteReady until the host is listening.
+set +e
+(
+  run_instrument "$HOST_SERIAL" \
+    -e class org.openmultitrack.app.e2e.RemoteE2eHostTest \
+    "${COMMON_ARGS[@]}"
+) >"$HOST_LOG" 2>&1 &
+HOST_PID=$!
+set -e
+
+sleep 3
+
 set +e
 run_instrument "$CLIENT_SERIAL" \
   -e class org.openmultitrack.app.e2e.RemoteE2eClientTest \
@@ -357,20 +390,12 @@ run_instrument "$CLIENT_SERIAL" \
 CLIENT_PID=$!
 set -e
 
-sleep 3
-
-(
-  run_instrument "$HOST_SERIAL" \
-    -e class org.openmultitrack.app.e2e.RemoteE2eHostTest \
-    "${COMMON_ARGS[@]}"
-) >"$HOST_LOG" 2>&1 &
-HOST_PID=$!
-
 ADB_KEEPALIVE_PID=""
 start_adb_keepalive() {
   (
     while kill -0 "$CLIENT_PID" 2>/dev/null || kill -0 "$HOST_PID" 2>/dev/null; do
       reconnect_wireless_adb "$HOST_SERIAL" || true
+      restart_client_wifi_if_needed "$CLIENT_SERIAL" "$HOST_IP" || true
       sleep 30
     done
   ) &
