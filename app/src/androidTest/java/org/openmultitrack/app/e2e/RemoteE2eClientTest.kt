@@ -84,7 +84,6 @@ class RemoteE2eClientTest {
         }
 
         RemoteE2eAssertions.assertLiveWaveformsDuringRecording(remote, mixerId)
-        RemoteE2eAssertions.assertVuMetersDuringRecording(remote, mixerId)
 
         testUnexpectedDisconnectRecovery(remote, hostIp, mixerId)
         E2eLanSync.signal(E2eLanSync.CLIENT_DONE, targetHost = hostIp)

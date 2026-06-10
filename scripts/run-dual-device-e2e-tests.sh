@@ -366,11 +366,25 @@ sleep 3
 ) >"$HOST_LOG" 2>&1 &
 HOST_PID=$!
 
+ADB_KEEPALIVE_PID=""
+start_adb_keepalive() {
+  (
+    while kill -0 "$CLIENT_PID" 2>/dev/null || kill -0 "$HOST_PID" 2>/dev/null; do
+      reconnect_wireless_adb "$HOST_SERIAL" || true
+      sleep 30
+    done
+  ) &
+  ADB_KEEPALIVE_PID=$!
+}
+
+start_adb_keepalive
+
 set +e
 wait "$CLIENT_PID"
 CLIENT_EXIT=$?
 wait "$HOST_PID"
 HOST_EXIT=$?
+[[ -n "$ADB_KEEPALIVE_PID" ]] && kill "$ADB_KEEPALIVE_PID" 2>/dev/null || true
 set -e
 
 cat "$HOST_LOG"

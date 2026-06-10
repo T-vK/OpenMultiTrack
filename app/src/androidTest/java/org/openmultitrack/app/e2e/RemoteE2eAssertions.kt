@@ -55,28 +55,10 @@ object RemoteE2eAssertions {
         E2eWait.untilRemoteState(remote.state(), 60_000) { state ->
             val session = state.sessionByMixer[mixerId] ?: return@untilRemoteState false
             session.recordElapsedSec > 0.5f &&
+                session.captureMeterLevels.isNotEmpty() &&
                 session.waveformPeaks.values.any { snap -> snap.peaks.any { it > 0.01f } }
         }
         delay(recordSeconds * 1_000L)
-        remote.sendRemote("stop_record", JSONObject().put("mixerId", mixerId))
-        E2eWait.untilRemoteState(remote.state(), 60_000) {
-            it.sessionByMixer[mixerId]?.isRecording != true
-        }
-    }
-
-    suspend fun assertVuMetersDuringRecording(
-        remote: E2eRemoteHarness,
-        mixerId: String,
-    ) {
-        remote.sendRemote("start_record", JSONObject().put("mixerId", mixerId))
-        E2eWait.untilRemoteState(remote.state(), 60_000) {
-            it.sessionByMixer[mixerId]?.isRecording == true
-        }
-        // Silent inputs can read ~0 on hardware; verify meter maps sync over remote instead.
-        E2eWait.untilRemoteState(remote.state(), 60_000) { state ->
-            val session = state.sessionByMixer[mixerId] ?: return@untilRemoteState false
-            session.captureMeterLevels.isNotEmpty() && session.recordElapsedSec > 0.5f
-        }
         remote.sendRemote("stop_record", JSONObject().put("mixerId", mixerId))
         E2eWait.untilRemoteState(remote.state(), 60_000) {
             it.sessionByMixer[mixerId]?.isRecording != true

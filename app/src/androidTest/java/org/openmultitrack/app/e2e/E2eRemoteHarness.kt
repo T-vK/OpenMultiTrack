@@ -77,7 +77,7 @@ class E2eRemoteHarness(
             ),
         )
         if (remote.state.value.role != RemoteRole.CLIENT) {
-            remote.applyRole(RemoteRole.CLIENT)
+            remote.applyRole(RemoteRole.CLIENT, autoConnect = false)
         }
         remote.connectDirect(
             host = hostIp,

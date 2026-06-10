@@ -88,7 +88,7 @@ class RemoteControlManager(
     @Volatile
     private var clientSocketOpen = false
 
-    fun applyRole(role: RemoteRole) {
+    fun applyRole(role: RemoteRole, autoConnect: Boolean = true) {
         if (_state.value.role == role) return
         stopAll()
         settings.remoteRole = role
@@ -105,7 +105,7 @@ class RemoteControlManager(
             RemoteRole.HOST -> startHost()
             RemoteRole.CLIENT -> {
                 refreshPairingState()
-                discoverHosts()
+                if (autoConnect) discoverHosts()
             }
         }
     }
