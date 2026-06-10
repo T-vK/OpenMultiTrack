@@ -1,6 +1,14 @@
 # OpenMultiTrack
 
-FOSS Android app for **live multitrack recording** and **virtual soundcheck** with Behringer **X32** / **XR18**, **Flow 8**, and other UAC2 mixers. Designed for [F-Droid](https://f-droid.org/).
+> **Beta — €99 · permission required**
+>
+> OpenMultiTrack is in **beta**. A license costs **€99**.
+>
+> To **apply for beta testing** or **purchase a license**, open a [GitHub issue](https://github.com/T-vK/OpenMultiTrack/issues).
+>
+> **Copyright notice:** The entire project — all source code, documentation, and assets in this repository — is **copyrighted** and **not available under any free or open-source license**. **Use, copying, modification, distribution, or incorporation of any of this code into other projects is prohibited** without explicit written permission from the copyright holder. See [LICENSE](LICENSE).
+
+Android app for **live multitrack recording** and **virtual soundcheck** with Behringer **X32** / **XR18**, **Flow 8**, and other UAC2 mixers.
 
 Record per-channel sessions on a tablet at the mixer, play them back for rehearsal, and optionally control the Host from a second Android device over Wi‑Fi.
 
@@ -15,22 +23,26 @@ Record per-channel sessions on a tablet at the mixer, play them back for rehears
 | LAN remote (second Android device) | ✅ |
 | Channel labels (XR18 OSC, Flow 8 BLE/USB) | ✅ |
 | OSC routing snapshots (record ↔ soundcheck) | 🟡 planned / stubbed |
-| Official F-Droid main repo | 🟡 self-hosted repo live |
 
 **Detailed tracker:** [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)
 
 ## License
 
-**GPL-3.0-or-later** — see [LICENSE](LICENSE). Oboe is Apache-2.0 ([`third_party/oboe`](third_party/oboe)).
+**Proprietary — all rights reserved.** This project is not free or open-source software. No use of the code is permitted without a license agreement. See [LICENSE](LICENSE).
 
-## Install (CI builds)
+Third-party components under `third_party/` (for example Oboe, libusb) remain subject to their upstream licenses.
 
-Add F-Droid repository: **`https://T-vK.github.io/OpenMultiTrack/fdroid/repo`**
+## Install
 
-Debug builds only. GitHub Releases attach the **same APK** as the F-Droid repo.  
-If you installed a build from before signing was pinned (≤0.2.1), uninstall once, then reinstall — see [docs/ci-and-releases.md](docs/ci-and-releases.md).
+Licensed builds are provided to beta testers and purchasers. Contact the copyright holder via [GitHub issues](https://github.com/T-vK/OpenMultiTrack/issues) for access.
+
+Historical CI/F-Droid distribution metadata may still exist in the repository but does not grant a license to use the Software.
 
 ## Build
+
+Building from source requires a license. Unauthorized building, running, or redistribution is prohibited. See [LICENSE](LICENSE).
+
+Licensed developers:
 
 ```bash
 git submodule update --init --recursive
@@ -38,19 +50,13 @@ git submodule update --init --recursive
 ./gradlew :app:assembleDebug
 ```
 
-Requires Android SDK API 35, NDK r26d, JDK 17. Debug signing uses committed `keystore/debug.keystore`. See [docs/reproducible-builds.md](docs/reproducible-builds.md).
+Requires Android SDK API 35, NDK r26d, JDK 17. See [docs/reproducible-builds.md](docs/reproducible-builds.md).
 
 ## Hardware
 
 Connect the mixer via **USB OTG** (powered hub recommended). Grant USB permission in the app, then add or probe your mixer. Validate channel counts against [docs/hardware-assumptions.md](docs/hardware-assumptions.md).
 
 **Remote control:** On the same Wi‑Fi, set one tablet to **Host** (at the mixer) and another to **Remote** in Settings → Remote control.
-
-## F-Droid
-
-- Fastlane metadata: [`fastlane/metadata`](fastlane/metadata)
-- Self-hosted repo metadata: [`fdroid/metadata`](fdroid/metadata)
-- Draft upstream recipe (needs refresh): [`fdroiddata/org.openmultitrack.yml`](fdroiddata/org.openmultitrack.yml)
 
 ## Documentation
 

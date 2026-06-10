@@ -1,6 +1,6 @@
 # Contributing to OpenMultiTrack
 
-Thank you for helping improve OpenMultiTrack. This project is **GPL-3.0-or-later** FOSS aimed at F-Droid; all contributions must keep it buildable, testable, and free of proprietary dependencies.
+Thank you for helping improve OpenMultiTrack. This project is **proprietary software** (see [LICENSE](LICENSE)); contributions are accepted only with explicit agreement to the copyright holder's terms.
 
 ## Before you start
 
@@ -67,4 +67,4 @@ Most instrumented tests require a physical device and often a connected mixer. S
 
 ## License
 
-By contributing, you agree that your contributions are licensed under **GPL-3.0-or-later**, the same license as the project ([LICENSE](LICENSE)).
+By contributing, you agree that your contributions become the property of the copyright holder and may be used under the project's proprietary license ([LICENSE](LICENSE)). Do not contribute unless you accept these terms.
