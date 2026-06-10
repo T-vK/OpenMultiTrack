@@ -8,84 +8,65 @@
 >
 > **Copyright notice:** The entire project — all source code, documentation, and assets in this repository — is **copyrighted** and **not available under any free or open-source license**. **Use, copying, modification, distribution, or incorporation of any of this code into other projects is prohibited** without explicit written permission from the copyright holder. See [LICENSE](LICENSE).
 
-Android app for **live multitrack recording** and **virtual soundcheck** with Behringer **X32** / **XR18**, **Flow 8**, and other UAC2 mixers.
+Record every channel from your live mixer on an Android tablet, then rehearse with **virtual soundcheck** — play back last night’s show through the real desk.
 
-Record per-channel sessions on a tablet at the mixer, play them back for rehearsal, and optionally control the Host from a second Android device over Wi‑Fi.
+Built for bands, FOH engineers, and anyone who wants multitrack capture without a laptop and a DAW.
 
-## Status
+## Supported mixers
 
-| Capability | State |
-|------------|-------|
-| DAW UI (strips, waveforms, multi-mixer) | ✅ |
-| USB probe + multichannel record (per-channel WAV) | ✅ |
-| Monitor, VU meters, virtual soundcheck playback | ✅ |
-| USB dropout recovery (silence + resume) | ✅ |
-| LAN remote (second Android device) | ✅ |
-| Channel labels (XR18 OSC, Flow 8 BLE/USB) | ✅ |
-| OSC routing snapshots (record ↔ soundcheck) | 🟡 planned / stubbed |
+Best experience today is with **Behringer** and **Midas** desks we test against regularly:
 
-**Detailed tracker:** [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)
+- **X32** family (X32, Compact, Producer, Rack, …)
+- **M32** family (M32, M32R, …)
+- **X Air** / **XR** rack mixers (XR12, XR16, **XR18**, …)
+- **WING**
+- **Flow 8**
+
+Many other **professional digital mixers** that show up as a multichannel USB audio device on a computer should also work for recording and playback, for example:
+
+- Allen & Heath **SQ** series  
+- Soundcraft **UI** series  
+- PreSonus **StudioLive Series III**  
+- Mackie **DL** series  
+- Yamaha **TF** series  
+
+Channel counts and extras (such as automatic name sync) depend on the model. If yours is not listed, try the app’s mixer probe after connecting over USB.
+
+## Features
+
+- **Multitrack recording** — capture each channel to its own file during the gig  
+- **Virtual soundcheck** — load a past session and send channels back to the mixer for rehearsal  
+- **Tablet DAW layout** — channel strips, waveforms, transport, and meters designed for touch  
+- **Live monitoring** — hear what you are recording with level meters on every channel  
+- **Reliable USB recording** — brief dropouts are filled with silence so the session keeps going  
+- **Automatic channel names** — labels from the mixer appear in the app when supported  
+- **Remote control** — run the app on a second phone or tablet on the same **Wi‑Fi or wired network** and control record/playback from the stage or FOH position  
+- **Multiple mixers** — manage more than one desk in the same project  
+
+## Requirements
+
+- **Android 8.0 or later** (phone or tablet)  
+- **USB OTG** connection to the mixer (a **powered USB hub** is recommended)  
+- Mixer connected as a **USB audio interface** (same idea as plugging it into a laptop)  
+
+Grant USB permission when the app asks, then add or detect your mixer in the app.
+
+**Remote control:** Put one device at the mixer (**Host**) and another anywhere on the same network (**Remote**). Pair them in **Settings → Remote control**.
+
+## Get the app
+
+Licensed builds are provided to beta testers and purchasers. Open a [GitHub issue](https://github.com/T-vK/OpenMultiTrack/issues) to request access.
 
 ## License
 
 **Proprietary — all rights reserved.** This project is not free or open-source software. No use of the code is permitted without a license agreement. See [LICENSE](LICENSE).
 
-Third-party components under `third_party/` (for example Oboe, libusb) remain subject to their upstream licenses.
+## More information
 
-## Install
-
-Licensed builds are provided to beta testers and purchasers. Contact the copyright holder via [GitHub issues](https://github.com/T-vK/OpenMultiTrack/issues) for access.
-
-Historical CI/F-Droid distribution metadata may still exist in the repository but does not grant a license to use the Software.
-
-## Build
-
-Building from source requires a license. Unauthorized building, running, or redistribution is prohibited. See [LICENSE](LICENSE).
-
-Licensed developers:
-
-```bash
-git submodule update --init --recursive
-./scripts/install-git-hooks.sh
-./gradlew :app:assembleDebug
-```
-
-Requires Android SDK API 35, NDK r26d, JDK 17. See [docs/reproducible-builds.md](docs/reproducible-builds.md).
-
-## Hardware
-
-Connect the mixer via **USB OTG** (powered hub recommended). Grant USB permission in the app, then add or probe your mixer. Validate channel counts against [docs/hardware-assumptions.md](docs/hardware-assumptions.md).
-
-**Remote control:** On the same Wi‑Fi, set one tablet to **Host** (at the mixer) and another to **Remote** in Settings → Remote control.
-
-## Documentation
-
-| Audience | Start here |
-|----------|------------|
-| **Users** (install, hardware) | This README |
-| **Contributors** | [CONTRIBUTING.md](CONTRIBUTING.md) |
-| **Developers** | [**docs/README.md**](docs/README.md) |
-| **AI coding agents** | [docs/AGENTS.md](docs/AGENTS.md) |
-
-### Developer docs (summary)
-
-| Doc | Contents |
-|-----|----------|
-| [docs/README.md](docs/README.md) | Full documentation index |
-| [docs/development/getting-started.md](docs/development/getting-started.md) | Toolchain, build, test |
-| [docs/architecture/overview.md](docs/architecture/overview.md) | System design |
-| [docs/product/ui-daw.md](docs/product/ui-daw.md) | DAW UI for designers |
-| [docs/remote-control.md](docs/remote-control.md) | LAN Host/Remote sync |
-| [docs/ci-and-releases.md](docs/ci-and-releases.md) | CI, signing, releases |
-
-## Modules
-
-| Module | Role |
-|--------|------|
-| `app` | Compose DAW UI, foreground service, session orchestration |
-| `domain` | Session/mixer models, `Mixer` interface |
-| `usb-audio` | USB enumeration, Oboe/UAC2 routing |
-| `audio-engine` | Native Oboe + UAC2 record/playback |
-| `mixer-behringer` | X32/XR18 OSC, scribble import |
-| `session-io` | Per-channel WAV, session.json, waveforms |
-| `remote-server` | LAN discovery and WebSocket sync |
+| Topic | Where to read |
+|-------|----------------|
+| Install, updates, signing | [docs/ci-and-releases.md](docs/ci-and-releases.md) |
+| Hardware notes and channel counts | [docs/hardware-assumptions.md](docs/hardware-assumptions.md) |
+| Remote control setup | [docs/remote-control.md](docs/remote-control.md) |
+| Development and architecture | [docs/README.md](docs/README.md) |
+| Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
