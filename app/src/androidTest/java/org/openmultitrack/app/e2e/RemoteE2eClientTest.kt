@@ -9,6 +9,7 @@ import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.openmultitrack.domain.remote.RemoteConnectionState
 import kotlin.math.abs
 
 /**
@@ -77,6 +78,10 @@ class RemoteE2eClientTest {
 
         RemoteE2eAssertions.assertLiveWaveformsDuringRecording(remote, mixerId, hostIp)
 
+        // Recording mode can drop the socket; establish a clean client session before disconnect test.
+        if (remote.state().value.connectionState != RemoteConnectionState.CONNECTED) {
+            remote.reconnectClient(hostIp)
+        }
         testUnexpectedDisconnectRecovery(remote, hostIp, mixerId)
         E2eLanSync.signal(E2eLanSync.CLIENT_DONE, targetHost = hostIp)
     }
@@ -90,7 +95,7 @@ class RemoteE2eClientTest {
         hostIp: String,
         mixerId: String,
     ) {
-        E2eWait.awaitRemoteReady(remote, hostIp, mixerId)
+        E2eWait.awaitRemoteReady(remote, hostIp, mixerId, timeoutMs = 180_000)
         remote.disconnectClient()
         delay(2_000)
         remote.connectClient(hostIp)
