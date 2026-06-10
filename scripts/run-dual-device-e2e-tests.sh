@@ -13,8 +13,13 @@
 #   --host SERIAL       adb serial for USB host tablet
 #   --client SERIAL     adb serial for remote client tablet
 #   --skip-build        Use existing debug + androidTest APKs
+#   --no-install        Skip adb install (use when APKs are already on devices)
 #   --remote-only       Run only dual-device remote e2e (skip other host tests)
 #   -h, --help
+#
+# Wireless adb: this script never touches Wi-Fi or wireless debugging settings.
+# Avoid --no-install only when you must push new APKs; adb install restarts adbd
+# and often changes the wireless debugging port.
 
 set -euo pipefail
 
@@ -28,6 +33,7 @@ ADB="$SDK/platform-tools/adb"
 HOST_SERIAL=""
 CLIENT_SERIAL=""
 SKIP_BUILD=false
+SKIP_INSTALL=false
 REMOTE_ONLY=false
 
 while [[ $# -gt 0 ]]; do
@@ -43,6 +49,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --skip-build) SKIP_BUILD=true; shift ;;
+    --no-install) SKIP_INSTALL=true; shift ;;
     --remote-only) REMOTE_ONLY=true; shift ;;
     -h|--help)
       sed -n '2,19p' "$0"
@@ -132,25 +139,12 @@ done
 adb_host -s "$HOST_SERIAL" shell dumpsys usb 2>/dev/null | grep -qi 'X18/XR18\|XR18' \
   || die "XR18 not visible on host $HOST_SERIAL"
 
-wake_device() {
-  local serial="$1"
-  # Keep the screen on during tests. Use stayon true (not usb-only) so wireless adb
-  # tablets stay reachable when OTG is attached. Never disable Wi-Fi — that breaks adb.
-  "$ADB" -s "$serial" shell input keyevent KEYCODE_WAKEUP 2>/dev/null || true
-  "$ADB" -s "$serial" shell svc power stayon true 2>/dev/null || true
-  "$ADB" -s "$serial" shell wm dismiss-keyguard 2>/dev/null || true
-}
-
 require_device_online() {
   local serial="$1"
   local label="$2"
   "$ADB" -s "$serial" get-state 2>/dev/null | grep -q '^device$' \
     || die "$label $serial is not online (check Wi-Fi and wireless adb)"
 }
-
-wake_device "$HOST_SERIAL"
-wake_device "$CLIENT_SERIAL"
-sleep 2
 
 if [[ "$SKIP_BUILD" != true ]]; then
   log "Building APKs..."
@@ -169,15 +163,22 @@ install_on() {
   "$ADB" -s "$serial" shell pm grant org.openmultitrack.test android.permission.RECORD_AUDIO 2>/dev/null || true
 }
 
-install_on "$HOST_SERIAL"
-install_on "$CLIENT_SERIAL"
+if [[ "$SKIP_INSTALL" != true ]]; then
+  install_on "$HOST_SERIAL"
+  install_on "$CLIENT_SERIAL"
+  log "APK install done — if wireless adb dropped, reconnect (port may have changed)"
+else
+  log "Skipping APK install (--no-install)"
+fi
 
-log "Force-stopping app processes before tests..."
-"$ADB" -s "$HOST_SERIAL" shell am force-stop org.openmultitrack 2>/dev/null || true
-"$ADB" -s "$HOST_SERIAL" shell am force-stop org.openmultitrack.test 2>/dev/null || true
-"$ADB" -s "$CLIENT_SERIAL" shell am force-stop org.openmultitrack 2>/dev/null || true
-"$ADB" -s "$CLIENT_SERIAL" shell am force-stop org.openmultitrack.test 2>/dev/null || true
-sleep 2
+if [[ "$REMOTE_ONLY" != true ]]; then
+  log "Force-stopping app processes before non-remote tests..."
+  "$ADB" -s "$HOST_SERIAL" shell am force-stop org.openmultitrack 2>/dev/null || true
+  "$ADB" -s "$HOST_SERIAL" shell am force-stop org.openmultitrack.test 2>/dev/null || true
+  "$ADB" -s "$CLIENT_SERIAL" shell am force-stop org.openmultitrack 2>/dev/null || true
+  "$ADB" -s "$CLIENT_SERIAL" shell am force-stop org.openmultitrack.test 2>/dev/null || true
+  sleep 2
+fi
 
 run_instrument() {
   local serial="$1"
