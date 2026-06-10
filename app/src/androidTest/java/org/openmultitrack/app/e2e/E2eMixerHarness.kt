@@ -20,9 +20,9 @@ import java.io.File
 import kotlin.math.abs
 
 class E2eMixerHarness(
-    private val appRule: E2eAppRule,
+    private val appHost: E2eActivityHost,
 ) {
-    val context get() = appRule.appContext
+    val context get() = appHost.appContext
     private val client = AudioSessionClient(context)
     private lateinit var manager: MultiMixerSessionManager
     lateinit var mixerId: String
@@ -37,7 +37,7 @@ class E2eMixerHarness(
 
         releaseGlobalUsbCapture(manager, preserveActiveRecording)
 
-        val (id, descriptor, probe) = appRule.runOnActivity { activity ->
+        val (id, descriptor, probe) = appHost.runOnActivity { activity ->
             val enumerator = UsbAudioEnumerator(activity)
             val xr18 = enumerator.listUsbDevices().first {
                 it.vendorId == E2eConfig.XR18_VENDOR_ID && it.productId == E2eConfig.XR18_PRODUCT_ID

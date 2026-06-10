@@ -5,13 +5,13 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import kotlin.math.abs
 
-internal fun expectedSlotCenterX(slot: Int, capacitySlots: Int, imageWidth: Int): Float =
+fun expectedSlotCenterX(slot: Int, capacitySlots: Int, imageWidth: Int): Float =
     (slot + 0.5f) / capacitySlots * imageWidth
 
 /**
  * Finds the horizontal centroid of bar pixels near [nearX]. Returns null when no bar is visible.
  */
-internal fun measureBarCentroidX(
+fun measureBarCentroidX(
     image: ImageBitmap,
     nearX: Float,
     tolerancePx: Int,
@@ -36,7 +36,7 @@ internal fun measureBarCentroidX(
 }
 
 /** Rightmost x coordinate that contains waveform bar pixels. */
-internal fun waveformRightEdgeX(image: ImageBitmap): Int {
+fun waveformRightEdgeX(image: ImageBitmap): Int {
     val bitmap = image.asAndroidBitmap()
     val yStep = (bitmap.height / 8).coerceAtLeast(1)
     for (x in bitmap.width - 1 downTo 0) {
@@ -49,7 +49,7 @@ internal fun waveformRightEdgeX(image: ImageBitmap): Int {
     return -1
 }
 
-internal fun assertSlotCentroidStable(
+fun assertSlotCentroidStable(
     before: ImageBitmap,
     after: ImageBitmap,
     slot: Int,

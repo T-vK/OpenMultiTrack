@@ -14,9 +14,9 @@ import org.openmultitrack.domain.remote.RemoteRole
  */
 class E2eAppRule(
     private val enableWaveformsAndVu: Boolean = false,
-) : ExternalResource() {
+) : ExternalResource(), E2eActivityHost {
     private var scenario: ActivityScenario<MainActivity>? = null
-    lateinit var appContext: Context
+    override lateinit var appContext: Context
         private set
 
     override fun before() {
@@ -53,7 +53,7 @@ class E2eAppRule(
         Thread.sleep(2_000)
     }
 
-    fun <T> runOnActivity(block: (MainActivity) -> T): T {
+    override fun <T> runOnActivity(block: (MainActivity) -> T): T {
         val active = scenario ?: error("Activity not launched")
         var result: T? = null
         active.onActivity { activity ->
