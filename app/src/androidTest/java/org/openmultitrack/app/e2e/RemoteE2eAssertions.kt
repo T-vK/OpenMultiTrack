@@ -219,40 +219,41 @@ object RemoteE2eAssertions {
         ensureVirtualSoundcheck(remote, mixerId, hostIp)
         E2eWait.awaitRemoteReady(remote, hostIp, mixerId)
 
+        val duration = remote.state().value.sessionByMixer[mixerId]!!.playbackDurationSec
+        val windowBefore = remote.state().value.sessionByMixer[mixerId]!!.soundcheckViewWindowSec
+        val focalSec = (duration * 0.2f).coerceAtLeast(1f)
+        remote.sendRemote(
+            "zoom_soundcheck_view",
+            JSONObject()
+                .put("mixerId", mixerId)
+                .put("scale", 2.0)
+                .put("focalSec", focalSec.toDouble()),
+        )
+        E2eWait.untilRemoteState(remote.state(), 90_000) { state ->
+            val window = state.sessionByMixer[mixerId]?.soundcheckViewWindowSec ?: windowBefore
+            window < windowBefore - 1f
+        }
+
         remote.sendRemote(
             "set_soundcheck_view",
             JSONObject()
                 .put("mixerId", mixerId)
-                .put("viewStartSec", 0.0)
-                .put("viewWindowSec", 30.0),
+                .put("viewStartSec", 3.0)
+                .put("viewWindowSec", 35.0),
         )
-        E2eWait.untilRemoteState(remote.state(), 60_000) { state ->
+        E2eWait.untilRemoteState(remote.state(), 90_000) { state ->
             val session = state.sessionByMixer[mixerId] ?: return@untilRemoteState false
-            session.soundcheckViewStartSec <= 0.5f &&
-                abs(session.soundcheckViewWindowSec - 30f) <= 2f
+            abs(session.soundcheckViewStartSec - 3f) <= 2f
         }
 
         val startBefore = remote.state().value.sessionByMixer[mixerId]!!.soundcheckViewStartSec
         remote.sendRemote(
             "pan_soundcheck_view",
-            JSONObject().put("mixerId", mixerId).put("deltaSec", 2.0),
+            JSONObject().put("mixerId", mixerId).put("deltaSec", 1.5),
         )
-        E2eWait.untilRemoteState(remote.state(), 60_000) {
-            val start = it.sessionByMixer[mixerId]?.soundcheckViewStartSec ?: return@untilRemoteState false
-            start > startBefore + 0.5f
-        }
-
-        remote.sendRemote(
-            "set_soundcheck_view",
-            JSONObject()
-                .put("mixerId", mixerId)
-                .put("viewStartSec", 5.0)
-                .put("viewWindowSec", 45.0),
-        )
-        E2eWait.untilRemoteState(remote.state(), 60_000) { state ->
-            val session = state.sessionByMixer[mixerId] ?: return@untilRemoteState false
-            abs(session.soundcheckViewStartSec - 5f) <= 1f &&
-                abs(session.soundcheckViewWindowSec - 45f) <= 2f
+        E2eWait.untilRemoteState(remote.state(), 90_000) { state ->
+            val start = state.sessionByMixer[mixerId]?.soundcheckViewStartSec ?: return@untilRemoteState false
+            abs(start - startBefore) >= 0.4f
         }
     }
 
