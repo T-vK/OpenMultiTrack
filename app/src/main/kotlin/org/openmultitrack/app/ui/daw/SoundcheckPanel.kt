@@ -828,45 +828,6 @@ internal fun peakLevelAtTime(
     return scalePeaksForDisplay(floatArrayOf(peaks[idx]), normalized).first()
 }
 
-/**
- * Map live recording peaks into [pixelCount] columns across the record window.
- * Uses wall-clock [elapsedSec] and [windowSec] so the strip fills gradually (e.g. 15 s)
- * even when the peak buffer length does not match elapsed time.
- */
-internal fun binLiveWaveformToPixels(
-    peaks: FloatArray,
-    windowSec: Float,
-    elapsedSec: Float,
-    peaksPerSec: Int,
-    pixelCount: Int,
-): FloatArray {
-    if (pixelCount <= 0 || windowSec <= 0f || peaksPerSec <= 0) return FloatArray(0)
-    val capacity = kotlin.math.max(10, (windowSec * peaksPerSec).toInt())
-    val timeSlots = (elapsedSec * peaksPerSec).toInt().coerceIn(0, capacity)
-    val out = FloatArray(pixelCount)
-    if (timeSlots <= 0 || peaks.isEmpty()) return out
-    val startSlot = capacity - timeSlots
-    val samples = if (peaks.size > timeSlots) {
-        peaks.copyOfRange(peaks.size - timeSlots, peaks.size)
-    } else {
-        peaks
-    }
-    val sampleStartSlot = startSlot + (timeSlots - samples.size)
-    for (px in 0 until pixelCount) {
-        val slotLo = px * capacity / pixelCount
-        val slotHi = (px + 1) * capacity / pixelCount
-        var maxPeak = 0f
-        for (slot in slotLo until slotHi) {
-            val sampleIdx = slot - sampleStartSlot
-            if (sampleIdx in samples.indices) {
-                maxPeak = maxOf(maxPeak, samples[sampleIdx])
-            }
-        }
-        out[px] = maxPeak
-    }
-    return out
-}
-
 /** USB peaks are often very small floats; scale for display so waveforms stay visible. */
 internal fun scalePeaksForDisplay(peaks: FloatArray, normalized: Boolean): FloatArray {
     if (peaks.isEmpty()) return peaks

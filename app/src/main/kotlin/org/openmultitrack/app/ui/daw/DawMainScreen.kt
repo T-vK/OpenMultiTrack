@@ -1010,7 +1010,7 @@ private fun WaveformView(
         if (w <= 0f || h <= 0f) return@Canvas
         val pixelCount = w.toInt().coerceAtLeast(1)
         val scaledPeaks = scalePeaksForDisplay(data, normalized)
-        val columns = binLiveWaveformToPixels(
+        val columns = liveWaveformColumnsForPixels(
             peaks = scaledPeaks,
             windowSec = windowSec,
             elapsedSec = elapsedSec,

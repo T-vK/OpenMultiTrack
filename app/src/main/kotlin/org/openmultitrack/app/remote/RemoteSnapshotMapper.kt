@@ -156,7 +156,12 @@ object RemoteSnapshotMapper {
                 )
             }
             if (recordElapsedSec != null && recordElapsedSec > 0f) {
-                alignLiveWaveformChannels(mixerPeaks, recordElapsedSec, waveformCapacity)
+                alignLiveWaveformChannels(
+                    mixerPeaks,
+                    recordElapsedSec,
+                    waveformCapacity,
+                    settings.recordWaveformWindowSec,
+                )
             }
         }
         return snapshot.copy(
@@ -437,17 +442,27 @@ object RemoteSnapshotMapper {
         mixerPeaks: MutableMap<Int, LiveWaveformSnapshot>,
         recordElapsedSec: Float,
         capacity: Int,
+        windowSec: Float,
     ) {
-        val targetLen = (recordElapsedSec * RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC)
-            .toInt()
-            .coerceIn(0, capacity)
+        val rolling = recordElapsedSec > windowSec
+        val targetLen = if (rolling) {
+            capacity
+        } else {
+            (recordElapsedSec * RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC)
+                .toInt()
+                .coerceIn(0, capacity)
+        }
         if (targetLen <= 0) return
         mixerPeaks.keys.toList().forEach { ch ->
             val snap = mixerPeaks[ch] ?: return@forEach
             val peaks = snap.peaks
             val aligned = when {
                 peaks.size == targetLen -> peaks
-                peaks.size > targetLen -> peaks.copyOfRange(peaks.size - targetLen, peaks.size)
+                peaks.size > targetLen -> if (rolling) {
+                    peaks.copyOfRange(peaks.size - targetLen, peaks.size)
+                } else {
+                    peaks.copyOfRange(0, targetLen)
+                }
                 else -> peaks
             }
             mixerPeaks[ch] = snap.copy(peaks = aligned, capacity = capacity)
