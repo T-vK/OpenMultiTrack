@@ -20,7 +20,7 @@ import kotlin.math.abs
 @RunWith(AndroidJUnit4::class)
 class RemoteE2eClientTest {
     @get:Rule
-    val appRule = E2eAppRule()
+    val appRule = E2eAppRule(enableWaveformsAndVu = true)
 
     private var harness: E2eRemoteHarness? = null
     private lateinit var hostIp: String
@@ -48,7 +48,7 @@ class RemoteE2eClientTest {
     }
 
     @Test
-    fun remoteRecordingPlaybackSeekZoomAndReconnect() = runBlocking {
+    fun remoteFullSyncTransportWaveformsAndReconnect() = runBlocking {
         val remote = E2eRemoteHarness(appRule).also { harness = it }
         remote.bindSession()
         remote.connectClient(hostIp)
@@ -58,11 +58,10 @@ class RemoteE2eClientTest {
         assertThat(mirror!!.selectedSoundcheckDir).isEqualTo(sessionDir)
         awaitSoundcheckReady(remote)
 
-        remote.sendRemote("play_playback", JSONObject().put("mixerId", mixerId))
-        E2eWait.untilRemoteState(remote.state(), 60_000) {
-            it.sessionByMixer[mixerId]?.isPlaying == true
-        }
-        delay(1_000)
+        RemoteE2eAssertions.assertSettingsMirrored(remote.state())
+        RemoteE2eAssertions.assertSoundcheckWaveformsOnRemote(remote, mixerId)
+        RemoteE2eAssertions.assertPlaybackTransport(remote, mixerId)
+        RemoteE2eAssertions.assertSettingsChangeFromRemote(remote, mixerId)
 
         val duration = remote.state().value.sessionByMixer[mixerId]!!.playbackDurationSec
         val seekTarget = (duration * 0.4f).coerceAtLeast(1f)
@@ -87,16 +86,6 @@ class RemoteE2eClientTest {
         val zoomedWindow = remote.state().value.sessionByMixer[mixerId]!!.soundcheckViewWindowSec
         assertThat(zoomedWindow).isLessThan(windowBefore)
 
-        val seekAfterZoom = (seekTarget + 0.5f).coerceAtMost(duration - 0.25f)
-        remote.sendRemote(
-            "seek",
-            JSONObject().put("mixerId", mixerId).put("positionSec", seekAfterZoom.toDouble()),
-        )
-        E2eWait.untilRemoteState(remote.state(), 20_000) {
-            val pos = it.sessionByMixer[mixerId]?.playbackPositionSec ?: 0f
-            abs(pos - seekAfterZoom) <= 1.5f
-        }
-
         remote.sendRemote(
             "set_app_mode",
             JSONObject().put("mixerId", mixerId).put("mode", AppMode.SIMPLE_PLAY.ordinal),
@@ -105,25 +94,8 @@ class RemoteE2eClientTest {
             it.sessionByMixer[mixerId]?.appMode == AppMode.SIMPLE_PLAY
         }
 
-        remote.sendRemote("stop_playback", JSONObject().put("mixerId", mixerId))
-        E2eWait.untilRemoteState(remote.state(), 30_000) {
-            it.sessionByMixer[mixerId]?.isPlaying != true
-        }
-
-        remote.sendRemote(
-            "set_app_mode",
-            JSONObject().put("mixerId", mixerId).put("mode", AppMode.MULTITRACK_RECORD.ordinal),
-        )
-        delay(500)
-        remote.sendRemote("start_record", JSONObject().put("mixerId", mixerId))
-        E2eWait.untilRemoteState(remote.state(), 60_000) {
-            it.sessionByMixer[mixerId]?.isRecording == true
-        }
-        delay(3_000)
-        remote.sendRemote("stop_record", JSONObject().put("mixerId", mixerId))
-        E2eWait.untilRemoteState(remote.state(), 60_000) {
-            it.sessionByMixer[mixerId]?.isRecording != true
-        }
+        RemoteE2eAssertions.assertLiveWaveformsDuringRecording(remote, mixerId)
+        RemoteE2eAssertions.assertVuMetersDuringRecording(remote, mixerId)
 
         testUnexpectedDisconnectRecovery(remote)
         E2eLanSync.signal(E2eLanSync.CLIENT_DONE, targetHost = hostIp)

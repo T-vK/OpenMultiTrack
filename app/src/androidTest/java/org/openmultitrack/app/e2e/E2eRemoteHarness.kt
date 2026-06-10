@@ -41,6 +41,12 @@ class E2eRemoteHarness(
         settings.remoteAuthToken = E2eConfig.pairingPin
     }
 
+    fun ensureHostDisplayDefaults() {
+        val settings = AppSettingsStore(context)
+        settings.showWaveforms = true
+        settings.showVuMeters = true
+    }
+
     suspend fun startHost(): String {
         configureTestPin()
         remote.applyRole(RemoteRole.HOST)
@@ -69,9 +75,17 @@ class E2eRemoteHarness(
                 hostId = host.hostId ?: host.host,
                 displayName = host.name,
                 pin = E2eConfig.pairingPin,
+                lastHost = hostIp,
+                lastPort = org.openmultitrack.domain.remote.RemoteProtocol.HTTP_PORT,
             ),
         )
-        remote.connectToHost(host)
+        remote.connectDirect(
+            host = hostIp,
+            port = org.openmultitrack.domain.remote.RemoteProtocol.HTTP_PORT,
+            name = host.name,
+            hostId = host.hostId,
+            pin = E2eConfig.pairingPin,
+        )
         E2eWait.untilRemoteConnected(remote.state)
         return remote
     }

@@ -20,7 +20,7 @@ import org.openmultitrack.domain.session.AppMode
 @RequiresUsbDevice(vendorId = E2eConfig.XR18_VENDOR_ID, productId = E2eConfig.XR18_PRODUCT_ID)
 class RemoteE2eHostTest {
     @get:Rule(order = 0)
-    val appRule = E2eAppRule()
+    val appRule = E2eAppRule(enableWaveformsAndVu = true)
 
     @get:Rule(order = 1)
     val usbDeviceRule = UsbDeviceRule()
@@ -45,6 +45,7 @@ class RemoteE2eHostTest {
 
         val remote = E2eRemoteHarness(appRule).also { remoteHarness = it }
         remote.bindSession()
+        remote.ensureHostDisplayDefaults()
         val hostIp = remote.startHost()
         E2eLanSync.signal("$HOST_READY_PAYLOAD|ip=$hostIp|mixerId=${mixer.mixerId}|sessionDir=${sessionDir.absolutePath}")
 

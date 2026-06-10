@@ -181,6 +181,16 @@ class RemoteControlManager(
         }
     }
 
+    fun connectDirect(
+        host: String,
+        port: Int = RemoteProtocol.HTTP_PORT,
+        name: String = host,
+        hostId: String? = null,
+        pin: String? = null,
+    ) {
+        connectToAddress(host, port, name, hostId, pin)
+    }
+
     fun connectToHost(host: RemoteDiscoveredHost) {
         if (_state.value.role != RemoteRole.CLIENT) return
         val pin = host.hostId?.let { settings.pinForPairedHost(it) }
