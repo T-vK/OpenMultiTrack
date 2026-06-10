@@ -134,9 +134,18 @@ adb_host -s "$HOST_SERIAL" shell dumpsys usb 2>/dev/null | grep -qi 'X18/XR18\|X
 
 wake_device() {
   local serial="$1"
+  # Keep the screen on during tests. Use stayon true (not usb-only) so wireless adb
+  # tablets stay reachable when OTG is attached. Never disable Wi-Fi — that breaks adb.
   "$ADB" -s "$serial" shell input keyevent KEYCODE_WAKEUP 2>/dev/null || true
-  "$ADB" -s "$serial" shell svc power stayon usb 2>/dev/null || true
+  "$ADB" -s "$serial" shell svc power stayon true 2>/dev/null || true
   "$ADB" -s "$serial" shell wm dismiss-keyguard 2>/dev/null || true
+}
+
+require_device_online() {
+  local serial="$1"
+  local label="$2"
+  "$ADB" -s "$serial" get-state 2>/dev/null | grep -q '^device$' \
+    || die "$label $serial is not online (check Wi-Fi and wireless adb)"
 }
 
 wake_device "$HOST_SERIAL"
@@ -238,6 +247,8 @@ else
 fi
 
 log "Running dual-device remote e2e (host + client in parallel)..."
+require_device_online "$HOST_SERIAL" "Host"
+require_device_online "$CLIENT_SERIAL" "Client"
 HOST_LOG="$(mktemp)"
 CLIENT_LOG="$(mktemp)"
 trap 'rm -f "$HOST_LOG" "$CLIENT_LOG"' EXIT

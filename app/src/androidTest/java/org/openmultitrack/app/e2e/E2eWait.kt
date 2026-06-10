@@ -105,7 +105,8 @@ object E2eWait {
     ) {
         untilRemoteState(stateFlow, timeoutMs) {
             it.connectionState == RemoteConnectionState.CONNECTED &&
-                it.sessionByMixer.isNotEmpty()
+                it.sessionByMixer.isNotEmpty() &&
+                it.uiSettings != null
         }
     }
 

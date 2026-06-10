@@ -318,6 +318,10 @@ class RemoteControlManager(
                 hostName = name,
                 connectedHost = host,
                 errorMessage = null,
+                sessionByMixer = emptyMap(),
+                mixers = emptyList(),
+                activeMixerId = null,
+                uiSettings = null,
             )
         }
         client = RemoteClient(listener = clientListener).also {
@@ -343,6 +347,7 @@ class RemoteControlManager(
                 sessionByMixer = emptyMap(),
                 mixers = emptyList(),
                 activeMixerId = null,
+                uiSettings = null,
                 connectedClientCount = 0,
             )
         }
