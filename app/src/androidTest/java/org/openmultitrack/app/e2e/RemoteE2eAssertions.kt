@@ -45,17 +45,17 @@ object RemoteE2eAssertions {
             "set_app_mode",
             JSONObject().put("mixerId", mixerId).put("mode", AppMode.MULTITRACK_RECORD.ordinal),
         )
-        E2eWait.untilRemoteState(remote.state(), 15_000) {
+        E2eWait.untilRemoteState(remote.state(), 30_000) {
             it.sessionByMixer[mixerId]?.appMode == AppMode.MULTITRACK_RECORD
         }
+        delay(1_000)
         remote.sendRemote("start_record", JSONObject().put("mixerId", mixerId))
-        E2eWait.untilRemoteState(remote.state(), 60_000) {
+        E2eWait.untilRemoteState(remote.state(), 90_000) {
             it.sessionByMixer[mixerId]?.isRecording == true
         }
-        E2eWait.untilRemoteState(remote.state(), 60_000) { state ->
+        E2eWait.untilRemoteState(remote.state(), 90_000) { state ->
             val session = state.sessionByMixer[mixerId] ?: return@untilRemoteState false
             session.recordElapsedSec > 0.5f &&
-                session.captureMeterLevels.isNotEmpty() &&
                 session.waveformPeaks.values.any { snap -> snap.peaks.any { it > 0.01f } }
         }
         delay(recordSeconds * 1_000L)

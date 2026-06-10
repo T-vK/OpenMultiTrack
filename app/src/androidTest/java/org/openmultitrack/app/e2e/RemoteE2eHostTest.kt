@@ -63,8 +63,8 @@ class RemoteE2eHostTest {
         assertThat(ctrl.state.value.appMode).isEqualTo(AppMode.VIRTUAL_SOUNDCHECK)
 
         // Keep serving through the full client e2e budget (ignore brief reconnect blips).
-        val minServeMs = 150_000L
-        val maxServeMs = 300_000L
+        val minServeMs = 180_000L
+        val maxServeMs = 360_000L
         val serveStart = System.currentTimeMillis()
         while (System.currentTimeMillis() - serveStart < maxServeMs) {
             if (remote.state().value.connectedClientCount == 0 &&

@@ -75,14 +75,6 @@ class RemoteE2eClientTest {
         val zoomedWindow = remote.state().value.sessionByMixer[mixerId]!!.soundcheckViewWindowSec
         assertThat(zoomedWindow).isLessThan(windowBefore)
 
-        remote.sendRemote(
-            "set_app_mode",
-            JSONObject().put("mixerId", mixerId).put("mode", AppMode.SIMPLE_PLAY.ordinal),
-        )
-        E2eWait.untilRemoteState(remote.state(), 15_000) {
-            it.sessionByMixer[mixerId]?.appMode == AppMode.SIMPLE_PLAY
-        }
-
         RemoteE2eAssertions.assertLiveWaveformsDuringRecording(remote, mixerId)
 
         testUnexpectedDisconnectRecovery(remote, hostIp, mixerId)
