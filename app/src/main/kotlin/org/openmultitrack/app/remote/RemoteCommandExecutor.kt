@@ -1,7 +1,9 @@
 package org.openmultitrack.app.remote
 
+import org.json.JSONArray
 import org.json.JSONObject
 import org.openmultitrack.app.data.AppSettingsStore
+import org.openmultitrack.app.data.MixerRoutingStore
 import org.openmultitrack.app.data.StripIconMode
 import org.openmultitrack.app.data.StripNumberMode
 import org.openmultitrack.app.service.MultiMixerSessionManager
@@ -13,6 +15,7 @@ import org.openmultitrack.sessionio.wav.SessionWaveformOverview
 class RemoteCommandExecutor(
     private val manager: MultiMixerSessionManager,
     private val settings: AppSettingsStore,
+    private val routingStore: MixerRoutingStore,
     private val promoteForeground: (String) -> Boolean,
 ) {
     fun execute(command: String, payload: JSONObject): Result<WaveformChunkReply?> = runCatching {
@@ -185,6 +188,13 @@ class RemoteCommandExecutor(
             }
             "set_settings" -> {
                 applySettings(payload)
+                null
+            }
+            "set_mixer_routing" -> {
+                val mixerId = payload.getString("mixerId")
+                val config = RemoteSnapshotMapper.routingFromPayload(payload.getJSONObject("routing"))
+                routingStore.save(mixerId, config)
+                manager.getOrCreate(mixerId).setRouting(config)
                 null
             }
             "waveform_request" -> buildWaveformChunk(payload)

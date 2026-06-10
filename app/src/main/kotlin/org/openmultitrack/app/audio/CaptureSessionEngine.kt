@@ -704,8 +704,7 @@ class CaptureSessionEngine(
         private const val METER_OUTPUT_THRESHOLD = 1e-5f
 
         /** Keep roughly constant peak count across window sizes so short windows stay sharp. */
-        fun peaksPerSecondForWindow(windowSec: Float): Int =
-            (TARGET_WAVEFORM_CAPACITY / windowSec.coerceIn(5f, 120f)).toInt().coerceIn(30, 120)
+        fun peaksPerSecondForWindow(windowSec: Float): Int = DEFAULT_WAVEFORM_PEAKS_PER_SEC
     }
 
     private fun ensureVirtualMicOutput(config: VirtualMicConfig) {

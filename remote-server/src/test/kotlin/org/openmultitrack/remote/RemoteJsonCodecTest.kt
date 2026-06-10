@@ -23,6 +23,10 @@ class RemoteJsonCodecTest {
                     channelStrips = listOf(
                         RemoteChannelStripSnapshot(index = 0, label = "Kick", armed = true),
                     ),
+                    routing = RemoteRoutingSnapshot(
+                        inputMap = mapOf(1 to 3),
+                        hiddenRecord = setOf(4),
+                    ),
                 ),
             ),
         )
@@ -31,6 +35,8 @@ class RemoteJsonCodecTest {
         assertThat(decoded.activeMixerId).isEqualTo("m1")
         assertThat(decoded.sessions["m1"]?.transportState).isEqualTo("RECORDING")
         assertThat(decoded.sessions["m1"]?.channelStrips?.first()?.label).isEqualTo("Kick")
+        assertThat(decoded.sessions["m1"]?.routing?.inputMap).isEqualTo(mapOf(1 to 3))
+        assertThat(decoded.sessions["m1"]?.routing?.hiddenRecord).isEqualTo(setOf(4))
     }
 
     @Test

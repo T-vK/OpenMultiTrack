@@ -18,6 +18,7 @@ import org.openmultitrack.app.R
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.data.MixerDeviceStore
+import org.openmultitrack.app.data.MixerRoutingStore
 import org.openmultitrack.app.remote.RemoteControlManager
 import org.openmultitrack.usb.UsbAudioEnumerator
 
@@ -39,11 +40,13 @@ class AudioSessionService : Service() {
         val enumerator = UsbAudioEnumerator(applicationContext)
         val settings = AppSettingsStore(applicationContext)
         val mixerStore = MixerDeviceStore(applicationContext)
+        val routingStore = MixerRoutingStore(applicationContext)
         mixerManager = MultiMixerSessionManager(applicationContext, enumerator, settings)
         remoteControl = RemoteControlManager(
             appContext = applicationContext,
             settings = settings,
             mixerStore = mixerStore,
+            routingStore = routingStore,
             getManager = { mixerManager },
             promoteForeground = { status -> promoteToForeground(status) },
         )

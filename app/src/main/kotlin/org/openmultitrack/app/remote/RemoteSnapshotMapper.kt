@@ -1,11 +1,14 @@
 package org.openmultitrack.app.remote
 
+import org.json.JSONArray
+import org.json.JSONObject
 import org.openmultitrack.app.audio.LiveWaveformSnapshot
 import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.app.service.SoundcheckSessionItem
 import org.openmultitrack.domain.channel.ChannelStripState
 import org.openmultitrack.domain.mixer.MixerProfile
+import org.openmultitrack.domain.mixer.MixerRoutingConfig
 import org.openmultitrack.domain.remote.RemoteProtocol
 import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.TransportState
@@ -16,6 +19,7 @@ import org.openmultitrack.remote.RemoteMirrorSnapshot
 import org.openmultitrack.remote.RemoteMixerDelta
 import org.openmultitrack.remote.RemoteMixerProfileSnapshot
 import org.openmultitrack.remote.RemoteMixerSnapshot
+import org.openmultitrack.remote.RemoteRoutingSnapshot
 import org.openmultitrack.remote.RemoteSettingsSnapshot
 import org.openmultitrack.remote.RemoteSoundcheckSessionSnapshot
 import org.openmultitrack.remote.RemoteSoundcheckWaveformMeta
@@ -29,6 +33,7 @@ object RemoteSnapshotMapper {
         mixers: List<MixerProfile>,
         activeMixerId: String?,
         sessions: Map<String, MixerSessionUiState>,
+        routingByMixer: Map<String, MixerRoutingConfig> = emptyMap(),
     ): RemoteMirrorSnapshot =
         RemoteMirrorSnapshot(
             protocolVersion = RemoteProtocol.VERSION,
@@ -36,8 +41,64 @@ object RemoteSnapshotMapper {
             activeMixerId = activeMixerId,
             settings = settingsToRemote(settings),
             mixers = mixers.map { RemoteMixerProfileSnapshot(it.id, it.displayName) },
-            sessions = sessions.mapValues { (_, session) -> sessionToRemote(session) },
+            sessions = sessions.mapValues { (id, session) ->
+                sessionToRemote(session, routingByMixer[id])
+            },
         )
+
+    fun routingToRemote(config: MixerRoutingConfig): RemoteRoutingSnapshot =
+        RemoteRoutingSnapshot(
+            inputMap = config.inputMap,
+            outputMap = config.outputMap,
+            hiddenRecord = config.hiddenRecord,
+            hiddenSoundcheck = config.hiddenSoundcheck,
+        )
+
+    fun routingFromRemote(remote: RemoteRoutingSnapshot): MixerRoutingConfig =
+        MixerRoutingConfig(
+            inputMap = remote.inputMap,
+            outputMap = remote.outputMap,
+            hiddenRecord = remote.hiddenRecord,
+            hiddenSoundcheck = remote.hiddenSoundcheck,
+        )
+
+    fun routingFromPayload(obj: JSONObject): MixerRoutingConfig =
+        routingFromRemote(
+            RemoteRoutingSnapshot(
+                inputMap = jsonToIntMap(obj.optJSONObject("inputMap")),
+                outputMap = jsonToIntMap(obj.optJSONObject("outputMap")),
+                hiddenRecord = jsonToIntSet(obj.optJSONArray("hiddenRecord")),
+                hiddenSoundcheck = jsonToIntSet(obj.optJSONArray("hiddenSoundcheck")),
+            ),
+        )
+
+    fun routingToPayload(config: MixerRoutingConfig): JSONObject =
+        JSONObject().apply {
+            put("inputMap", intMapToJson(config.inputMap))
+            put("outputMap", intMapToJson(config.outputMap))
+            put("hiddenRecord", intSetToJson(config.hiddenRecord))
+            put("hiddenSoundcheck", intSetToJson(config.hiddenSoundcheck))
+        }
+
+    private fun intMapToJson(map: Map<Int, Int>): JSONObject =
+        JSONObject().apply { map.forEach { (k, v) -> put(k.toString(), v) } }
+
+    private fun jsonToIntMap(obj: JSONObject?): Map<Int, Int> {
+        if (obj == null) return emptyMap()
+        return buildMap {
+            obj.keys().forEach { key -> put(key.toInt(), obj.getInt(key)) }
+        }
+    }
+
+    private fun intSetToJson(set: Set<Int>): JSONArray =
+        JSONArray().apply { set.sorted().forEach { put(it) } }
+
+    private fun jsonToIntSet(arr: JSONArray?): Set<Int> {
+        if (arr == null) return emptySet()
+        return buildSet {
+            for (i in 0 until arr.length()) add(arr.getInt(i))
+        }
+    }
 
     fun buildDelta(
         previous: RemoteMirrorSnapshot?,
@@ -197,11 +258,7 @@ object RemoteSnapshotMapper {
                     }
                 }
                 if (changedChannels.isEmpty()) return@forEach
-                val channelsToEmit = if (session.isRecording) {
-                    session.waveformPeaks.keys
-                } else {
-                    changedChannels
-                }
+                val channelsToEmit = changedChannels
                 val channels = buildMap<Int, RemoteLiveWaveformTail> {
                     channelsToEmit.forEach { ch ->
                         val tail = mixerPrev[ch] ?: return@forEach
@@ -228,7 +285,10 @@ object RemoteSnapshotMapper {
             monitorGainLinear = settings.monitorGainLinear,
         )
 
-    private fun sessionToRemote(session: MixerSessionUiState): RemoteMixerSnapshot =
+    private fun sessionToRemote(
+        session: MixerSessionUiState,
+        routing: MixerRoutingConfig? = null,
+    ): RemoteMixerSnapshot =
         RemoteMixerSnapshot(
             mixerId = session.mixerId,
             displayName = session.mixerProfile?.displayName ?: session.mixerId,
@@ -264,6 +324,7 @@ object RemoteSnapshotMapper {
             warningMessage = session.warningMessage,
             lastRecordingPath = session.lastRecordingPath,
             hostMixerReady = session.probe != null,
+            routing = routing?.let(::routingToRemote),
         )
 
     private fun mixerDelta(prev: RemoteMixerSnapshot?, current: RemoteMixerSnapshot): RemoteMixerDelta? {
@@ -309,6 +370,7 @@ object RemoteSnapshotMapper {
             warningMessage = optionalStringChanged(prev?.warningMessage, current.warningMessage),
             lastRecordingPath = optionalStringChanged(prev?.lastRecordingPath, current.lastRecordingPath),
             hostMixerReady = changed(prev?.hostMixerReady, current.hostMixerReady),
+            routing = if (prev?.routing != current.routing) current.routing else null,
         )
         return if (delta == RemoteMixerDelta(mixerId = current.mixerId)) null else delta
     }
@@ -339,6 +401,7 @@ object RemoteSnapshotMapper {
             warningMessage = applyOptionalString(delta.warningMessage, base.warningMessage),
             lastRecordingPath = applyOptionalString(delta.lastRecordingPath, base.lastRecordingPath),
             hostMixerReady = delta.hostMixerReady ?: base.hostMixerReady,
+            routing = delta.routing ?: base.routing,
         )
 
     private fun stripToRemote(strip: ChannelStripState): RemoteChannelStripSnapshot =

@@ -25,6 +25,7 @@ import org.openmultitrack.app.data.StorageVolumeOption
 import org.openmultitrack.app.data.MixerDeviceStore
 import org.openmultitrack.app.data.MixerRoutingStore
 import org.openmultitrack.app.data.ScribbleStripCache
+import org.openmultitrack.app.remote.RemoteSnapshotMapper
 import org.openmultitrack.app.service.AudioSessionClient
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.app.service.SoundcheckSessionItem
@@ -329,6 +330,7 @@ class MainViewModel(
                         stripIconMode = settingsPatch?.stripIconMode?.let {
                             StripIconMode.entries.getOrElse(it) { StripIconMode.SHOW }
                         } ?: ui.stripIconMode,
+                        mixerRoutingById = remoteState.mixerRoutingById.ifEmpty { ui.mixerRoutingById },
                         soundcheckLoadPrompt = soundcheckPrompt,
                     )
                 }
@@ -422,6 +424,18 @@ class MainViewModel(
     }
 
     fun saveMixerRouting(mixerId: String, config: MixerRoutingConfig) {
+        if (isRemoteClient()) {
+            remoteCommand(
+                "set_mixer_routing",
+                JSONObject()
+                    .put("mixerId", mixerId)
+                    .put("routing", RemoteSnapshotMapper.routingToPayload(config)),
+            )
+            _uiState.update {
+                it.copy(mixerRoutingById = it.mixerRoutingById + (mixerId to config))
+            }
+            return
+        }
         routingStore.save(mixerId, config)
         _uiState.update { it.copy(mixerRoutingById = routingStore.loadAll()) }
         sessionClient.withManager { it.getOrCreate(mixerId).setRouting(config) }

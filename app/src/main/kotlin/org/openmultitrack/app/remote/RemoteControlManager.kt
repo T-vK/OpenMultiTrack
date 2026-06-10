@@ -17,6 +17,8 @@ import org.json.JSONObject
 import org.openmultitrack.app.audio.LiveWaveformSnapshot
 import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.data.MixerDeviceStore
+import org.openmultitrack.app.data.MixerRoutingStore
+import org.openmultitrack.domain.mixer.MixerRoutingConfig
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.app.service.MultiMixerSessionManager
 import org.openmultitrack.audio.OmtLog
@@ -50,6 +52,7 @@ data class RemoteControlUiState(
     val activeMixerId: String? = null,
     val sessionByMixer: Map<String, MixerSessionUiState> = emptyMap(),
     val uiSettings: RemoteUiSettings? = null,
+    val mixerRoutingById: Map<String, MixerRoutingConfig> = emptyMap(),
     val connectedClientCount: Int = 0,
 )
 
@@ -57,6 +60,7 @@ class RemoteControlManager(
     private val appContext: Context,
     private val settings: AppSettingsStore,
     private val mixerStore: MixerDeviceStore,
+    private val routingStore: MixerRoutingStore,
     private val getManager: () -> MultiMixerSessionManager?,
     private val promoteForeground: (String) -> Boolean,
 ) {
@@ -433,17 +437,11 @@ class RemoteControlManager(
             while (isActive) {
                 val manager = getManager()
                 if (manager != null) {
-                    val sessions = manager.mixerIds().associateWith { id ->
-                        manager.getOrCreate(id).state.value
-                    }
-                    val snapshot = RemoteSnapshotMapper.buildSnapshot(
-                        hostName = _state.value.hostName ?: "OpenMultiTrack",
-                        settings = settings,
-                        mixers = mixerStore.listMixers(),
-                        activeMixerId = manager.activeMixerId.value,
-                        sessions = sessions,
-                    )
+                    val snapshot = buildHostSnapshot(manager)
                     if ((hostServer?.clientCount() ?: 0) > 0) {
+                        val sessions = manager.mixerIds().associateWith { id ->
+                            manager.getOrCreate(id).state.value
+                        }
                         val live = RemoteSnapshotMapper.liveWaveformTails(
                             sessions,
                             liveWaveformGen,
@@ -463,16 +461,21 @@ class RemoteControlManager(
         }
     }
 
-    private fun pushFullSnapshot() {
-        val manager = getManager() ?: return
+    private fun buildHostSnapshot(manager: MultiMixerSessionManager): RemoteMirrorSnapshot {
         val sessions = manager.mixerIds().associateWith { id -> manager.getOrCreate(id).state.value }
-        val snapshot = RemoteSnapshotMapper.buildSnapshot(
+        return RemoteSnapshotMapper.buildSnapshot(
             hostName = _state.value.hostName ?: "OpenMultiTrack",
             settings = settings,
             mixers = mixerStore.listMixers(),
             activeMixerId = manager.activeMixerId.value,
             sessions = sessions,
+            routingByMixer = routingStore.loadAll(),
         )
+    }
+
+    private fun pushFullSnapshot() {
+        val manager = getManager() ?: return
+        val snapshot = buildHostSnapshot(manager)
         lastHostSnapshot = snapshot
         hostServer?.broadcast(RemoteJsonCodec.encodeSnapshot(snapshot))
     }
@@ -483,14 +486,7 @@ class RemoteControlManager(
                 OmtLog.e("Remote", "Client connected but session manager unavailable")
                 return
             }
-            val sessions = manager.mixerIds().associateWith { id -> manager.getOrCreate(id).state.value }
-            val snapshot = RemoteSnapshotMapper.buildSnapshot(
-                hostName = _state.value.hostName ?: "OpenMultiTrack",
-                settings = settings,
-                mixers = mixerStore.listMixers(),
-                activeMixerId = manager.activeMixerId.value,
-                sessions = sessions,
-            )
+            val snapshot = buildHostSnapshot(manager)
             lastHostSnapshot = snapshot
             val payload = RemoteJsonCodec.encodeSnapshot(snapshot)
             OmtLog.i(
@@ -508,20 +504,13 @@ class RemoteControlManager(
                 return
             }
             if (command == "request_snapshot") {
-                val sessions = manager.mixerIds().associateWith { id -> manager.getOrCreate(id).state.value }
-                val snapshot = RemoteSnapshotMapper.buildSnapshot(
-                    hostName = _state.value.hostName ?: "OpenMultiTrack",
-                    settings = settings,
-                    mixers = mixerStore.listMixers(),
-                    activeMixerId = manager.activeMixerId.value,
-                    sessions = sessions,
-                )
+                val snapshot = buildHostSnapshot(manager)
                 lastHostSnapshot = snapshot
                 sendToClient(RemoteJsonCodec.encodeSnapshot(snapshot))
                 sendToClient(RemoteHostServer.encodeAck(command, true))
                 return
             }
-            val executor = RemoteCommandExecutor(manager, settings, promoteForeground)
+            val executor = RemoteCommandExecutor(manager, settings, routingStore, promoteForeground)
             val result = executor.execute(command, payload)
             result.onSuccess { waveform ->
                 waveform?.let {
@@ -855,6 +844,9 @@ class RemoteControlManager(
         val activeMixerId = mirror.activeMixerId
             ?: mixers.firstOrNull()?.id
             ?: _state.value.activeMixerId
+        val routingByMixer = mirror.sessions.mapNotNull { (id, remote) ->
+            remote.routing?.let { id to RemoteSnapshotMapper.routingFromRemote(it) }
+        }.toMap()
         OmtLog.d(
             "Remote",
             "Mirror updated: mixers=${mixers.size} sessions=${sessions.size} active=$activeMixerId",
@@ -865,6 +857,7 @@ class RemoteControlManager(
                 activeMixerId = activeMixerId,
                 sessionByMixer = sessions,
                 uiSettings = uiSettings,
+                mixerRoutingById = routingByMixer,
                 connectionState = RemoteConnectionState.CONNECTED,
             )
         }

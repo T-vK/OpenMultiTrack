@@ -219,6 +219,7 @@ internal object RemoteJson {
             s.warningMessage?.let { put("warningMessage", it) }
             s.lastRecordingPath?.let { put("lastRecordingPath", it) }
             put("hostMixerReady", s.hostMixerReady)
+            s.routing?.let { put("routing", encodeRouting(it)) }
         }
 
     private fun decodeMixerSnapshot(mixerId: String, obj: JSONObject): RemoteMixerSnapshot {
@@ -256,6 +257,7 @@ internal object RemoteJson {
             warningMessage = obj.optString("warningMessage").takeIf { it.isNotBlank() },
             lastRecordingPath = obj.optString("lastRecordingPath").takeIf { it.isNotBlank() },
             hostMixerReady = obj.optBoolean("hostMixerReady"),
+            routing = obj.optJSONObject("routing")?.let(::decodeRouting),
         )
     }
 
@@ -287,6 +289,7 @@ internal object RemoteJson {
             if (d.warningMessage != null) put("warningMessage", d.warningMessage)
             if (d.lastRecordingPath != null) put("lastRecordingPath", d.lastRecordingPath)
             d.hostMixerReady?.let { put("hostMixerReady", it) }
+            d.routing?.let { put("routing", encodeRouting(it)) }
         }
 
     private fun decodeMixerDelta(mixerId: String, obj: JSONObject): RemoteMixerDelta {
@@ -346,7 +349,44 @@ internal object RemoteJson {
             warningMessage = if (obj.has("warningMessage")) obj.optString("warningMessage") else null,
             lastRecordingPath = if (obj.has("lastRecordingPath")) obj.optString("lastRecordingPath") else null,
             hostMixerReady = if (obj.has("hostMixerReady")) obj.getBoolean("hostMixerReady") else null,
+            routing = obj.optJSONObject("routing")?.let(::decodeRouting),
         )
+    }
+
+    private fun encodeRouting(r: RemoteRoutingSnapshot): JSONObject =
+        JSONObject().apply {
+            put("inputMap", intMapToJson(r.inputMap))
+            put("outputMap", intMapToJson(r.outputMap))
+            put("hiddenRecord", intSetToJson(r.hiddenRecord))
+            put("hiddenSoundcheck", intSetToJson(r.hiddenSoundcheck))
+        }
+
+    private fun decodeRouting(obj: JSONObject): RemoteRoutingSnapshot =
+        RemoteRoutingSnapshot(
+            inputMap = jsonToIntMap(obj.optJSONObject("inputMap")),
+            outputMap = jsonToIntMap(obj.optJSONObject("outputMap")),
+            hiddenRecord = jsonToIntSet(obj.optJSONArray("hiddenRecord")),
+            hiddenSoundcheck = jsonToIntSet(obj.optJSONArray("hiddenSoundcheck")),
+        )
+
+    private fun intMapToJson(map: Map<Int, Int>): JSONObject =
+        JSONObject().apply { map.forEach { (k, v) -> put(k.toString(), v) } }
+
+    private fun jsonToIntMap(obj: JSONObject?): Map<Int, Int> {
+        if (obj == null) return emptyMap()
+        return buildMap {
+            obj.keys().forEach { key -> put(key.toInt(), obj.getInt(key)) }
+        }
+    }
+
+    private fun intSetToJson(set: Set<Int>): JSONArray =
+        JSONArray().apply { set.sorted().forEach { put(it) } }
+
+    private fun jsonToIntSet(arr: JSONArray?): Set<Int> {
+        if (arr == null) return emptySet()
+        return buildSet {
+            for (i in 0 until arr.length()) add(arr.getInt(i))
+        }
     }
 
     private fun encodeStrips(strips: List<RemoteChannelStripSnapshot>): JSONArray =

@@ -22,6 +22,13 @@ data class RemoteSettingsSnapshot(
     val monitorGainLinear: Float = 2.5f,
 )
 
+data class RemoteRoutingSnapshot(
+    val inputMap: Map<Int, Int> = emptyMap(),
+    val outputMap: Map<Int, Int> = emptyMap(),
+    val hiddenRecord: Set<Int> = emptySet(),
+    val hiddenSoundcheck: Set<Int> = emptySet(),
+)
+
 data class RemoteChannelStripSnapshot(
     val index: Int,
     val displayName: String = "",
@@ -77,6 +84,7 @@ data class RemoteMixerSnapshot(
     val warningMessage: String? = null,
     val lastRecordingPath: String? = null,
     val hostMixerReady: Boolean = false,
+    val routing: RemoteRoutingSnapshot? = null,
 )
 
 data class RemoteMirrorSnapshot(
@@ -166,4 +174,5 @@ data class RemoteMixerDelta(
     val warningMessage: String? = null,
     val lastRecordingPath: String? = null,
     val hostMixerReady: Boolean? = null,
+    val routing: RemoteRoutingSnapshot? = null,
 )

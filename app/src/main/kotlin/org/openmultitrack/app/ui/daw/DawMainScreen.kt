@@ -989,7 +989,9 @@ private fun WaveformView(
         )
         return
     }
-    val displayPeaks = org.openmultitrack.app.ui.daw.scalePeaksForDisplay(data, normalized)
+    val displayPeaks = remember(waveform) {
+        org.openmultitrack.app.ui.daw.scalePeaksForDisplay(data, normalized)
+    }
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
@@ -1002,18 +1004,15 @@ private fun WaveformView(
         }
         if (bars.isEmpty()) return@Canvas
         val mid = h / 2f
-        val drawSlotWidth = w / capacity.coerceAtLeast(bars.size)
-        val stroke = (drawSlotWidth * 0.85f).coerceIn(1f, 4f)
+        val slotCount = bars.size.coerceAtLeast(1)
+        val drawSlotWidth = w / slotCount
+        val stroke = (drawSlotWidth * 0.96f).coerceAtLeast(1f)
         val minBar = h * 0.06f
-        val startSlot = if (bars.size < capacity) {
-            (capacity - bars.size).coerceAtLeast(0)
-        } else {
-            0
-        }
+        val xOffset = if (bars.size < capacity) w - bars.size * drawSlotWidth else 0f
         bars.forEachIndexed { i, peak ->
             val amp = peak.coerceIn(0f, 1f)
             val barH = maxOf(amp * h * 0.9f, if (amp > 0.02f) minBar else 0f)
-            val x = (startSlot + i + 0.5f) * drawSlotWidth
+            val x = xOffset + (i + 0.5f) * drawSlotWidth
             drawLine(
                 color = color.copy(alpha = 0.9f),
                 start = Offset(x, mid - barH / 2f),
