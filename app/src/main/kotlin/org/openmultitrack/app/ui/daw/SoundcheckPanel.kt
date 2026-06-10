@@ -828,6 +828,33 @@ internal fun peakLevelAtTime(
     return scalePeaksForDisplay(floatArrayOf(peaks[idx]), normalized).first()
 }
 
+/**
+ * Map live recording peaks into [pixelCount] columns across a fixed [capacity]-slot window.
+ * Peaks are right-aligned so the strip fills gradually over the record window (e.g. 15 s).
+ */
+internal fun binLiveWaveformToPixels(
+    peaks: FloatArray,
+    capacity: Int,
+    pixelCount: Int,
+): FloatArray {
+    if (peaks.isEmpty() || capacity <= 0 || pixelCount <= 0) return FloatArray(0)
+    val startSlot = (capacity - peaks.size).coerceAtLeast(0)
+    val out = FloatArray(pixelCount)
+    for (px in 0 until pixelCount) {
+        val slotLo = px * capacity / pixelCount
+        val slotHi = (px + 1) * capacity / pixelCount
+        var maxPeak = 0f
+        for (slot in slotLo until slotHi) {
+            val idx = slot - startSlot
+            if (idx in peaks.indices) {
+                maxPeak = maxOf(maxPeak, peaks[idx])
+            }
+        }
+        out[px] = maxPeak
+    }
+    return out
+}
+
 /** USB peaks are often very small floats; scale for display so waveforms stay visible. */
 internal fun scalePeaksForDisplay(peaks: FloatArray, normalized: Boolean): FloatArray {
     if (peaks.isEmpty()) return peaks

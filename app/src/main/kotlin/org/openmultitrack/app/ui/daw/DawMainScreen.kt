@@ -70,6 +70,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
@@ -989,35 +990,30 @@ private fun WaveformView(
         )
         return
     }
-    val displayPeaks = remember(waveform) {
-        org.openmultitrack.app.ui.daw.scalePeaksForDisplay(data, normalized)
-    }
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
         if (w <= 0f || h <= 0f) return@Canvas
         val pixelCount = w.toInt().coerceAtLeast(1)
-        val bars = if (displayPeaks.size <= pixelCount) {
-            displayPeaks
-        } else {
-            downsamplePeaksMax(displayPeaks, pixelCount)
-        }
-        if (bars.isEmpty()) return@Canvas
+        val scaledPeaks = scalePeaksForDisplay(data, normalized)
+        val columns = binLiveWaveformToPixels(scaledPeaks, capacity, pixelCount)
+        if (columns.isEmpty()) return@Canvas
         val mid = h / 2f
-        val slotCount = bars.size.coerceAtLeast(1)
-        val drawSlotWidth = w / slotCount
-        val stroke = (drawSlotWidth * 0.96f).coerceAtLeast(1f)
+        val colWidth = w / pixelCount
         val minBar = h * 0.06f
-        val xOffset = if (bars.size < capacity) w - bars.size * drawSlotWidth else 0f
-        bars.forEachIndexed { i, peak ->
+        val barColor = color.copy(alpha = 0.9f)
+        columns.forEachIndexed { px, peak ->
             val amp = peak.coerceIn(0f, 1f)
-            val barH = maxOf(amp * h * 0.9f, if (amp > 0.02f) minBar else 0f)
-            val x = xOffset + (i + 0.5f) * drawSlotWidth
-            drawLine(
-                color = color.copy(alpha = 0.9f),
-                start = Offset(x, mid - barH / 2f),
-                end = Offset(x, mid + barH / 2f),
-                strokeWidth = stroke,
+            if (amp <= 0.01f) return@forEachIndexed
+            val barH = maxOf(amp * h * 0.9f, minBar)
+            val inset = colWidth * 0.04f
+            drawRect(
+                color = barColor,
+                topLeft = Offset(px * colWidth + inset, mid - barH / 2f),
+                size = Size(
+                    (colWidth - inset * 2f).coerceAtLeast(1f),
+                    barH,
+                ),
             )
         }
     }
