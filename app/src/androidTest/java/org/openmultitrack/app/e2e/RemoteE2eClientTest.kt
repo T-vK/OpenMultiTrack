@@ -34,6 +34,7 @@ class RemoteE2eClientTest {
         val hostIp = E2eConfig.hostIp ?: error("host_ip instrumentation arg required")
         E2eWait.awaitHostRemoteReady(hostIp)
         val remote = E2eRemoteHarness(appRule).also { harness = it }
+        remote.prepareClientBeforeBind()
         remote.bindSession()
         remote.connectClient(hostIp)
 

@@ -41,6 +41,13 @@ class E2eRemoteHarness(
         settings.listPairedRemoteHosts().forEach { settings.removePairedRemoteHost(it.hostId) }
     }
 
+    /** Prevent AudioSessionService from auto-connecting to a remembered host on bind. */
+    fun prepareClientBeforeBind() {
+        val settings = AppSettingsStore(context)
+        settings.remoteRole = RemoteRole.OFF
+        configureTestPin()
+    }
+
     fun ensureHostDisplayDefaults() {
         val settings = AppSettingsStore(context)
         settings.showWaveforms = true
