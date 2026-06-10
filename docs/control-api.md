@@ -1,8 +1,19 @@
-# Control API (draft)
+# Control API (draft — superseded)
+
+> **Status: superseded**  
+> This draft described a **browser web UI** served by **Ktor** from the Android app.  
+> The **shipped system** is **Android-to-Android LAN sync** documented in [remote-control.md](remote-control.md).  
+> Implementation: `remote-server` module (NanoHTTPD + OkHttp), not Ktor.
+
+Keep this file for historical REST/WS shape ideas only. Do not implement against it without a product decision to revive browser remote.
+
+---
+
+## Original draft (Ktor / browser)
 
 Embedded Ktor server (milestone 4). All endpoints on `http://<device-ip>:8765/` — no CDN, no third-party assets.
 
-## REST
+### REST
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -18,7 +29,7 @@ Embedded Ktor server (milestone 4). All endpoints on `http://<device-ip>:8765/` 
 | GET | `/api/v1/snapshots` | List stored mixer snapshots |
 | POST | `/api/v1/snapshots/{id}/recall` | Apply snapshot |
 
-## WebSocket `/api/v1/ws`
+### WebSocket `/api/v1/ws`
 
 Server → client events (JSON):
 
@@ -35,10 +46,12 @@ Client → server:
 { "type": "subscribe", "meters": true }
 ```
 
-## Auth (milestone 4+)
+### Auth (milestone 4+)
 
 Optional `Authorization: Bearer <token>` set in app preferences. Default: LAN-trusted (document risk).
 
-## Shared backend
+---
 
-`ControlService` interface implemented once; injected into ViewModels and Ktor routes.
+## What actually ships
+
+See [remote-control.md](remote-control.md) for snapshot/delta/command JSON used by `RemoteHostServer` and `RemoteClient`.
