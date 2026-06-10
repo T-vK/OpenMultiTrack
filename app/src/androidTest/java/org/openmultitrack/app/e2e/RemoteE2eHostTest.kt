@@ -38,11 +38,13 @@ class RemoteE2eHostTest {
         mixerHarness = null
     }
 
-    @Test
+    @Test(timeout = 600_000)
     fun hostPreparesSessionAndServesRemoteClient() = runBlocking {
         val mixer = E2eMixerHarness(appRule).also { mixerHarness = it }
         val ctrl = mixer.bindAndRegisterXr18()
-        val sessionDir = mixer.recordShortSession(ctrl, seconds = 15)
+        val sessionDir = mixer.recordShortSession(ctrl, seconds = E2eConfig.ZOOM_RECORD_SECONDS)
+        mixer.prepareSoundcheck(ctrl, sessionDir)
+        mixer.recordShortSession(ctrl, seconds = E2eConfig.RECORD_SECONDS)
         mixer.prepareSoundcheck(ctrl, sessionDir)
 
         val remote = E2eRemoteHarness(appRule).also { remoteHarness = it }
@@ -63,8 +65,8 @@ class RemoteE2eHostTest {
         assertThat(ctrl.state.value.appMode).isEqualTo(AppMode.VIRTUAL_SOUNDCHECK)
 
         // Keep serving through the full client e2e budget (ignore brief reconnect blips).
-        val minServeMs = 180_000L
-        val maxServeMs = 360_000L
+        val minServeMs = 300_000L
+        val maxServeMs = 540_000L
         val serveStart = System.currentTimeMillis()
         while (System.currentTimeMillis() - serveStart < maxServeMs) {
             if (remote.state().value.connectedClientCount == 0 &&

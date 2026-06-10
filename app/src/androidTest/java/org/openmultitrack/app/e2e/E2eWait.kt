@@ -74,6 +74,37 @@ object E2eWait {
     /**
      * Fails if transport reports playing but the playhead does not move — catches silent USB stalls.
      */
+    suspend fun untilRemotePlaybackAdvances(
+        remote: E2eRemoteHarness,
+        mixerId: String,
+        minAdvanceSec: Float = 1.0f,
+        observeMs: Long = 3_000,
+        timeoutMs: Long = 60_000,
+    ) {
+        untilRemoteState(remote.state(), timeoutMs) {
+            it.sessionByMixer[mixerId]?.isPlaying == true
+        }
+        val startPos = remote.state().value.sessionByMixer[mixerId]?.playbackPositionSec ?: 0f
+        val deadline = System.currentTimeMillis() + observeMs
+        withTimeout(timeoutMs) {
+            while (System.currentTimeMillis() < deadline) {
+                val session = remote.state().value.sessionByMixer[mixerId]
+                    ?: error("Remote session missing for $mixerId")
+                check(session.isPlaying) {
+                    "Playback stopped before advancing (pos=${session.playbackPositionSec}s)"
+                }
+                if (session.playbackPositionSec >= startPos + minAdvanceSec) {
+                    return@withTimeout
+                }
+                delay(100)
+            }
+        }
+        val endPos = remote.state().value.sessionByMixer[mixerId]?.playbackPositionSec ?: 0f
+        check(endPos >= startPos + minAdvanceSec) {
+            "Remote playhead did not advance by ${minAdvanceSec}s (start=$startPos end=$endPos)"
+        }
+    }
+
     suspend fun untilPlaybackAdvances(
         ctrl: MixerSessionController,
         minAdvanceSec: Float = 1.0f,

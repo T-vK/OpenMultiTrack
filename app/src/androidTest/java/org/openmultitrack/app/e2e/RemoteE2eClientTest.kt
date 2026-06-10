@@ -4,17 +4,16 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import org.json.JSONObject
 import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.openmultitrack.domain.remote.RemoteConnectionState
-import kotlin.math.abs
 
 /**
  * Client (remote) side of dual-device e2e: connects to host, mirrors state, and exercises
- * recording, playback, seek, zoom, and unexpected disconnect recovery.
+ * strip controls, monitor mode, transport, view/loop/session/routing commands, settings sync,
+ * live recording waveforms, and disconnect recovery.
  */
 @RunWith(AndroidJUnit4::class)
 class RemoteE2eClientTest {
@@ -29,7 +28,7 @@ class RemoteE2eClientTest {
         harness = null
     }
 
-    @Test
+    @Test(timeout = 600_000)
     fun remoteFullSyncTransportWaveformsAndReconnect() = runBlocking {
         val hostIp = E2eConfig.hostIp ?: error("host_ip instrumentation arg required")
         E2eWait.awaitHostRemoteReady(hostIp)
@@ -45,41 +44,31 @@ class RemoteE2eClientTest {
         }
         val mirror = remote.state().value.sessionByMixer[mixerId]
         assertThat(mirror).isNotNull()
-        assertThat(mirror!!.selectedSoundcheckDir).isNotNull()
+        val primarySessionDir = mirror!!.selectedSoundcheckDir
+        assertThat(primarySessionDir).isNotNull()
         awaitSoundcheckReady(remote, mixerId)
 
         RemoteE2eAssertions.assertSettingsMirrored(remote.state())
+        RemoteE2eAssertions.assertRoutingMirrored(remote, mixerId)
         RemoteE2eAssertions.assertSoundcheckWaveformsOnRemote(remote, mixerId)
+        RemoteE2eAssertions.assertStripControlsFromRemote(remote, mixerId, hostIp)
         RemoteE2eAssertions.assertPlaybackTransport(remote, mixerId, hostIp)
+        RemoteE2eAssertions.assertSoundcheckViewPanAndSet(remote, mixerId, hostIp)
         RemoteE2eAssertions.assertSettingsChangeFromRemote(remote, mixerId, hostIp)
-
-        val duration = remote.state().value.sessionByMixer[mixerId]!!.playbackDurationSec
-        val seekTarget = (duration * 0.4f).coerceAtLeast(1f)
-        E2eWait.awaitRemoteReady(remote, hostIp, mixerId)
-        remote.sendRemote(
-            "seek",
-            JSONObject().put("mixerId", mixerId).put("positionSec", seekTarget.toDouble()),
+        RemoteE2eAssertions.assertZoomSeekPlayAccuracy(remote, mixerId, hostIp)
+        RemoteE2eAssertions.assertLoopRegionFromRemote(remote, mixerId, hostIp)
+        RemoteE2eAssertions.assertSessionLibraryFromRemote(
+            remote,
+            mixerId,
+            hostIp,
+            primarySessionDir!!,
         )
-        E2eWait.untilRemoteState(remote.state(), 60_000) {
-            val pos = it.sessionByMixer[mixerId]?.playbackPositionSec ?: 0f
-            abs(pos - seekTarget) <= 1.5f
-        }
-
-        val windowBefore = remote.state().value.sessionByMixer[mixerId]!!.soundcheckViewWindowSec
-        remote.sendRemote(
-            "zoom_soundcheck_view",
-            JSONObject()
-                .put("mixerId", mixerId)
-                .put("scale", 2.0)
-                .put("focalSec", seekTarget.toDouble()),
-        )
-        delay(500)
-        val zoomedWindow = remote.state().value.sessionByMixer[mixerId]!!.soundcheckViewWindowSec
-        assertThat(zoomedWindow).isLessThan(windowBefore)
-
+        RemoteE2eAssertions.assertRoutingChangeFromRemote(remote, mixerId, hostIp)
+        RemoteE2eAssertions.assertSimplePlayFromRemote(remote, mixerId, hostIp, primarySessionDir)
+        RemoteE2eAssertions.assertBroaderSettingsSync(remote, mixerId, hostIp)
+        RemoteE2eAssertions.assertMonitorModeFromRemote(remote, mixerId, hostIp)
         RemoteE2eAssertions.assertLiveWaveformsDuringRecording(remote, mixerId, hostIp)
 
-        // Recording mode can drop the socket; establish a clean client session before disconnect test.
         if (remote.state().value.connectionState != RemoteConnectionState.CONNECTED) {
             remote.reconnectClient(hostIp)
         }
