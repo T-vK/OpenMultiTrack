@@ -829,25 +829,37 @@ internal fun peakLevelAtTime(
 }
 
 /**
- * Map live recording peaks into [pixelCount] columns across a fixed [capacity]-slot window.
- * Peaks are right-aligned so the strip fills gradually over the record window (e.g. 15 s).
+ * Map live recording peaks into [pixelCount] columns across the record window.
+ * Uses wall-clock [elapsedSec] and [windowSec] so the strip fills gradually (e.g. 15 s)
+ * even when the peak buffer length does not match elapsed time.
  */
 internal fun binLiveWaveformToPixels(
     peaks: FloatArray,
-    capacity: Int,
+    windowSec: Float,
+    elapsedSec: Float,
+    peaksPerSec: Int,
     pixelCount: Int,
 ): FloatArray {
-    if (peaks.isEmpty() || capacity <= 0 || pixelCount <= 0) return FloatArray(0)
-    val startSlot = (capacity - peaks.size).coerceAtLeast(0)
+    if (pixelCount <= 0 || windowSec <= 0f || peaksPerSec <= 0) return FloatArray(0)
+    val capacity = kotlin.math.max(10, (windowSec * peaksPerSec).toInt())
+    val timeSlots = (elapsedSec * peaksPerSec).toInt().coerceIn(0, capacity)
     val out = FloatArray(pixelCount)
+    if (timeSlots <= 0 || peaks.isEmpty()) return out
+    val startSlot = capacity - timeSlots
+    val samples = if (peaks.size > timeSlots) {
+        peaks.copyOfRange(peaks.size - timeSlots, peaks.size)
+    } else {
+        peaks
+    }
+    val sampleStartSlot = startSlot + (timeSlots - samples.size)
     for (px in 0 until pixelCount) {
         val slotLo = px * capacity / pixelCount
         val slotHi = (px + 1) * capacity / pixelCount
         var maxPeak = 0f
         for (slot in slotLo until slotHi) {
-            val idx = slot - startSlot
-            if (idx in peaks.indices) {
-                maxPeak = maxOf(maxPeak, peaks[idx])
+            val sampleIdx = slot - sampleStartSlot
+            if (sampleIdx in samples.indices) {
+                maxPeak = maxOf(maxPeak, samples[sampleIdx])
             }
         }
         out[px] = maxPeak

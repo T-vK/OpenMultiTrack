@@ -1,6 +1,7 @@
 package org.openmultitrack.remote
 
 import org.openmultitrack.domain.remote.RemoteProtocol
+import kotlin.math.abs
 import kotlin.math.ceil
 
 object RemoteWaveformUtil {
@@ -38,7 +39,7 @@ object RemoteWaveformUtil {
         for (len in maxOverlap downTo 1) {
             var matches = true
             for (i in 0 until len) {
-                if (existing[existing.size - len + i] != newTail[i]) {
+                if (!peaksNearEqual(existing[existing.size - len + i], newTail[i])) {
                     matches = false
                     break
                 }
@@ -91,4 +92,6 @@ object RemoteWaveformUtil {
         val slice = peaks.copyOfRange(startIdx, endIdx)
         return downsamplePeaksMax(slice, maxPoints)
     }
+
+    private fun peaksNearEqual(a: Float, b: Float): Boolean = abs(a - b) <= 0.02f
 }

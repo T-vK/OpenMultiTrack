@@ -94,6 +94,7 @@ import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.domain.mixer.MixerRoutingConfig
 import org.openmultitrack.domain.remote.RemoteConnectionState
 import org.openmultitrack.domain.remote.RemoteRole
+import org.openmultitrack.domain.remote.RemoteProtocol
 import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.TransportState
 import org.openmultitrack.domain.session.isPlaybackMode
@@ -555,6 +556,8 @@ fun DawMainScreen(
                                 soundcheckMode = false,
                                 normalized = recordWaveformNormalized,
                                 waveformPeaks = s.waveformPeaks,
+                                recordWaveformWindowSec = recordWaveformWindowSec,
+                                recordElapsedSec = s.recordElapsedSec,
                                 captureMeterLevels = s.captureMeterLevels,
                                 isMonitoring = s.isMonitoring,
                                 isRecording = s.isRecording,
@@ -777,6 +780,8 @@ private fun ChannelStripList(
     soundcheckMode: Boolean,
     normalized: Boolean,
     waveformPeaks: Map<Int, LiveWaveformSnapshot>,
+    recordWaveformWindowSec: Float,
+    recordElapsedSec: Float,
     captureMeterLevels: Map<Int, Float>,
     isMonitoring: Boolean,
     isRecording: Boolean,
@@ -864,6 +869,8 @@ private fun ChannelStripList(
                     labelFontSize = labelFontSize,
                     labelColumnWidth = labelColumnWidth,
                     waveform = if (showWaveforms && isRecording) waveformPeaks[strip.index] else null,
+                    recordWaveformWindowSec = recordWaveformWindowSec,
+                    recordElapsedSec = recordElapsedSec,
                     captureMeterLevel = if (showVuMeters && (isMonitoring || isRecording || isVuMetering)) {
                         captureMeterLevels[strip.index] ?: 0f
                     } else {
@@ -914,6 +921,8 @@ private fun ChannelStripRow(
     labelFontSize: Float,
     labelColumnWidth: Dp,
     waveform: LiveWaveformSnapshot?,
+    recordWaveformWindowSec: Float,
+    recordElapsedSec: Float,
     captureMeterLevel: Float?,
     normalized: Boolean,
     showWaveform: Boolean,
@@ -957,6 +966,9 @@ private fun ChannelStripRow(
         if (showWaveform) {
             WaveformView(
                 waveform = waveform,
+                windowSec = recordWaveformWindowSec,
+                elapsedSec = recordElapsedSec,
+                peaksPerSec = RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC,
                 color = Color(strip.colorArgb),
                 normalized = normalized,
                 modifier = Modifier
@@ -974,13 +986,15 @@ private fun ChannelStripRow(
 @Composable
 private fun WaveformView(
     waveform: LiveWaveformSnapshot?,
+    windowSec: Float,
+    elapsedSec: Float,
+    peaksPerSec: Int,
     color: Color,
     normalized: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val data = waveform?.peaks
-    val capacity = waveform?.capacity ?: 0
-    if (data == null || data.isEmpty() || capacity <= 0) {
+    if (data == null || data.isEmpty() || windowSec <= 0f || elapsedSec <= 0f) {
         Box(
             modifier = modifier.border(
                 width = 0.5.dp,
@@ -996,7 +1010,13 @@ private fun WaveformView(
         if (w <= 0f || h <= 0f) return@Canvas
         val pixelCount = w.toInt().coerceAtLeast(1)
         val scaledPeaks = scalePeaksForDisplay(data, normalized)
-        val columns = binLiveWaveformToPixels(scaledPeaks, capacity, pixelCount)
+        val columns = binLiveWaveformToPixels(
+            peaks = scaledPeaks,
+            windowSec = windowSec,
+            elapsedSec = elapsedSec,
+            peaksPerSec = peaksPerSec,
+            pixelCount = pixelCount,
+        )
         if (columns.isEmpty()) return@Canvas
         val mid = h / 2f
         val colWidth = w / pixelCount
