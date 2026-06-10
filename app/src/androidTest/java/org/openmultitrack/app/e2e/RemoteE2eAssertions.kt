@@ -39,8 +39,10 @@ object RemoteE2eAssertions {
     suspend fun assertLiveWaveformsDuringRecording(
         remote: E2eRemoteHarness,
         mixerId: String,
+        hostIp: String,
         recordSeconds: Int = 3,
     ) {
+        E2eWait.awaitRemoteReady(remote, hostIp, mixerId)
         remote.sendRemote(
             "set_app_mode",
             JSONObject().put("mixerId", mixerId).put("mode", AppMode.MULTITRACK_RECORD.ordinal),

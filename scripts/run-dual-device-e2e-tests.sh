@@ -421,7 +421,6 @@ start_adb_keepalive() {
     sleep 45
     while kill -0 "$CLIENT_PID" 2>/dev/null || kill -0 "$HOST_PID" 2>/dev/null; do
       reconnect_wireless_adb "$HOST_SERIAL" || true
-      restart_client_wifi_if_needed "$CLIENT_SERIAL" "$HOST_IP" || true
       sleep 30
     done
   ) &

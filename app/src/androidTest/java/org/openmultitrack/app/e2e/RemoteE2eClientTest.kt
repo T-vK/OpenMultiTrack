@@ -75,7 +75,7 @@ class RemoteE2eClientTest {
         val zoomedWindow = remote.state().value.sessionByMixer[mixerId]!!.soundcheckViewWindowSec
         assertThat(zoomedWindow).isLessThan(windowBefore)
 
-        RemoteE2eAssertions.assertLiveWaveformsDuringRecording(remote, mixerId)
+        RemoteE2eAssertions.assertLiveWaveformsDuringRecording(remote, mixerId, hostIp)
 
         testUnexpectedDisconnectRecovery(remote, hostIp, mixerId)
         E2eLanSync.signal(E2eLanSync.CLIENT_DONE, targetHost = hostIp)
