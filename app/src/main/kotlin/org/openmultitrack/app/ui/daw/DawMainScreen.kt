@@ -59,9 +59,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -996,15 +994,6 @@ private fun WaveformView(
     modifier: Modifier = Modifier,
 ) {
     val data = waveform?.peaks
-    val peakHold = remember { mutableFloatStateOf(0f) }
-    SideEffect {
-        if (data == null || data.isEmpty() || elapsedSec < 0.1f) {
-            peakHold.floatValue = 0f
-        } else if (peakHold.floatValue <= 0f) {
-            // Freeze display gain for this take so already-drawn bars never rescale.
-            peakHold.floatValue = data.max().coerceAtLeast(1e-6f)
-        }
-    }
     if (data == null || data.isEmpty() || windowSec <= 0f || elapsedSec <= 0f) {
         Box(
             modifier = modifier.border(
@@ -1019,30 +1008,30 @@ private fun WaveformView(
         val w = size.width
         val h = size.height
         if (w <= 0f || h <= 0f) return@Canvas
-        val pixelCount = w.toInt().coerceAtLeast(1)
-        val scaledPeaks = scaleLivePeaksForDisplay(data, normalized, peakHold.floatValue)
-        val columns = liveWaveformColumnsForPixels(
+        val scaledPeaks = scalePeaksForDisplay(data, normalized)
+        val slotPeaks = liveWaveformSlotPeaks(
             peaks = scaledPeaks,
             windowSec = windowSec,
             elapsedSec = elapsedSec,
             peaksPerSec = peaksPerSec,
-            pixelCount = pixelCount,
         )
-        if (columns.isEmpty()) return@Canvas
+        if (slotPeaks.isEmpty()) return@Canvas
+        val capacitySlots = slotPeaks.size
+        val slotWidth = w / capacitySlots
         val mid = h / 2f
-        val colWidth = w / pixelCount
+        val minBar = h * 0.06f
         val barColor = color.copy(alpha = 0.9f)
-        columns.forEachIndexed { px, peak ->
+        val inset = slotWidth * 0.04f
+        slotPeaks.forEachIndexed { slot, peak ->
             val amp = peak.coerceIn(0f, 1f)
             if (amp <= 0.01f) return@forEachIndexed
-            val barH = amp * h * 0.9f
-            if (barH < 1f) return@forEachIndexed
-            val inset = colWidth * 0.04f
+            val barH = maxOf(amp * h * 0.9f, minBar)
+            val x = slot * slotWidth
             drawRect(
                 color = barColor,
-                topLeft = Offset(px * colWidth + inset, mid - barH / 2f),
+                topLeft = Offset(x + inset, mid - barH / 2f),
                 size = Size(
-                    (colWidth - inset * 2f).coerceAtLeast(1f),
+                    (slotWidth - inset * 2f).coerceAtLeast(1f),
                     barH,
                 ),
             )

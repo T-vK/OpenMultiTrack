@@ -1,83 +1,57 @@
 package org.openmultitrack.app.ui.daw
 
 /**
- * Maps live recording peaks into per-pixel columns for strip rendering.
+ * Maps live recording peaks into one value per timeline slot for strip rendering.
  *
- * Growth (elapsed ≤ window): waveform grows **left to right** — 1 s of a 15 s window
- * fills the left 1/15 of the container, 2 s fills 2/15, etc.
+ * Growth (elapsed ≤ window): slots 0, 1, 2… are anchored at fixed positions across the
+ * window (slot 0 at the left edge). New peaks only append higher slot indices on the right.
  *
- * Rolling (elapsed > window): the last [window] of audio spans the full width,
- * oldest sample on the left, newest on the right.
+ * Rolling (elapsed > window): the last [window] of audio occupies all slots, oldest left.
  *
- * [peaks] must be oldest → newest. [elapsedSec] is the authority for how much
- * horizontal space is used during growth, so a bloated peak buffer cannot zoom the view.
+ * [peaks] must be oldest → newest. During growth, [elapsedSec] only caps a bloated buffer.
  */
-internal fun liveWaveformColumnsForPixels(
+internal fun liveWaveformSlotPeaks(
     peaks: FloatArray,
     windowSec: Float,
     elapsedSec: Float,
     peaksPerSec: Int,
-    pixelCount: Int,
 ): FloatArray {
-    if (pixelCount <= 0 || windowSec <= 0f || peaksPerSec <= 0) return FloatArray(0)
-    val out = FloatArray(pixelCount)
-    if (peaks.isEmpty() || elapsedSec <= 0f) return out
-
+    if (windowSec <= 0f || peaksPerSec <= 0 || peaks.isEmpty() || elapsedSec <= 0f) {
+        return FloatArray(0)
+    }
     val capacitySlots = (windowSec * peaksPerSec).toInt().coerceAtLeast(1)
-    val elapsedSlots = (elapsedSec * peaksPerSec).toInt().coerceAtLeast(0)
-    if (elapsedSlots <= 0) return out
+    val elapsedCap = (elapsedSec * peaksPerSec).toInt().coerceIn(0, capacitySlots)
+    if (elapsedCap <= 0) return FloatArray(capacitySlots)
 
     val rolling = elapsedSec > windowSec
-    val activeSlots = if (rolling) {
-        capacitySlots
-    } else {
-        // Tie horizontal extent to both wall clock and available peaks so the strip
-        // only grows rightward as new samples arrive.
-        minOf(elapsedSlots, peaks.size).coerceAtMost(capacitySlots)
-    }
-
-    val samples = if (rolling) {
+    val out = FloatArray(capacitySlots)
+    if (rolling) {
         val count = minOf(peaks.size, capacitySlots)
-        peaks.copyOfRange(peaks.size - count, peaks.size)
-    } else {
-        peaks.copyOfRange(0, activeSlots)
-    }
-
-    for (px in 0 until pixelCount) {
-        val slotLo = px * capacitySlots / pixelCount
-        val slotHi = (px + 1) * capacitySlots / pixelCount
-        if (!rolling && slotLo >= activeSlots) continue
-        var maxPeak = 0f
-        for (slot in slotLo until slotHi) {
-            val sampleIdx = if (rolling) {
-                slot - (capacitySlots - samples.size)
-            } else {
-                slot
-            }
-            if (sampleIdx in samples.indices) {
-                maxPeak = maxOf(maxPeak, samples[sampleIdx])
-            }
+        val start = peaks.size - count
+        for (i in 0 until count) {
+            out[i] = peaks[start + i]
         }
-        out[px] = maxPeak
+    } else {
+        val count = minOf(peaks.size, elapsedCap)
+        for (i in 0 until count) {
+            out[i] = peaks[i]
+        }
     }
     return out
 }
 
-/**
- * Scales live peaks for display using a session [peakHold] that only ratchets upward.
- * Prevents already-drawn bars from jumping when a later sample is louder.
- */
-internal fun scaleLivePeaksForDisplay(
-    peaks: FloatArray,
-    normalized: Boolean,
-    peakHold: Float,
-): FloatArray {
-    if (peaks.isEmpty()) return peaks
-    val hold = peakHold.coerceAtLeast(1e-6f)
-    return if (normalized) {
-        FloatArray(peaks.size) { (peaks[it] / hold).coerceIn(0f, 1f) }
-    } else {
-        val gain = if (hold < 0.15f) 1f / hold else 1f
-        FloatArray(peaks.size) { (peaks[it] * gain).coerceIn(0f, 1f) }
+/** Counts how many pixel columns would be touched by [slotPeaks] (for tests). */
+internal fun liveWaveformFilledPixelCount(
+    slotPeaks: FloatArray,
+    pixelCount: Int,
+): Int {
+    if (slotPeaks.isEmpty() || pixelCount <= 0) return 0
+    val capacity = slotPeaks.size
+    val filled = BooleanArray(pixelCount)
+    slotPeaks.forEachIndexed { slot, peak ->
+        if (peak <= 0f) return@forEachIndexed
+        val px = (slot.toLong() * pixelCount / capacity).toInt().coerceIn(0, pixelCount - 1)
+        filled[px] = true
     }
+    return filled.count { it }
 }
