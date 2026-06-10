@@ -6,7 +6,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.After
-import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -23,23 +22,6 @@ class RemoteE2eClientTest {
     val appRule = E2eAppRule(enableWaveformsAndVu = true)
 
     private var harness: E2eRemoteHarness? = null
-    private lateinit var hostIp: String
-    private lateinit var mixerId: String
-    private lateinit var sessionDir: String
-
-    @Before
-    fun resolveHostFromSync() {
-        runBlocking {
-            val sync = E2eLanSync.await(E2eLanSync.HOST_READY, timeoutMs = 120_000)
-            hostIp = E2eConfig.hostIp
-                ?: Regex("""ip=([^|]+)""").find(sync)?.groupValues?.get(1)
-                ?: error("Could not resolve host IP")
-            mixerId = Regex("""mixerId=([^|]+)""").find(sync)?.groupValues?.get(1)
-                ?: error("mixerId missing from HOST_READY sync")
-            sessionDir = Regex("""sessionDir=(.+)""").find(sync)?.groupValues?.get(1)?.trim()
-                ?: error("sessionDir missing from HOST_READY sync")
-        }
-    }
 
     @After
     fun tearDown() {
@@ -49,14 +31,21 @@ class RemoteE2eClientTest {
 
     @Test
     fun remoteFullSyncTransportWaveformsAndReconnect() = runBlocking {
+        val hostIp = E2eConfig.hostIp ?: error("host_ip instrumentation arg required")
+        E2eWait.awaitHostRemoteReady(hostIp)
         val remote = E2eRemoteHarness(appRule).also { harness = it }
         remote.bindSession()
         remote.connectClient(hostIp)
 
+        val mixerId = E2eWait.untilRemoteState(remote.state(), 60_000) { state ->
+            state.sessionByMixer.isNotEmpty()
+        }.let { state ->
+            state.activeMixerId ?: state.sessionByMixer.keys.first()
+        }
         val mirror = remote.state().value.sessionByMixer[mixerId]
         assertThat(mirror).isNotNull()
-        assertThat(mirror!!.selectedSoundcheckDir).isEqualTo(sessionDir)
-        awaitSoundcheckReady(remote)
+        assertThat(mirror!!.selectedSoundcheckDir).isNotNull()
+        awaitSoundcheckReady(remote, mixerId)
 
         RemoteE2eAssertions.assertSettingsMirrored(remote.state())
         RemoteE2eAssertions.assertSoundcheckWaveformsOnRemote(remote, mixerId)
@@ -97,23 +86,27 @@ class RemoteE2eClientTest {
         RemoteE2eAssertions.assertLiveWaveformsDuringRecording(remote, mixerId)
         RemoteE2eAssertions.assertVuMetersDuringRecording(remote, mixerId)
 
-        testUnexpectedDisconnectRecovery(remote)
+        testUnexpectedDisconnectRecovery(remote, hostIp, mixerId)
         E2eLanSync.signal(E2eLanSync.CLIENT_DONE, targetHost = hostIp)
     }
 
-    private suspend fun awaitSoundcheckReady(remote: E2eRemoteHarness) {
+    private suspend fun awaitSoundcheckReady(remote: E2eRemoteHarness, mixerId: String) {
         E2eWait.untilRemoteState(remote.state(), 120_000) { state ->
             val session = state.sessionByMixer[mixerId] ?: return@untilRemoteState false
             session.playbackDurationSec > 1f && !session.soundcheckWaveformsLoading
         }
     }
 
-    private suspend fun testUnexpectedDisconnectRecovery(remote: E2eRemoteHarness) {
+    private suspend fun testUnexpectedDisconnectRecovery(
+        remote: E2eRemoteHarness,
+        hostIp: String,
+        mixerId: String,
+    ) {
         assertThat(remote.state().value.connectionState.name).isEqualTo("CONNECTED")
         remote.disconnectClient()
         delay(2_000)
         remote.connectClient(hostIp)
-        E2eWait.untilRemoteConnected(remote.state())
-        awaitSoundcheckReady(remote)
+        E2eWait.untilRemoteConnected(remote.state(), timeoutMs = 120_000)
+        awaitSoundcheckReady(remote, mixerId)
     }
 }

@@ -139,11 +139,67 @@ done
 adb_host -s "$HOST_SERIAL" shell dumpsys usb 2>/dev/null | grep -qi 'X18/XR18\|XR18' \
   || die "XR18 not visible on host $HOST_SERIAL"
 
+is_wireless_serial() {
+  [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+$ ]]
+}
+
+wireless_ip() {
+  [[ "$1" =~ ^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+): ]] && echo "${BASH_REMATCH[1]}"
+}
+
+# Reconnect wireless adb without touching Wi-Fi or wireless debugging settings.
+reconnect_wireless_adb() {
+  local serial="$1"
+  is_wireless_serial "$serial" || return 0
+  if "$ADB" -s "$serial" get-state 2>/dev/null | grep -q '^device$'; then
+    return 0
+  fi
+  local ip port
+  ip="$(wireless_ip "$serial")"
+  port="${serial##*:}"
+  log "Wireless adb offline for $serial — reconnecting (Wi-Fi left unchanged)"
+  "$ADB" disconnect "$serial" 2>/dev/null || true
+  "$ADB" connect "$serial" 2>/dev/null || true
+  if "$ADB" -s "$serial" get-state 2>/dev/null | grep -q '^device$'; then
+    log "Reconnected $serial"
+    return 0
+  fi
+  # Try current wireless debugging port from the device (rooted builds).
+  local live_port
+  live_port="$("$ADB" -s "$serial" shell dumpsys adb 2>/dev/null \
+    | grep -oE 'port=[0-9]+' | head -1 | cut -d= -f2 | tr -d '\r')" || true
+  if [[ -n "$live_port" && "$live_port" != "$port" ]]; then
+    serial="${ip}:${live_port}"
+    log "Trying updated wireless port ${serial}"
+    "$ADB" connect "$serial" 2>/dev/null || true
+  fi
+  if "$ADB" -s "$serial" get-state 2>/dev/null | grep -q '^device$'; then
+    log "Reconnected $serial"
+    return 0
+  fi
+  # mDNS fallback for paired tablets (same host, new TLS port).
+  while IFS= read -r mdns; do
+    [[ -z "$mdns" ]] && continue
+    if "$ADB" -s "$mdns" shell ip -4 addr show wlan0 2>/dev/null | grep -q "$ip"; then
+      log "Falling back to mDNS transport $mdns"
+      if [[ "$serial" == "$HOST_SERIAL" ]]; then
+        HOST_SERIAL="$mdns"
+      elif [[ "$serial" == "$CLIENT_SERIAL" ]]; then
+        CLIENT_SERIAL="$mdns"
+      fi
+      return 0
+    fi
+  done < <("$ADB" devices 2>/dev/null | awk '/_adb-tls-connect/ && /device$/{print $1}')
+  return 1
+}
+
 require_device_online() {
   local serial="$1"
   local label="$2"
-  "$ADB" -s "$serial" get-state 2>/dev/null | grep -q '^device$' \
-    || die "$label $serial is not online (check Wi-Fi and wireless adb)"
+  if "$ADB" -s "$serial" get-state 2>/dev/null | grep -q '^device$'; then
+    return 0
+  fi
+  reconnect_wireless_adb "$serial" || die "$label $serial is not online (reconnect wireless adb manually)"
 }
 
 if [[ "$SKIP_BUILD" != true ]]; then
@@ -206,9 +262,40 @@ HOST_IP="$("$ADB" -s "$HOST_SERIAL" shell ip -4 addr show wlan0 2>/dev/null \
 
 log "Host LAN IP: $HOST_IP"
 
+REMOTE_PORT=8765
+ADB_FORWARD_PORT=18765
+CLIENT_HOST_IP="$HOST_IP"
+BRIDGE_PID=""
+
+cleanup_remote_bridge() {
+  [[ -n "$BRIDGE_PID" ]] && kill "$BRIDGE_PID" 2>/dev/null || true
+  "$ADB" -s "$HOST_SERIAL" forward --remove "tcp:$ADB_FORWARD_PORT" 2>/dev/null || true
+}
+
+setup_remote_bridge_if_needed() {
+  if "$ADB" -s "$CLIENT_SERIAL" shell ping -c 1 -W 2 "$HOST_IP" 2>/dev/null | grep -q '1 received'; then
+    log "Client reaches host directly on LAN"
+    return 0
+  fi
+  local pc_ip
+  pc_ip="$(ip -4 route get "$HOST_IP" 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
+  [[ -n "$pc_ip" ]] || die "Could not resolve PC LAN IP for remote bridge"
+  log "Tablet-to-tablet traffic blocked (AP isolation?) — bridging via PC at ${pc_ip}:${REMOTE_PORT}"
+  "$ADB" -s "$HOST_SERIAL" forward --remove "tcp:$ADB_FORWARD_PORT" 2>/dev/null || true
+  "$ADB" -s "$HOST_SERIAL" forward "tcp:$ADB_FORWARD_PORT" "tcp:$REMOTE_PORT"
+  python3 "$ROOT/scripts/tcp-bridge.py" "$pc_ip" "$REMOTE_PORT" "$ADB_FORWARD_PORT" &
+  BRIDGE_PID=$!
+  sleep 1
+  CLIENT_HOST_IP="$pc_ip"
+}
+
 COMMON_ARGS=(
   -e pairing_pin 424242
   -e host_ip "$HOST_IP"
+)
+CLIENT_ARGS=(
+  -e pairing_pin 424242
+  -e host_ip "$CLIENT_HOST_IP"
 )
 
 if [[ "$REMOTE_ONLY" != true ]]; then
@@ -250,9 +337,27 @@ fi
 log "Running dual-device remote e2e (host + client in parallel)..."
 require_device_online "$HOST_SERIAL" "Host"
 require_device_online "$CLIENT_SERIAL" "Client"
+setup_remote_bridge_if_needed
+CLIENT_ARGS=(
+  -e pairing_pin 424242
+  -e host_ip "$CLIENT_HOST_IP"
+)
+[[ "$CLIENT_HOST_IP" == "$HOST_IP" ]] || log "Client will connect via bridge host_ip=$CLIENT_HOST_IP"
 HOST_LOG="$(mktemp)"
 CLIENT_LOG="$(mktemp)"
-trap 'rm -f "$HOST_LOG" "$CLIENT_LOG"' EXIT
+trap 'cleanup_remote_bridge; rm -f "$HOST_LOG" "$CLIENT_LOG"' EXIT
+
+# Start the client first — it blocks in @Before until the host signals HOST_READY.
+# The host tablet is busy with USB OTG recording; starting the lightweight client
+# process first avoids racing wireless adb on the remote-only tablet.
+set +e
+run_instrument "$CLIENT_SERIAL" \
+  -e class org.openmultitrack.app.e2e.RemoteE2eClientTest \
+  "${CLIENT_ARGS[@]}" >"$CLIENT_LOG" 2>&1 &
+CLIENT_PID=$!
+set -e
+
+sleep 3
 
 (
   run_instrument "$HOST_SERIAL" \
@@ -261,16 +366,9 @@ trap 'rm -f "$HOST_LOG" "$CLIENT_LOG"' EXIT
 ) >"$HOST_LOG" 2>&1 &
 HOST_PID=$!
 
-sleep 4
-
 set +e
-run_instrument "$CLIENT_SERIAL" \
-  -e class org.openmultitrack.app.e2e.RemoteE2eClientTest \
-  "${COMMON_ARGS[@]}" >"$CLIENT_LOG" 2>&1
+wait "$CLIENT_PID"
 CLIENT_EXIT=$?
-set -e
-
-set +e
 wait "$HOST_PID"
 HOST_EXIT=$?
 set -e

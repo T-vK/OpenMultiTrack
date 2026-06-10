@@ -1,9 +1,13 @@
 package org.openmultitrack.app.e2e
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import java.net.InetSocketAddress
+import java.net.Socket
 import org.openmultitrack.app.service.MixerSessionController
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.domain.remote.RemoteConnectionState
@@ -120,4 +124,28 @@ object E2eWait {
         }
         true
     } == true
+
+    suspend fun isTcpPortOpen(host: String, port: Int, timeoutMs: Int = 2_000): Boolean =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                Socket().use { socket ->
+                    socket.connect(InetSocketAddress(host, port), timeoutMs)
+                }
+            }.isSuccess
+        }
+
+    /** Wait until the host remote server is up (UDP sync or TCP probe). */
+    suspend fun awaitHostRemoteReady(hostIp: String, timeoutMs: Long = 180_000) {
+        withTimeout(timeoutMs) {
+            while (true) {
+                val sync = runCatching {
+                    E2eLanSync.await(E2eLanSync.HOST_READY, timeoutMs = 1_000)
+                }.getOrNull()
+                if (sync != null || isTcpPortOpen(hostIp, org.openmultitrack.domain.remote.RemoteProtocol.HTTP_PORT)) {
+                    return@withTimeout
+                }
+                delay(2_000)
+            }
+        }
+    }
 }

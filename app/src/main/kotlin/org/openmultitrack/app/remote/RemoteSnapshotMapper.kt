@@ -394,10 +394,12 @@ object RemoteSnapshotMapper {
     private fun buildSoundcheckWaveformMeta(session: MixerSessionUiState): RemoteSoundcheckWaveformMeta? {
         val overview = session.soundcheckWaveforms
         if (overview != null) {
+            val availableChannels = overview.peaksByChannel.keys.maxOrNull()?.plus(1)
+                ?: overview.peaksByChannel.size
             return RemoteSoundcheckWaveformMeta(
                 durationSec = overview.durationSec,
                 peaksPerSec = overview.peaksPerSec.toInt(),
-                channelCount = session.soundcheckWaveformChannelsTotal.coerceAtLeast(overview.peaksByChannel.size),
+                channelCount = availableChannels.coerceAtLeast(1),
                 loading = session.soundcheckWaveformsLoading,
                 progress = session.soundcheckWaveformProgress,
             )

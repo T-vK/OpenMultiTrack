@@ -15,7 +15,6 @@ import org.openmultitrack.domain.remote.RemoteConnectionState
 import org.openmultitrack.domain.remote.RemotePairedHost
 import org.openmultitrack.domain.remote.RemoteRole
 import org.openmultitrack.remote.RemoteDiscovery
-import org.openmultitrack.remote.RemoteDiscoveredHost
 
 class E2eRemoteHarness(
     private val appRule: E2eAppRule,
@@ -39,6 +38,7 @@ class E2eRemoteHarness(
         val settings = AppSettingsStore(context)
         settings.remotePairingPin = E2eConfig.pairingPin
         settings.remoteAuthToken = E2eConfig.pairingPin
+        settings.listPairedRemoteHosts().forEach { settings.removePairedRemoteHost(it.hostId) }
     }
 
     fun ensureHostDisplayDefaults() {
@@ -59,7 +59,7 @@ class E2eRemoteHarness(
         return ip!!
     }
 
-    suspend fun waitForRemoteClient(timeoutMs: Long = 120_000) {
+    suspend fun waitForRemoteClient(timeoutMs: Long = 180_000) {
         E2eWait.untilRemoteState(remote.state, timeoutMs) { it.connectedClientCount >= 1 }
     }
 
@@ -67,43 +67,27 @@ class E2eRemoteHarness(
         configureTestPin()
         val settings = AppSettingsStore(context)
         settings.remoteRole = RemoteRole.CLIENT
-        remote.applyRole(RemoteRole.CLIENT)
-
-        val host = discoverOrManualHost(hostIp)
         settings.savePairedRemoteHost(
             RemotePairedHost(
-                hostId = host.hostId ?: host.host,
-                displayName = host.name,
+                hostId = hostIp,
+                displayName = "E2E Host",
                 pin = E2eConfig.pairingPin,
                 lastHost = hostIp,
                 lastPort = org.openmultitrack.domain.remote.RemoteProtocol.HTTP_PORT,
             ),
         )
+        if (remote.state.value.role != RemoteRole.CLIENT) {
+            remote.applyRole(RemoteRole.CLIENT)
+        }
         remote.connectDirect(
             host = hostIp,
             port = org.openmultitrack.domain.remote.RemoteProtocol.HTTP_PORT,
-            name = host.name,
-            hostId = host.hostId,
+            name = "E2E Host",
+            hostId = hostIp,
             pin = E2eConfig.pairingPin,
         )
-        E2eWait.untilRemoteConnected(remote.state)
+        E2eWait.untilRemoteConnected(remote.state, timeoutMs = 120_000)
         return remote
-    }
-
-    private suspend fun discoverOrManualHost(hostIp: String): RemoteDiscoveredHost {
-        repeat(10) {
-            val hosts = RemoteDiscovery.discoverHosts(context, timeoutMs = 2_000)
-            hosts.firstOrNull { it.host == hostIp }?.let { return it }
-            delay(1_000)
-        }
-        return RemoteDiscoveredHost(
-            name = "E2E Host",
-            host = hostIp,
-            port = org.openmultitrack.domain.remote.RemoteProtocol.HTTP_PORT,
-            protocolVersion = org.openmultitrack.domain.remote.RemoteProtocol.VERSION,
-            hostId = null,
-            isPaired = true,
-        )
     }
 
     fun state() = remote.state

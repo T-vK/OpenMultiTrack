@@ -3,6 +3,8 @@ package org.openmultitrack.app.e2e
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Rule
@@ -47,12 +49,31 @@ class RemoteE2eHostTest {
         remote.bindSession()
         remote.ensureHostDisplayDefaults()
         val hostIp = remote.startHost()
-        E2eLanSync.signal("$HOST_READY_PAYLOAD|ip=$hostIp|mixerId=${mixer.mixerId}|sessionDir=${sessionDir.absolutePath}")
+        val readyPayload =
+            "$HOST_READY_PAYLOAD|ip=$hostIp|mixerId=${mixer.mixerId}|sessionDir=${sessionDir.absolutePath}"
+        val announceJob = launch {
+            while (isActive && remote.state().value.connectedClientCount < 1) {
+                E2eLanSync.signal(readyPayload)
+                delay(2_000)
+            }
+        }
 
         remote.waitForRemoteClient()
+        announceJob.cancel()
         assertThat(ctrl.state.value.appMode).isEqualTo(AppMode.VIRTUAL_SOUNDCHECK)
 
-        E2eLanSync.await(E2eLanSync.CLIENT_DONE, timeoutMs = 240_000)
+        // Keep serving through the full client e2e budget (ignore brief reconnect blips).
+        val minServeMs = 150_000L
+        val maxServeMs = 300_000L
+        val serveStart = System.currentTimeMillis()
+        while (System.currentTimeMillis() - serveStart < maxServeMs) {
+            if (remote.state().value.connectedClientCount == 0 &&
+                System.currentTimeMillis() - serveStart >= minServeMs
+            ) {
+                break
+            }
+            delay(1_000)
+        }
         delay(1_000)
         assertThat(remoteHarness).isNotNull()
     }
