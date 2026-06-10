@@ -53,11 +53,12 @@ class RemoteE2eClientTest {
 
         val duration = remote.state().value.sessionByMixer[mixerId]!!.playbackDurationSec
         val seekTarget = (duration * 0.4f).coerceAtLeast(1f)
+        E2eWait.awaitRemoteReady(remote, hostIp, mixerId)
         remote.sendRemote(
             "seek",
             JSONObject().put("mixerId", mixerId).put("positionSec", seekTarget.toDouble()),
         )
-        E2eWait.untilRemoteState(remote.state(), 20_000) {
+        E2eWait.untilRemoteState(remote.state(), 60_000) {
             val pos = it.sessionByMixer[mixerId]?.playbackPositionSec ?: 0f
             abs(pos - seekTarget) <= 1.5f
         }

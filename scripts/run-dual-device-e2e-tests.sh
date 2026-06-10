@@ -227,7 +227,7 @@ restart_client_wifi_if_needed() {
   local now
   now="$(date +%s)"
   if (( now - LAST_CLIENT_WIFI_RESTART < 90 )); then
-    log "Skipping client Wi-Fi restart (cooldown; last ${now - LAST_CLIENT_WIFI_RESTART}s ago)"
+    log "Skipping client Wi-Fi restart (cooldown; last $((now - LAST_CLIENT_WIFI_RESTART))s ago)"
     return 1
   fi
   log "Client $serial lost LAN reachability to $host_ip — restarting Wi-Fi (su)"
