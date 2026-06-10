@@ -76,7 +76,7 @@ object RemoteE2eAssertions {
                 "set_app_mode",
                 JSONObject().put("mixerId", mixerId).put("mode", AppMode.VIRTUAL_SOUNDCHECK.ordinal),
             )
-            E2eWait.untilRemoteState(remote.state(), 15_000) {
+            E2eWait.untilRemoteState(remote.state(), 60_000) {
                 it.sessionByMixer[mixerId]?.appMode == AppMode.VIRTUAL_SOUNDCHECK
             }
             assertSoundcheckWaveformsOnRemote(remote, mixerId)
@@ -113,14 +113,16 @@ object RemoteE2eAssertions {
     suspend fun assertSettingsChangeFromRemote(
         remote: E2eRemoteHarness,
         mixerId: String,
+        hostIp: String,
     ) {
         val before = remote.state().value.uiSettings?.monitorGainLinear ?: 2.5f
         val target = (before + 0.5f).coerceAtMost(4f)
+        E2eWait.awaitRemoteReady(remote, hostIp, mixerId)
         remote.sendRemote(
             "set_settings",
             JSONObject().put("monitorGainLinear", target.toDouble()),
         )
-        E2eWait.untilRemoteState(remote.state(), 15_000) { state ->
+        E2eWait.untilRemoteState(remote.state(), 60_000) { state ->
             val gain = state.uiSettings?.monitorGainLinear ?: return@untilRemoteState false
             kotlin.math.abs(gain - target) < 0.05f
         }

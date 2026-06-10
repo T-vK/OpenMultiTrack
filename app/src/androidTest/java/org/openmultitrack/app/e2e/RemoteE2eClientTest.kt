@@ -49,7 +49,7 @@ class RemoteE2eClientTest {
         RemoteE2eAssertions.assertSettingsMirrored(remote.state())
         RemoteE2eAssertions.assertSoundcheckWaveformsOnRemote(remote, mixerId)
         RemoteE2eAssertions.assertPlaybackTransport(remote, mixerId, hostIp)
-        RemoteE2eAssertions.assertSettingsChangeFromRemote(remote, mixerId)
+        RemoteE2eAssertions.assertSettingsChangeFromRemote(remote, mixerId, hostIp)
 
         val duration = remote.state().value.sessionByMixer[mixerId]!!.playbackDurationSec
         val seekTarget = (duration * 0.4f).coerceAtLeast(1f)

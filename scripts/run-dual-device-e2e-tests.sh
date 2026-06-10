@@ -214,15 +214,10 @@ restart_client_wifi_if_needed() {
   if client_can_reach_host "$serial" "$host_ip"; then
     return 0
   fi
-  # wlan0 down: recover immediately; otherwise require repeated ping loss (transient drops happen).
+  # Only bounce Wi-Fi when wlan0 is actually down — ping loss with wlan up is often transient
+  # and restarting Wi-Fi kills an active remote WebSocket mid-test.
   if client_wlan_up "$serial"; then
-    local attempt
-    for attempt in 1 2; do
-      sleep 3
-      if client_can_reach_host "$serial" "$host_ip"; then
-        return 0
-      fi
-    done
+    return 1
   fi
   local now
   now="$(date +%s)"
