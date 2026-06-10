@@ -382,6 +382,12 @@ else
 fi
 
 log "Running dual-device remote e2e (host + client in parallel)..."
+log "Force-stopping app processes before remote e2e..."
+for serial in "$HOST_SERIAL" "$CLIENT_SERIAL"; do
+  "$ADB" -s "$serial" shell am force-stop org.openmultitrack 2>/dev/null || true
+  "$ADB" -s "$serial" shell am force-stop org.openmultitrack.test 2>/dev/null || true
+done
+sleep 2
 require_device_online "$HOST_SERIAL" "Host"
 require_device_online "$CLIENT_SERIAL" "Client"
 restart_client_wifi_if_needed "$CLIENT_SERIAL" "$HOST_IP"
