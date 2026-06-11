@@ -30,6 +30,8 @@ object AudioSessionBridge {
     var mixerManager: MultiMixerSessionManager? = null
     var activeMixerId: () -> String? = { mixerManager?.activeMixerId?.value }
     var rebuildNotification: () -> Unit = {}
+    /** Fast playback-only notification refresh (skips full multi-mixer sync). */
+    var refreshPlaybackNotification: (MixerSessionUiState?) -> Unit = {}
     var tickMediaProgress: (MixerSessionUiState?) -> Unit = {}
     /** Invoked when the user stops recording from the notification (after bringing the app forward). */
     var onNotificationStopRecord: ((mixerId: String) -> Unit)? = null

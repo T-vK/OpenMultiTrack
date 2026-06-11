@@ -66,6 +66,9 @@ class AudioSessionService : Service() {
         AudioSessionBridge.mixerManager = mixerManager
         AudioSessionBridge.activeMixerId = { mixerManager.activeMixerId.value }
         AudioSessionBridge.rebuildNotification = { refreshForegroundNotification(forceRebuild = true) }
+        AudioSessionBridge.refreshPlaybackNotification = { session ->
+            refreshPlaybackNotificationOnly(session)
+        }
         AudioSessionBridge.tickMediaProgress = { session ->
             if (isInForeground && notificationMode(session) == SessionNotificationMode.PLAYBACK) {
                 playbackMedia.updateProgress(session)
@@ -125,6 +128,20 @@ class AudioSessionService : Service() {
             statusHint = null,
             attachForeground = isInForeground,
         )
+    }
+
+    /** Updates only the playback media notification — used on stop/seek/end without full sync cost. */
+    private fun refreshPlaybackNotificationOnly(session: MixerSessionUiState?) {
+        if (!isInForeground || session == null) return
+        if (SessionNotificationPolicy.mode(session) != SessionNotificationMode.PLAYBACK) return
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val mixerName = session.mixerProfile?.displayName
+        playbackMedia.applySession(session, mixerName)
+        lastPlaybackSignature = playbackMedia.layoutSignature(session, mixerName)
+        val notification = PlaybackNotificationBuilder
+            .build(this, session, mixerName, playbackMedia)
+            .build()
+        manager.notify(RecordingNotificationIds.PLAYBACK_ID, notification)
     }
 
     private fun syncNotifications(

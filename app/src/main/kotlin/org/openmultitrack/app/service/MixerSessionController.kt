@@ -453,9 +453,7 @@ class MixerSessionController(
     }
 
     fun stopSoundcheck(resetPosition: Boolean = true) {
-        scope.launch {
-            finishPlaybackTransport(resetPosition = resetPosition)
-        }
+        finishPlaybackTransport(resetPosition = resetPosition)
     }
 
     fun seekSoundcheck(positionSec: Float) {
@@ -473,7 +471,7 @@ class MixerSessionController(
                     player.seekToFrame(frame)
                 }
             }
-            AudioSessionBridge.rebuildNotification()
+            AudioSessionBridge.refreshPlaybackNotification(_state.value)
         }
     }
 
@@ -548,9 +546,9 @@ class MixerSessionController(
                     playbackPositionSec = posSec,
                 )
             }
+            AudioSessionBridge.refreshPlaybackNotification(_state.value)
             scope.launch(Dispatchers.IO) {
                 captureMutex.withLock { stopSoundcheckLocked(skipStateUpdate = true) }
-                AudioSessionBridge.rebuildNotification()
             }
         } else {
             _state.update {
@@ -597,13 +595,13 @@ class MixerSessionController(
                 playbackPositionSec = posSec,
             )
         }
+        AudioSessionBridge.refreshPlaybackNotification(_state.value)
         scope.launch(Dispatchers.IO) {
             captureMutex.withLock {
                 if (player.isPlaying) {
                     stopSoundcheckLocked(skipStateUpdate = true)
                 }
             }
-            AudioSessionBridge.rebuildNotification()
         }
     }
 
@@ -1291,7 +1289,7 @@ class MixerSessionController(
         }
     }
 
-    private suspend fun finishPlaybackTransport(
+    private fun finishPlaybackTransport(
         resetPosition: Boolean,
         cancelStatusJob: Boolean = true,
     ) {
@@ -1306,11 +1304,13 @@ class MixerSessionController(
                 soundcheckMeterLevels = emptyMap(),
             )
         }
-        captureMutex.withLock {
-            withContext(Dispatchers.IO) { player.stopAndAwait() }
-        }
         lastMediaProgressSec = -1
-        AudioSessionBridge.rebuildNotification()
+        AudioSessionBridge.refreshPlaybackNotification(_state.value)
+        scope.launch(Dispatchers.IO) {
+            captureMutex.withLock {
+                player.stopAndAwait()
+            }
+        }
     }
 
     private fun startPlaybackStatusUpdates(sampleRate: Int) {
@@ -1336,17 +1336,19 @@ class MixerSessionController(
                     _state.value.playbackDurationSec
                 }
                 if (!activelyPlaying) {
-                    idleChecks++
-                    if (idleChecks < 2) {
-                        delay(16)
-                        continue
-                    }
                     val durationSec = _state.value.playbackDurationSec.coerceAtLeast(durSec)
                     val reachedEnd = PlaybackTransportPolicy.shouldFinishAtEnd(
                         positionSec = posSec,
                         durationSec = durationSec,
                         loopEnabled = false,
                     )
+                    if (!reachedEnd) {
+                        idleChecks++
+                        if (idleChecks < 2) {
+                            delay(16)
+                            continue
+                        }
+                    }
                     lastMediaProgressSec = -1
                     _state.update {
                         it.copy(
@@ -1357,7 +1359,7 @@ class MixerSessionController(
                             warningMessage = if (reachedEnd) null else it.warningMessage,
                         )
                     }
-                    AudioSessionBridge.rebuildNotification()
+                    AudioSessionBridge.refreshPlaybackNotification(_state.value)
                     break
                 }
                 idleChecks = 0
@@ -1394,7 +1396,7 @@ class MixerSessionController(
                             )
                         }
                     }
-                    AudioSessionBridge.rebuildNotification()
+                    AudioSessionBridge.refreshPlaybackNotification(_state.value)
                     break
                 }
                 _state.update { s ->
@@ -1405,11 +1407,7 @@ class MixerSessionController(
                         playbackDurationSec = durSec.takeIf { it > 0f } ?: s.playbackDurationSec,
                     )
                 }
-                val mediaSec = posSec.toInt()
-                if (mediaSec != lastMediaProgressSec) {
-                    lastMediaProgressSec = mediaSec
-                    AudioSessionBridge.tickMediaProgress(_state.value)
-                }
+                AudioSessionBridge.tickMediaProgress(_state.value)
                 delay(50)
             }
         }
