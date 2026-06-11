@@ -63,6 +63,29 @@ object Flow8StateDecoder {
     }
 
     /**
+     * Reads a BLE compact channel name at [lengthOffset].
+     * Strips 4–6 may echo the icon-preset byte as the first counted character.
+     */
+    internal fun readChannelName(buf: ByteArray, lengthOffset: Int): String? {
+        if (lengthOffset >= buf.size) return null
+        var len = buf[lengthOffset].toInt() and 0xFF
+        if (len !in 2..18 || lengthOffset + 1 + len > buf.size) return null
+        var start = lengthOffset + 1
+        if (lengthOffset >= 1 &&
+            (buf[lengthOffset - 1].toInt() and 0xFF) != RECORD_MAGIC &&
+            start < buf.size &&
+            buf[start] == buf[lengthOffset - 1]
+        ) {
+            start++
+            len--
+        }
+        if (len !in 2..18 || start + len > buf.size) return null
+        val slice = buf.copyOfRange(start, start + len)
+        if (!slice.all { it in 0x20..0x7E }) return null
+        return String(slice, Charsets.US_ASCII)
+    }
+
+    /**
      * Parses the 48-byte ParamQuery `0x80` payload together with the MixerState buffer.
      * Preset bytes alone are not Mixing Station icon ids — combine with per-strip input type.
      */
@@ -120,7 +143,7 @@ object Flow8StateDecoder {
     }
 
     internal fun isValidChannelNameRecord(buf: ByteArray, offset: Int): Boolean {
-        if (readLengthPrefixed(buf, offset) == null || offset < 6) return false
+        if (readChannelName(buf, offset) == null || offset < 6) return false
         if ((buf[offset - 1].toInt() and 0xFF) == RECORD_MAGIC) {
             val stripIndex = buf[offset - 3].toInt() and 0xFF
             return stripIndex in 0..2 &&
@@ -135,7 +158,10 @@ object Flow8StateDecoder {
         ) {
             return false
         }
-        return (buf[offset - 2].toInt() and 0xFF) in 1..2
+        if ((buf[offset - 2].toInt() and 0xFF) !in 1..2) return false
+        // [strip][sub][preset][len] — reject the preset byte mistaken for length.
+        if ((buf[offset - 1].toInt() and 0xFF) in 1..2) return false
+        return true
     }
 
     internal fun channelStripIndexFromRecord(buf: ByteArray, offset: Int): Int =
@@ -147,12 +173,13 @@ object Flow8StateDecoder {
         while (i < buf.size) {
             if (isValidChannelNameRecord(buf, i)) {
                 val stripIndex = channelStripIndexFromRecord(buf, i)
-                val name = readLengthPrefixed(buf, i)
+                val name = readChannelName(buf, i)
                 if (name != null && stripIndex in 0 until MIXER_NAME_COUNT) {
                     records[stripIndex] = name
                 }
                 i += 1 + (buf[i].toInt() and 0xFF)
             } else {
+                maybeRecordPresetHeaderName(buf, i, records)
                 i++
             }
         }
@@ -170,10 +197,44 @@ object Flow8StateDecoder {
                 }
                 i += 1 + (buf[i].toInt() and 0xFF)
             } else {
+                maybeRecordPresetHeaderOffset(buf, i, offsets)
                 i++
             }
         }
         return offsets
+    }
+
+    private fun maybeRecordPresetHeaderName(buf: ByteArray, presetOffset: Int, records: MutableMap<Int, String>) {
+        val stripIndex = presetHeaderStripIndex(buf, presetOffset) ?: return
+        if (records.containsKey(stripIndex)) return
+        val nameOffset = presetOffset + 1
+        val name = readChannelName(buf, nameOffset) ?: readPrintableAsciiRun(buf, nameOffset) ?: return
+        records[stripIndex] = name
+    }
+
+    private fun maybeRecordPresetHeaderOffset(buf: ByteArray, presetOffset: Int, offsets: MutableMap<Int, Int>) {
+        val stripIndex = presetHeaderStripIndex(buf, presetOffset) ?: return
+        if (offsets.containsKey(stripIndex)) return
+        val nameOffset = presetOffset + 1
+        if (readChannelName(buf, nameOffset) != null || readPrintableAsciiRun(buf, nameOffset) != null) {
+            offsets[stripIndex] = nameOffset
+        }
+    }
+
+    private fun presetHeaderStripIndex(buf: ByteArray, presetOffset: Int): Int? {
+        if (presetOffset < 2) return null
+        val stripIndex = buf[presetOffset - 2].toInt() and 0xFF
+        if (stripIndex !in 3..5) return null
+        if ((buf[presetOffset - 1].toInt() and 0xFF) !in 1..2) return null
+        return stripIndex
+    }
+
+    private fun readPrintableAsciiRun(buf: ByteArray, start: Int, maxLen: Int = 18): String? {
+        if (start >= buf.size) return null
+        val end = minOf(buf.size, start + maxLen)
+        val slice = buf.copyOfRange(start, end).takeWhile { it in 0x20..0x7E }
+        if (slice.size < 2) return null
+        return String(slice.toByteArray(), Charsets.US_ASCII)
     }
 
     private fun usesSysexNameRegion(buf: ByteArray): Boolean {

@@ -76,6 +76,38 @@ class Flow8StateDecoderTest {
         assertThat(records[5]).isEqualTo("Playback")
     }
 
+    @Test
+    fun readChannelName_stripsPresetEchoOnStripsFourToSix() {
+        val header = byteArrayOf(0x03, 0x01, 0x62)
+        val withEcho = header + byteArrayOf(0x07, 0x62, 0x56, 0x69, 0x6F, 0x6C, 0x69, 0x6E)
+        val withoutEcho = header + byteArrayOf(0x07, 0x56, 0x69, 0x6F, 0x6C, 0x69, 0x6E, 0x65)
+
+        assertThat(Flow8StateDecoder.readChannelName(withEcho, 3)).isEqualTo("Violin")
+        assertThat(Flow8StateDecoder.readChannelName(withoutEcho, 3)).isEqualTo("Violine")
+    }
+
+    @Test
+    fun decodeNames_doesNotTreatPresetByteAsLengthOnStripFour() {
+        val padded = ByteArray(6) + byteArrayOf(
+            0x03, 0x01, 0x04, 0x43, 0x65, 0x6C, 0x6C, 0x6F,
+        )
+
+        val names = Flow8StateDecoder.decodeNames(padded)
+
+        assertThat(names[3]).isEqualTo("Cello")
+    }
+
+    @Test
+    fun decodeNames_readsCelloWhenLengthByteFollowsPreset() {
+        val padded = ByteArray(6) + byteArrayOf(
+            0x03, 0x01, 0x04, 0x05, 0x43, 0x65, 0x6C, 0x6C, 0x6F,
+        )
+
+        val names = Flow8StateDecoder.decodeNames(padded)
+
+        assertThat(names[3]).isEqualTo("Cello")
+    }
+
     private fun readRepoFixture(name: String): ByteArray {
         val candidates = listOf(
             Paths.get("docs/flow8-reverse-engineering/tools", name),
