@@ -24,6 +24,7 @@ import org.openmultitrack.app.audio.LiveWaveformSnapshot
 import org.openmultitrack.app.audio.MonitorMixConfig
 import org.openmultitrack.app.audio.PlaybackMixContext
 import org.openmultitrack.app.audio.SessionPlayer
+import org.openmultitrack.app.audio.SyntheticCaptureGenerator
 import org.openmultitrack.app.audio.VirtualMixerProbe
 import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.data.RecordingStorageResolver
@@ -32,6 +33,7 @@ import org.openmultitrack.app.root.RootShell
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 import org.openmultitrack.domain.channel.ChannelStripState
+import org.openmultitrack.domain.mixer.DemoBandChannels
 import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.domain.mixer.MixerRoutingConfig
 import org.openmultitrack.domain.mixer.VirtualMixer
@@ -850,16 +852,32 @@ class MixerSessionController(
 
     fun canStartRecording(): Boolean {
         val prof = profile ?: return false
-        if (VirtualMixer.isSineGenerator(prof)) {
+        if (VirtualMixer.isDemoMixer(prof)) {
             return activeProbe != null
         }
         return activeDescriptor != null && activeProbe != null
     }
 
-    fun attachVirtualSineProbe() {
+    fun attachVirtualDemoProbe() {
         val descriptor = VirtualMixerProbe.usbDescriptor()
-        val probe = VirtualMixerProbe.sineProbeResult()
-        setProbeResult(descriptor, probe)
+        val probe = VirtualMixerProbe.demoProbeResult()
+        val chCount = VirtualMixer.DEMO_CHANNEL_COUNT
+        val strips = DemoBandChannels.channelStripStates()
+        activeDescriptor = descriptor
+        activeProbe = probe
+        _state.update {
+            it.copy(
+                usbDescriptor = descriptor,
+                probe = probe,
+                probing = false,
+                captureChannelCount = chCount,
+                playbackChannelCount = maxPlaybackChannelsFromProbe(probe),
+                channelStrips = strips,
+                statusMessage = "Ready — Demo band ($chCount channels)",
+            )
+        }
+        syncVuMeterCapture()
+        refreshStorageEstimate()
     }
 
     fun startRecording() {
@@ -1505,7 +1523,7 @@ class MixerSessionController(
         val prof = profile
         val hasSource = activeProbe != null && (
             activeDescriptor != null ||
-                (prof != null && VirtualMixer.isSineGenerator(prof))
+                (prof != null && VirtualMixer.isDemoMixer(prof))
             )
         return isActiveMixer() &&
             settings.showVuMeters &&
@@ -1553,14 +1571,15 @@ class MixerSessionController(
         probe: FullUsbProbeResult,
     ): Result<Int> {
         updateWaveformConfig()
-        if (VirtualMixer.isSineGenerator(profile ?: return Result.failure(IllegalStateException("No mixer profile")))) {
+        if (VirtualMixer.isDemoMixer(profile ?: return Result.failure(IllegalStateException("No mixer profile")))) {
             if (captureEngine.isCaptureActive && captureEngine.isSyntheticCapture()) {
                 return Result.success(captureEngine.activeChannelCount)
             }
             return captureEngine.startSyntheticCapture(
                 scope = scope,
-                channelCount = VirtualMixer.SINE_CHANNEL_COUNT,
+                channelCount = VirtualMixer.DEMO_CHANNEL_COUNT,
                 sampleRateHz = VirtualMixer.SAMPLE_RATE_HZ,
+                generator = SyntheticCaptureGenerator.fromDemoBand(VirtualMixer.SAMPLE_RATE_HZ),
             ).map {
                 syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
                 captureEngine.activeChannelCount
@@ -1598,9 +1617,18 @@ class MixerSessionController(
 
     private fun syncChannelStripsToCaptureCount(captureCh: Int) {
         if (captureCh <= 0) return
+        val demoStrips = if (profile?.let(VirtualMixer::isDemoMixer) == true) {
+            DemoBandChannels.channelStripStates()
+        } else {
+            null
+        }
         _state.update { s ->
             val existing = s.channelStrips
             when {
+                demoStrips != null && existing.size != captureCh -> s.copy(
+                    channelStrips = demoStrips.take(captureCh),
+                    captureChannelCount = captureCh,
+                )
                 existing.size == captureCh -> s.copy(captureChannelCount = captureCh)
                 existing.size > captureCh -> s.copy(
                     channelStrips = existing.take(captureCh),
@@ -1609,7 +1637,7 @@ class MixerSessionController(
                 else -> {
                     val strips = existing.toMutableList()
                     for (i in existing.size until captureCh) {
-                        strips.add(ChannelStripState(index = i))
+                        strips.add(demoStrips?.getOrNull(i) ?: ChannelStripState(index = i))
                     }
                     s.copy(channelStrips = strips, captureChannelCount = captureCh)
                 }

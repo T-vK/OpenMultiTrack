@@ -127,7 +127,7 @@ fun DawMainScreen(
     onSelectMixer: (String) -> Unit,
     onRemoveMixer: (String) -> Unit,
     onAddMixerDevice: (UsbAudioDeviceDescriptor) -> Unit,
-    onAddVirtualSineMixer: () -> Unit,
+    onAddVirtualDemoMixer: () -> Unit,
     onDismissAddMixer: () -> Unit,
     onToggleArm: (String, Int) -> Unit,
     onToggleMonitor: (String, Int) -> Unit,
@@ -617,12 +617,11 @@ fun DawMainScreen(
         AddMixerDialog(
             devices = state.addableUsbDevices,
             alreadyAddedCount = state.mixers.size,
-            hasVirtualSineMixer = state.mixers.any {
-                it.vendorId == org.openmultitrack.domain.mixer.VirtualMixer.VENDOR_ID &&
-                    it.productId == org.openmultitrack.domain.mixer.VirtualMixer.PRODUCT_ID_SINE
+            hasVirtualDemoMixer = state.mixers.any {
+                org.openmultitrack.domain.mixer.VirtualMixer.isDemoMixer(it)
             },
             onAdd = onAddMixerDevice,
-            onAddVirtualSine = onAddVirtualSineMixer,
+            onAddVirtualDemo = onAddVirtualDemoMixer,
             onDismiss = onDismissAddMixer,
         )
     }
@@ -1113,9 +1112,9 @@ private fun ChannelStripRow(
 private fun AddMixerDialog(
     devices: List<UsbAudioDeviceDescriptor>,
     alreadyAddedCount: Int,
-    hasVirtualSineMixer: Boolean,
+    hasVirtualDemoMixer: Boolean,
     onAdd: (UsbAudioDeviceDescriptor) -> Unit,
-    onAddVirtualSine: () -> Unit,
+    onAddVirtualDemo: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -1123,9 +1122,9 @@ private fun AddMixerDialog(
         title = { Text("Add audio interface") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (!hasVirtualSineMixer) {
-                    TextButton(onClick = onAddVirtualSine) {
-                        Text("Test signal (sine) — no USB")
+                if (!hasVirtualDemoMixer) {
+                    TextButton(onClick = onAddVirtualDemo) {
+                        Text("Demo band — no USB")
                     }
                     HorizontalDivider()
                 }

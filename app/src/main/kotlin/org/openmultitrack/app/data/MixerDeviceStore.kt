@@ -13,13 +13,10 @@ class MixerDeviceStore(context: Context) {
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun listMixers(): List<MixerProfile> {
-        val raw = prefs.getString(KEY_MIXERS, null) ?: return emptyList()
-        val parsed = runCatching {
-            val arr = JSONArray(raw)
-            (0 until arr.length()).map { i -> fromJson(arr.getJSONObject(i)) }
-        }.getOrDefault(emptyList())
-        val deduped = deduplicate(parsed)
-        if (deduped.size != parsed.size) {
+        val parsed = readRawMixers()
+        val migrated = parsed.map { migrateVirtualProfileFields(it) }
+        val deduped = deduplicate(dedupeVirtualProfiles(migrated))
+        if (migrated != parsed || deduped.size != parsed.size) {
             persist(deduped)
         }
         return deduped
@@ -56,12 +53,14 @@ class MixerDeviceStore(context: Context) {
     }
 
     fun saveMixer(profile: MixerProfile) {
-        val list = listMixers().filter { it.id != profile.id } + profile
-        persist(deduplicate(list))
+        val list = readRawMixers()
+            .map { migrateVirtualProfileFields(it) }
+            .filter { it.id != profile.id } + migrateVirtualProfileFields(profile)
+        persist(deduplicate(dedupeVirtualProfiles(list)))
     }
 
     fun removeMixer(id: String) {
-        persist(listMixers().filter { it.id != id })
+        persist(readRawMixers().filter { it.id != id })
     }
 
     fun isBehringerAudioInterface(descriptor: UsbAudioDeviceDescriptor): Boolean {
@@ -69,23 +68,53 @@ class MixerDeviceStore(context: Context) {
         return descriptor.vendorId == 0x1397
     }
 
-    fun findVirtualSineMixer(): MixerProfile? =
-        listMixers().firstOrNull { VirtualMixer.isSineGenerator(it) }
+    fun findVirtualDemoMixer(): MixerProfile? =
+        listMixers().firstOrNull { VirtualMixer.isDemoMixer(it) }
 
-    /** Built-in sine-wave test source (no USB hardware). */
-    fun addVirtualSineMixer(): MixerProfile {
-        findVirtualSineMixer()?.let { return it }
+    /** Built-in demo band (no USB hardware). */
+    fun addVirtualDemoMixer(): MixerProfile {
+        findVirtualDemoMixer()?.let { return it }
         val profile = MixerProfile(
             id = UUID.randomUUID().toString(),
-            usbDeviceName = "virtual:sine",
+            usbDeviceName = "virtual:demo",
             vendorId = VirtualMixer.VENDOR_ID,
-            productId = VirtualMixer.PRODUCT_ID_SINE,
-            serialNumber = "virtual-sine",
-            productName = "OMT Test Signal",
+            productId = VirtualMixer.PRODUCT_ID_DEMO,
+            serialNumber = "virtual-demo",
+            productName = "OMT Demo",
             displayName = VirtualMixer.DISPLAY_NAME,
         )
         saveMixer(profile)
         return profile
+    }
+
+    private fun readRawMixers(): List<MixerProfile> {
+        val raw = prefs.getString(KEY_MIXERS, null) ?: return emptyList()
+        return runCatching {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).map { i -> fromJson(arr.getJSONObject(i)) }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun migrateVirtualProfileFields(profile: MixerProfile): MixerProfile {
+        if (!VirtualMixer.isDemoMixer(profile)) return profile
+        val legacy = profile.displayName == "Test Signal (sine)" ||
+            profile.productName == "OMT Test Signal" ||
+            profile.usbDeviceName == "virtual:sine" ||
+            profile.serialNumber == "virtual-sine"
+        if (!legacy) return profile
+        return profile.copy(
+            usbDeviceName = "virtual:demo",
+            serialNumber = "virtual-demo",
+            productName = "OMT Demo",
+            displayName = VirtualMixer.DISPLAY_NAME,
+        )
+    }
+
+    private fun dedupeVirtualProfiles(list: List<MixerProfile>): List<MixerProfile> {
+        val virtual = list.filter { VirtualMixer.isDemoMixer(it) }
+        if (virtual.size <= 1) return list
+        val keep = virtual.maxByOrNull { it.displayName == VirtualMixer.DISPLAY_NAME } ?: virtual.first()
+        return list.filter { !VirtualMixer.isDemoMixer(it) || it.id == keep.id }
     }
 
     private fun matchesSameDevice(profile: MixerProfile, descriptor: UsbAudioDeviceDescriptor): Boolean {

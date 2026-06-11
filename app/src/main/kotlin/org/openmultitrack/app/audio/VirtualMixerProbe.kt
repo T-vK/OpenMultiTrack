@@ -6,23 +6,23 @@ import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 import org.openmultitrack.domain.mixer.VirtualMixer
 import org.openmultitrack.usb.FullUsbProbeResult
 
-/** Fake USB probe for the built-in sine test signal mixer. */
+/** Fake USB probe for the built-in demo band mixer. */
 object VirtualMixerProbe {
     fun usbDescriptor(): UsbAudioDeviceDescriptor = UsbAudioDeviceDescriptor(
-        deviceName = "virtual:sine",
+        deviceName = "virtual:demo",
         vendorId = VirtualMixer.VENDOR_ID,
-        productId = VirtualMixer.PRODUCT_ID_SINE,
+        productId = VirtualMixer.PRODUCT_ID_DEMO,
         manufacturerName = "OpenMultiTrack",
-        productName = "OMT Test Signal",
-        serialNumber = "virtual-sine",
+        productName = "OMT Demo",
+        serialNumber = "virtual-demo",
         isLikelyBehringerMixer = false,
-        guessedModel = "TestSignal",
+        guessedModel = "DemoBand",
         androidAudioDeviceId = null,
     )
 
-    fun sineProbeResult(): FullUsbProbeResult {
+    fun demoProbeResult(): FullUsbProbeResult {
         val usb = usbDescriptor()
-        val ch = VirtualMixer.SINE_CHANNEL_COUNT
+        val ch = VirtualMixer.DEMO_CHANNEL_COUNT
         val rate = VirtualMixer.SAMPLE_RATE_HZ
         val input = AudioEndpointProbe(
             deviceId = -1,
@@ -43,7 +43,7 @@ object VirtualMixerProbe {
             input = input,
             output = output,
             uac2Caps = null,
-            note = "Virtual sine test signal — no USB hardware",
+            note = "Virtual demo band — no USB hardware",
         )
     }
 }

@@ -194,14 +194,16 @@ class CaptureSessionEngine(
         scope: CoroutineScope,
         channelCount: Int,
         sampleRateHz: Int = 48_000,
+        generator: SyntheticCaptureGenerator? = null,
     ): Result<Unit> = lifecycleMutex.withLock {
         if (isCaptureActive && syntheticGenerator != null) {
             return Result.success(Unit)
         }
         stopCaptureInternalLocked()
-        this.channelCount = channelCount.coerceAtLeast(1)
+        val synth = generator ?: SyntheticCaptureGenerator(channelCount, sampleRateHz)
+        this.channelCount = synth.channelCount.coerceAtLeast(1)
         sampleRate = sampleRateHz.coerceAtLeast(1)
-        syntheticGenerator = SyntheticCaptureGenerator(this.channelCount, sampleRate)
+        syntheticGenerator = synth
         usbDegraded = false
         clearWaveforms()
         allocateWaveformRings()

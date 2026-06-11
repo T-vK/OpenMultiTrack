@@ -674,8 +674,8 @@ class MainViewModel(
         return mixerStore.findMatchingMixer(desc) != null
     }
 
-    fun addVirtualSineMixer() {
-        val profile = mixerStore.addVirtualSineMixer()
+    fun addVirtualDemoMixer() {
+        val profile = mixerStore.addVirtualDemoMixer()
         loadMixers()
         sessionClient.whenReady { mgr ->
             mgr.registerMixer(profile)
@@ -683,11 +683,11 @@ class MainViewModel(
             ctrl.setRouting(routingStore.get(profile.id))
             ctrl.setAppMode(settings.appModeForMixer(profile.id))
             observeMixerSession(profile.id, mgr)
-            ctrl.attachVirtualSineProbe()
+            ctrl.attachVirtualDemoProbe()
         }
         _uiState.update { it.copy(showAddMixerDialog = false) }
         setActiveMixer(profile.id)
-        showStatus("Test signal ready — sine tones on all channels.", profile.id)
+        showStatus("Demo band ready — vocals, guitars, keys, and drums.", profile.id)
     }
 
     fun addMixer(descriptor: UsbAudioDeviceDescriptor) {
@@ -1774,8 +1774,8 @@ class MainViewModel(
         manager: org.openmultitrack.app.service.MultiMixerSessionManager,
         usbDevices: List<UsbAudioDeviceDescriptor> = _uiState.value.availableUsbDevices,
     ) {
-        if (VirtualMixer.isSineGenerator(profile)) {
-            manager.getOrCreate(profile.id).attachVirtualSineProbe()
+        if (VirtualMixer.isDemoMixer(profile)) {
+            manager.getOrCreate(profile.id).attachVirtualDemoProbe()
             refreshInterruptedRecording(profile.id, manager)
             return
         }
