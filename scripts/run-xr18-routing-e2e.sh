@@ -49,7 +49,9 @@ adb_dev() {
 log() { echo "[routing-e2e] $*"; }
 
 if [[ -z "$SERIAL" ]]; then
-  SERIAL="$(adb_dev devices 2>/dev/null | awk '/\tdevice$/{print $1; exit}')" || true
+  # Prefer the wireless tablet (XR18 host) over other adb devices.
+  SERIAL="$(adb_dev devices -l 2>/dev/null | awk '/gta4xlwifi/ && /\tdevice/{print $1; exit}')" || true
+  [[ -n "$SERIAL" ]] || SERIAL="$(adb_dev devices 2>/dev/null | awk '/\tdevice$/{print $1; exit}')" || true
 fi
 [[ -n "$SERIAL" ]] || { echo "ERROR: no adb device" >&2; exit 1; }
 log "device: $SERIAL"

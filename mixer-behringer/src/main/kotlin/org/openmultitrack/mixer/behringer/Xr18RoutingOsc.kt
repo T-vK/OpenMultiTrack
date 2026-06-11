@@ -2,7 +2,7 @@ package org.openmultitrack.mixer.behringer
 
 /** Low-level X-Air routing OSC read/write with verification. */
 internal object Xr18RoutingOsc {
-    private const val SETTLE_MS = 100L
+    private const val SETTLE_MS = 200L
 
     /** Optional diagnostic hook (set from app layer). */
     var onVerifyFailure: ((channelIndex: Int, target: XAirChannelInputState, live: XAirChannelInputState?, replies: Map<String, List<Any>>) -> Unit)? = null

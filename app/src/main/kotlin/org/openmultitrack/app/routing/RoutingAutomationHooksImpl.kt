@@ -118,6 +118,23 @@ class RoutingAutomationHooksImpl(
 
     override suspend fun afterRecordRestore() = afterRestore(RoutingOverrideKind.RECORD)
 
+    override suspend fun afterSoundcheckPlaybackStarted(profile: MixerProfile): RoutingHookResult {
+        val pending = coordinator.loadPending() ?: return RoutingHookResult.Skipped
+        if (pending.kind != RoutingOverrideKind.SOUNDCHECK || pending.mixerId != profile.id) {
+            return RoutingHookResult.Skipped
+        }
+        val config = settings.routingAutomationForMixer(profile.id)
+        if (config.level == RoutingAutomationLevel.OFF) return RoutingHookResult.Skipped
+        return when (val outcome = coordinator.reapplyOverrideOnly(config, pending)) {
+            is RoutingApplyOutcome.Applied -> RoutingHookResult.Proceed
+            is RoutingApplyOutcome.Failed ->
+                routingFailed(profile, RoutingOverrideKind.SOUNDCHECK, outcome.message)
+            is RoutingApplyOutcome.SkippedUnreachable ->
+                routingFailed(profile, RoutingOverrideKind.SOUNDCHECK, "Mixer not reachable on LAN — check Wi‑Fi and OSC IP")
+            else -> RoutingHookResult.Skipped
+        }
+    }
+
     override suspend fun afterSoundcheckRestore() = afterRestore(RoutingOverrideKind.SOUNDCHECK)
 
     private suspend fun afterRestore(expectedKind: RoutingOverrideKind) {

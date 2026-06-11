@@ -114,6 +114,34 @@ class Xr18RoutingOscE2eTest {
     }
 
     @Test
+    fun applyAllSixteenChannels_recordThenSoundcheck() = runBlocking {
+        usbAppProcessRule.runOnActivity { activity ->
+            runBlocking(Dispatchers.IO) {
+                val channels = (0 until 16).toSet()
+                val usbOk = port.applySoundcheckRouting(channels)
+                Log.i(TAG, "applySoundcheckRouting all16 ok=$usbOk lastFail=${org.openmultitrack.mixer.behringer.Xr18RoutingService.lastVerifyFailure?.report()}")
+                assertWithMessage("USB apply all channels").that(usbOk).isTrue()
+                for (ch in channels) {
+                    Xr18RoutingE2eHarness.assertConfirmed(
+                        "USB CH${ch + 1}",
+                        port.confirmChannelRouting(ch, Xr18RoutingE2eHarness.usbTarget(ch)),
+                    )
+                }
+
+                val adOk = port.applyRecordRouting(channels)
+                Log.i(TAG, "applyRecordRouting all16 ok=$adOk lastFail=${org.openmultitrack.mixer.behringer.Xr18RoutingService.lastVerifyFailure?.report()}")
+                assertWithMessage("A/D apply all channels").that(adOk).isTrue()
+                for (ch in channels) {
+                    Xr18RoutingE2eHarness.assertConfirmed(
+                        "A/D CH${ch + 1}",
+                        port.confirmChannelRouting(ch, Xr18RoutingE2eHarness.adTarget(ch)),
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
     fun readChannelInput_matchesConfirmQuery() = runBlocking {
         usbAppProcessRule.runOnActivity {
             runBlocking(Dispatchers.IO) {

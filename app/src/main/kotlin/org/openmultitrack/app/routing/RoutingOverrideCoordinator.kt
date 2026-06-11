@@ -108,6 +108,37 @@ class RoutingOverrideCoordinator(
         return port.readAllChannelInputs()
     }
 
+    /**
+     * Re-sends the saved override targets for an open transaction (no new baseline).
+     * Used after USB playback opens — XR18 often reverts rtnsw/insrc when host streaming starts.
+     */
+    suspend fun reapplyOverrideOnly(
+        config: MixerRoutingAutomationConfig,
+        pending: PendingRoutingRestore,
+    ): RoutingApplyOutcome {
+        if (config.level == RoutingAutomationLevel.OFF) return RoutingApplyOutcome.Disabled
+        val port = routingFactory(pending.oscHost)
+        if (!port.probe(timeoutMs = 2500)) return RoutingApplyOutcome.SkippedUnreachable
+        val channels = XAirInputSourceCatalog.routableIndices(pending.affectedChannels)
+        if (channels.isEmpty()) return RoutingApplyOutcome.SkippedEmptyScope
+        val ok = when (pending.kind) {
+            RoutingOverrideKind.RECORD -> port.applyRecordRouting(channels)
+            RoutingOverrideKind.SOUNDCHECK -> port.applySoundcheckRouting(channels)
+        }
+        return if (ok) {
+            RoutingApplyOutcome.Applied(pending.transactionId)
+        } else {
+            val detail = Xr18RoutingService.lastVerifyFailure?.report()
+            RoutingApplyOutcome.Failed(
+                if (detail != null) {
+                    "Mixer routing not confirmed after USB playback — $detail"
+                } else {
+                    "Mixer routing not confirmed after USB playback opened"
+                },
+            )
+        }
+    }
+
     private suspend fun applyInternal(
         profile: MixerProfile,
         config: MixerRoutingAutomationConfig,

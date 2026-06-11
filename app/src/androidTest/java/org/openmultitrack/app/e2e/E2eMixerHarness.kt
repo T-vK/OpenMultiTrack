@@ -76,8 +76,7 @@ class E2eMixerHarness(
         syncUiWithHarnessMixer(mixerId)
     }
 
-    /** Ensures MainActivity observes the harness-registered mixer (channels + waveforms on screen). */
-    private fun syncUiWithHarnessMixer(mixerId: String) {
+    fun syncUiWithHarnessMixer(mixerId: String, appMode: AppMode? = null) {
         appHost.runOnActivity { activity ->
             val vm = ViewModelProvider(
                 activity,
@@ -85,8 +84,11 @@ class E2eMixerHarness(
             )[MainViewModel::class.java]
             vm.reloadMixersFromStore()
             vm.setActiveMixer(mixerId)
+            if (appMode != null) {
+                vm.setAppMode(mixerId, appMode)
+            }
         }
-        Thread.sleep(500)
+        Thread.sleep(1_500)
     }
 
     private suspend fun releaseGlobalUsbCapture(

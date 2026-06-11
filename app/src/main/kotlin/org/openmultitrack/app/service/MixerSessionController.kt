@@ -704,6 +704,22 @@ class MixerSessionController(
         }
     }
 
+    /** Stop USB capture/playback so XR18 accepts OSC routing changes (verified on hardware). */
+    private suspend fun quiesceUsbBeforeRoutingLocked() {
+        if (player.isPlaying) {
+            player.stopAndAwait()
+        }
+        if (_state.value.isMonitoring) {
+            captureEngine.updateMonitor(MonitorMixConfig(enabled = false))
+            _state.update { it.copy(isMonitoring = false) }
+        }
+        captureEngine.updateVuMetering(false)
+        _state.update { it.copy(isVuMetering = false) }
+        if (captureEngine.isCaptureActive && !_state.value.isRecording) {
+            captureEngine.stopCapture()
+        }
+    }
+
     private suspend fun startSoundcheckPlaybackLocked(startFrame: Long, trace: TransportTrace? = null) {
         val descriptor = activeDescriptor
             ?: throw IllegalStateException("Mixer not connected — reconnect USB")
@@ -740,11 +756,7 @@ class MixerSessionController(
                 trace?.mark("player still playing, suspending first")
                 player.suspendAndAwait()
             }
-            val ui = _state.value
-            val usbOutputs = maxPlaybackChannelsFromProbe(probe).coerceAtLeast(1)
-            trace?.mark("ensurePlaybackRoute usbStream=${usbStream != null} fd=${usbStream?.fd}")
-            val route = ensurePlaybackLocked(descriptor, probe, usbOutputs).getOrThrow()
-            trace?.mark("route resolved backend=${route.backend}")
+            trace?.mark("soundcheck routing before playback USB route")
             when (val routing = routingBeforeSoundcheckLocked(dir, metadata)) {
                 RoutingHookResult.Cancelled ->
                     throw IllegalStateException("Soundcheck routing cancelled")
@@ -752,6 +764,19 @@ class MixerSessionController(
                     throw IllegalStateException(routing.message)
                 else -> Unit
             }
+            val ui = _state.value
+            val usbOutputs = maxPlaybackChannelsFromProbe(probe).coerceAtLeast(1)
+            trace?.mark("ensurePlaybackRoute usbStream=${usbStream != null} fd=${usbStream?.fd}")
+            val route = ensurePlaybackLocked(descriptor, probe, usbOutputs).getOrThrow()
+            trace?.mark("route resolved backend=${route.backend}")
+            when (val routingRetry = routingAfterSoundcheckPlaybackStartedLocked()) {
+                RoutingHookResult.Cancelled ->
+                    throw IllegalStateException("Soundcheck routing cancelled")
+                is RoutingHookResult.Failed ->
+                    throw IllegalStateException(routingRetry.message)
+                else -> Unit
+            }
+            trace?.mark("soundcheck routing confirmed with USB route open")
             val mixContext = PlaybackMixContext(
                 appMode = ui.appMode,
                 sessionChannelCount = metadata.channels.size,
@@ -828,9 +853,10 @@ class MixerSessionController(
         } else {
             player.suspendAndAwait()
             trace?.mark("suspend complete (native engine kept warm)")
-            if (restoreRouting) {
-                RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
-            }
+        }
+        if (restoreRouting) {
+            quiesceUsbBeforeRoutingLocked()
+            RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
         }
         if (!skipStateUpdate) {
             _state.update {
@@ -1037,11 +1063,7 @@ class MixerSessionController(
                 var recordingStarted = false
                 captureMutex.withLock {
                     withContext(Dispatchers.IO) {
-                        if (!captureEngine.isCaptureActive) {
-                            ensureCapture(descriptor, probe).getOrThrow()
-                        } else {
-                            syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
-                        }
+                        quiesceUsbBeforeRoutingLocked()
                         when (val routing = routingBeforeRecordLocked()) {
                             RoutingHookResult.Cancelled -> return@withContext
                             is RoutingHookResult.Failed -> {
@@ -1049,6 +1071,11 @@ class MixerSessionController(
                                 return@withContext
                             }
                             else -> Unit
+                        }
+                        if (!captureEngine.isCaptureActive) {
+                            ensureCapture(descriptor, probe).getOrThrow()
+                        } else {
+                            syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
                         }
                         val writePlan = org.openmultitrack.app.data.RecordingWritePlan.create(
                             storageResolver,
@@ -1197,7 +1224,14 @@ class MixerSessionController(
     fun stopRecording(restoreRouting: Boolean = true) {
         scope.launch {
             val session = captureMutex.withLock {
-                withContext(Dispatchers.IO) { captureEngine.stopRecording() }
+                withContext(Dispatchers.IO) {
+                    val ended = captureEngine.stopRecording()
+                    if (restoreRouting) {
+                        quiesceUsbBeforeRoutingLocked()
+                        RoutingAutomationBridge.hooks?.afterRecordRestore()
+                    }
+                    ended
+                }
             }
             settings.clearActiveRecording()
             releaseRecordingWakeLock()
@@ -1215,9 +1249,6 @@ class MixerSessionController(
             syncVuMeterCapture()
             if (_state.value.appMode.isPlaybackMode) {
                 refreshSoundcheckLibrary()
-            }
-            if (restoreRouting) {
-                RoutingAutomationBridge.hooks?.afterRecordRestore()
             }
             AudioSessionBridge.rebuildNotification()
         }
@@ -1419,6 +1450,7 @@ class MixerSessionController(
                     trace.mark("suspend complete (native engine kept warm)")
                 }
                 if (restoreRouting) {
+                    quiesceUsbBeforeRoutingLocked()
                     RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
                 }
             }
@@ -1435,6 +1467,12 @@ class MixerSessionController(
         val prof = profile ?: return RoutingHookResult.Skipped
         val trackChannels = SoundcheckTrackChannels.indicesWithTracks(dir, metadata)
         return RoutingAutomationBridge.hooks?.beforeSoundcheckApply(prof, trackChannels)
+            ?: RoutingHookResult.Skipped
+    }
+
+    private suspend fun routingAfterSoundcheckPlaybackStartedLocked(): RoutingHookResult {
+        val prof = profile ?: return RoutingHookResult.Skipped
+        return RoutingAutomationBridge.hooks?.afterSoundcheckPlaybackStarted(prof)
             ?: RoutingHookResult.Skipped
     }
 

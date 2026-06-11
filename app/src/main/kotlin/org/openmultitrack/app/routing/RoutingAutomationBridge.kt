@@ -11,6 +11,7 @@ interface RoutingAutomationHooks {
     suspend fun beforeRecordApply(profile: MixerProfile, armedChannels: Set<Int>): RoutingHookResult
     suspend fun afterRecordRestore()
     suspend fun beforeSoundcheckApply(profile: MixerProfile, trackChannels: Set<Int>): RoutingHookResult
+    suspend fun afterSoundcheckPlaybackStarted(profile: MixerProfile): RoutingHookResult
     suspend fun afterSoundcheckRestore()
     suspend fun onStartupPendingRestore()
 }
