@@ -3,7 +3,6 @@ package org.openmultitrack.app.service
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 import org.openmultitrack.domain.session.AppMode
-import org.openmultitrack.sessionio.session.SessionTrackmark
 
 class PlaybackNotificationTransportTest {
     @Test
@@ -22,14 +21,13 @@ class PlaybackNotificationTransportTest {
     }
 
     @Test
-    fun soundcheckWithChapters_usesStandardSkipActions() {
+    fun playbackModes_alwaysExposeSkipActions() {
         val session = MixerSessionUiState(
             mixerId = "m1",
-            appMode = AppMode.VIRTUAL_SOUNDCHECK,
+            appMode = AppMode.SIMPLE_PLAY,
             isPlaying = true,
             playbackPositionSec = 1f,
             playbackDurationSec = 60f,
-            trackmarks = listOf(SessionTrackmark(index = 1, startSec = 5f, title = "A")),
         )
         val snap = PlaybackNotificationTransport.snapshot(session)
         assertThat(snap.standardActions and android.support.v4.media.session.PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS)

@@ -489,19 +489,24 @@ class MixerSessionController(
 
     fun seekToPreviousTrackmark() {
         val marks = _state.value.trackmarks.sortedBy { it.startSec }
-        if (marks.isEmpty()) return
         val pos = _state.value.playbackPositionSec
-        val target = marks.lastOrNull { it.startSec < pos - 0.25f }?.startSec
-            ?: marks.first().startSec
+        val target = if (marks.isEmpty()) {
+            0f
+        } else {
+            marks.lastOrNull { it.startSec < pos - 0.25f }?.startSec ?: marks.first().startSec
+        }
         seekSoundcheck(target)
     }
 
     fun seekToNextTrackmark() {
         val marks = _state.value.trackmarks.sortedBy { it.startSec }
-        if (marks.isEmpty()) return
         val pos = _state.value.playbackPositionSec
-        val target = marks.firstOrNull { it.startSec > pos + 0.25f }?.startSec
-            ?: marks.last().startSec
+        val duration = _state.value.playbackDurationSec
+        val target = if (marks.isEmpty()) {
+            duration.coerceAtLeast(0f)
+        } else {
+            marks.firstOrNull { it.startSec > pos + 0.25f }?.startSec ?: marks.last().startSec
+        }
         seekSoundcheck(target)
     }
 
@@ -832,18 +837,6 @@ class MixerSessionController(
             windowSec = history,
             peaksPerSecond = CaptureSessionEngine.peaksPerSecondForWindow(history),
         )
-        _state.update { s ->
-            if (s.recordViewFollowPlayhead) {
-                val displayWindow = recordWaveformDisplayWindowSec()
-                val maxWindow = org.openmultitrack.app.ui.daw.RecordViewLayout.maxWindowSec(
-                    history,
-                    s.recordElapsedSec,
-                )
-                s.copy(recordViewWindowSec = displayWindow.coerceIn(1f, maxWindow))
-            } else {
-                s
-            }
-        }
     }
 
     fun setRecordView(viewStartSec: Float, viewWindowSec: Float) {
@@ -871,8 +864,10 @@ class MixerSessionController(
         val s = _state.value
         val history = recordWaveformHistorySec()
         val currentWindow = effectiveRecordViewWindow(s)
-        val maxWindow = org.openmultitrack.app.ui.daw.RecordViewLayout.maxWindowSec(history, s.recordElapsedSec)
-        val newWindow = (currentWindow / scale).coerceIn(1f, maxWindow)
+        val newWindow = org.openmultitrack.app.ui.daw.RecordViewLayout.clampWindow(
+            currentWindow / scale,
+            history,
+        )
         setRecordViewWindow(newWindow)
     }
 
@@ -883,18 +878,15 @@ class MixerSessionController(
     private fun effectiveRecordViewWindow(s: MixerSessionUiState): Float {
         val history = recordWaveformHistorySec()
         val displayDefault = recordWaveformDisplayWindowSec()
-        val maxWindow = org.openmultitrack.app.ui.daw.RecordViewLayout.maxWindowSec(history, s.recordElapsedSec)
-        return s.recordViewWindowSec.takeIf { it > 0f }?.coerceIn(1f, maxWindow) ?: displayDefault.coerceIn(1f, maxWindow)
+        val window = s.recordViewWindowSec.takeIf { it > 0f } ?: displayDefault
+        return org.openmultitrack.app.ui.daw.RecordViewLayout.clampWindow(window, history)
     }
 
     private fun withRecordViewFollowPlayhead(s: MixerSessionUiState, elapsedSec: Float): MixerSessionUiState {
         if (!s.recordViewFollowPlayhead) return s
         val window = effectiveRecordViewWindow(s)
         val start = org.openmultitrack.app.ui.daw.RecordViewLayout.anchoredStartSec(elapsedSec, window)
-        return s.copy(
-            recordViewStartSec = start,
-            recordViewWindowSec = window,
-        )
+        return s.copy(recordViewStartSec = start)
     }
 
     private fun resetRecordViewAfterStop() {
@@ -1012,12 +1004,9 @@ class MixerSessionController(
                         warningMessage = null,
                         lastRecordingPath = sessionDir?.absolutePath ?: it.lastRecordingPath,
                         recordViewStartSec = 0f,
-                        recordViewWindowSec = bufferWindow.coerceIn(
-                            1f,
-                            org.openmultitrack.app.ui.daw.RecordViewLayout.maxWindowSec(
-                                recordWaveformHistorySec(),
-                                0f,
-                            ),
+                        recordViewWindowSec = org.openmultitrack.app.ui.daw.RecordViewLayout.clampWindow(
+                            bufferWindow,
+                            recordWaveformHistorySec(),
                         ),
                         recordViewFollowPlayhead = true,
                         recordStartedAtEpochMs = startedAt,

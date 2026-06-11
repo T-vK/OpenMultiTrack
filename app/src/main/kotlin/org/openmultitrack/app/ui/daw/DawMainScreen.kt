@@ -896,8 +896,10 @@ private fun ChannelStripList(
                 RecordViewLayout.MIN_HISTORY_SEC,
                 RecordViewLayout.MAX_HISTORY_SEC,
             )
-            val maxWindow = RecordViewLayout.maxWindowSec(history, elapsedState)
-            gestureViewWindow = (gestureViewWindow / zoomChange).coerceIn(1f, maxWindow)
+            gestureViewWindow = RecordViewLayout.clampWindow(
+                gestureViewWindow / zoomChange,
+                history,
+            )
         }
         LaunchedEffect(transformState.isTransformInProgress) {
             if (!transformState.isTransformInProgress && gestureActive) {

@@ -80,7 +80,7 @@ object PlaybackNotificationTransport {
                 android.support.v4.media.session.PlaybackStateCompat.ACTION_PLAY or
                 android.support.v4.media.session.PlaybackStateCompat.ACTION_PLAY_PAUSE
         }
-        if (session.appMode != AppMode.SIMPLE_PLAY && session.trackmarks.isNotEmpty()) {
+        if (session.appMode.isPlaybackMode) {
             actions = actions or
                 android.support.v4.media.session.PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
                 android.support.v4.media.session.PlaybackStateCompat.ACTION_SKIP_TO_NEXT

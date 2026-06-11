@@ -260,12 +260,17 @@ class AudioSessionService : Service() {
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val recordingColor = getColor(R.color.notification_recording)
             manager.createNotificationChannel(
                 NotificationChannel(
                     CHANNEL_RECORDING,
                     getString(R.string.notification_channel_recording),
                     NotificationManager.IMPORTANCE_DEFAULT,
-                ).apply { setShowBadge(false) },
+                ).apply {
+                    setShowBadge(false)
+                    enableLights(true)
+                    lightColor = recordingColor
+                },
             )
             manager.createNotificationChannel(
                 NotificationChannel(

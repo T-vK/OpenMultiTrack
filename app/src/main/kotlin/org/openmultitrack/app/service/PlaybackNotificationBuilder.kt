@@ -7,7 +7,6 @@ import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import org.openmultitrack.app.MainActivity
 import org.openmultitrack.app.R
-import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.isPlaybackMode
 
 /** Media-style player notification backed by [PlaybackMediaNotification]. */
@@ -97,17 +96,14 @@ object PlaybackNotificationBuilder {
             actionIndex++
         }
         if (session?.appMode?.isPlaybackMode == true) {
-            val showChapters = session.appMode != AppMode.SIMPLE_PLAY && session.trackmarks.isNotEmpty()
-            if (showChapters) {
-                addTracked(
-                    broadcastAction(
-                        13,
-                        SessionTransportReceiver.ACTION_PREVIOUS,
-                        context.getString(R.string.notification_action_previous),
-                        android.R.drawable.ic_media_previous,
-                    ),
-                )
-            }
+            addTracked(
+                broadcastAction(
+                    13,
+                    SessionTransportReceiver.ACTION_PREVIOUS,
+                    context.getString(R.string.notification_action_previous),
+                    android.R.drawable.ic_media_previous,
+                ),
+            )
             val playLabel = if (session.isPlaying) {
                 context.getString(R.string.notification_action_pause)
             } else {
@@ -126,16 +122,14 @@ object PlaybackNotificationBuilder {
                     playIcon,
                 ),
             )
-            if (showChapters) {
-                addTracked(
-                    broadcastAction(
-                        15,
-                        SessionTransportReceiver.ACTION_NEXT,
-                        context.getString(R.string.notification_action_next),
-                        android.R.drawable.ic_media_next,
-                    ),
-                )
-            }
+            addTracked(
+                broadcastAction(
+                    15,
+                    SessionTransportReceiver.ACTION_NEXT,
+                    context.getString(R.string.notification_action_next),
+                    android.R.drawable.ic_media_next,
+                ),
+            )
             addTracked(
                 broadcastAction(
                     16,

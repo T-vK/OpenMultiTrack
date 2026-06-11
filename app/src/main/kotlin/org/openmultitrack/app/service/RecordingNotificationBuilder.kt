@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import org.openmultitrack.app.MainActivity
 import org.openmultitrack.app.R
 
@@ -22,9 +23,12 @@ object RecordingNotificationBuilder {
             Intent(context, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val recordingColor = ContextCompat.getColor(context, R.color.notification_recording)
         val builder = NotificationCompat.Builder(context, AudioSessionService.CHANNEL_RECORDING)
             .setContentTitle(title)
-            .setSmallIcon(R.drawable.ic_notification)
+            .setSmallIcon(R.drawable.ic_notification_recording)
+            .setColor(recordingColor)
+            .setColorized(true)
             .setContentIntent(openIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

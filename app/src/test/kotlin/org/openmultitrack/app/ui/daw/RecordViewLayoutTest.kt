@@ -20,6 +20,17 @@ class RecordViewLayoutTest {
     }
 
     @Test
+    fun layoutKeepsConfiguredWindowWhenElapsedIsShort() {
+        val (start, window) = RecordViewLayout.layout(
+            elapsedSec = 2f,
+            viewWindowSec = 15f,
+            historySec = 120f,
+        )
+        assertEquals(0f, start, 0.001f)
+        assertEquals(15f, window, 0.001f)
+    }
+
+    @Test
     fun layoutClampsZoomOutToRetainedHistory() {
         val (start, window) = RecordViewLayout.layout(
             elapsedSec = 60f,
@@ -31,9 +42,8 @@ class RecordViewLayoutTest {
     }
 
     @Test
-    fun zoomOutNeverExceedsHistoryOrElapsed() {
-        assertEquals(15f, RecordViewLayout.maxWindowSec(historySec = 15f, elapsedSec = 60f), 0.001f)
-        assertEquals(60f, RecordViewLayout.maxWindowSec(historySec = 120f, elapsedSec = 60f), 0.001f)
-        assertEquals(120f, RecordViewLayout.maxWindowSec(historySec = 120f, elapsedSec = 300f), 0.001f)
+    fun zoomOutNeverExceedsHistory() {
+        assertEquals(15f, RecordViewLayout.maxWindowSec(historySec = 15f), 0.001f)
+        assertEquals(120f, RecordViewLayout.maxWindowSec(historySec = 120f), 0.001f)
     }
 }

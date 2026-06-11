@@ -3,6 +3,7 @@ package org.openmultitrack.app.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import org.openmultitrack.app.MainActivity
 import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.isPlaybackMode
 
@@ -14,7 +15,14 @@ class SessionTransportReceiver : BroadcastReceiver() {
         val ctrl = manager.getOrCreate(mixerId)
         when (action) {
             ACTION_PAUSE_RECORD -> ctrl.pauseRecording()
-            ACTION_STOP_RECORD -> ctrl.stopRecording()
+            ACTION_STOP_RECORD -> {
+                AudioSessionBridge.onNotificationStopRecord?.invoke(mixerId)
+                    ?: ctrl.stopRecording()
+                val openApp = Intent(context, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                }
+                context.startActivity(openApp)
+            }
             ACTION_TOGGLE_RECORD -> {
                 val session = ctrl.state.value
                 if (session.isRecording) ctrl.stopRecording() else ctrl.startRecording()
@@ -55,4 +63,6 @@ object AudioSessionBridge {
     var activeMixerId: () -> String? = { mixerManager?.activeMixerId?.value }
     var rebuildNotification: () -> Unit = {}
     var tickMediaProgress: (MixerSessionUiState?) -> Unit = {}
+    /** Invoked when the user stops recording from the notification (after bringing the app forward). */
+    var onNotificationStopRecord: ((mixerId: String) -> Unit)? = null
 }

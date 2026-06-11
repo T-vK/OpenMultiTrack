@@ -27,6 +27,7 @@ import org.openmultitrack.app.data.PostRecordBehavior
 import org.openmultitrack.app.data.MixerRoutingStore
 import org.openmultitrack.app.data.ScribbleStripCache
 import org.openmultitrack.app.remote.RemoteSnapshotMapper
+import org.openmultitrack.app.service.AudioSessionBridge
 import org.openmultitrack.app.service.AudioSessionClient
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.app.service.SoundcheckSessionItem
@@ -259,7 +260,17 @@ class MainViewModel(
             }
             attachRemoteControl()
             refreshUsbAndOutputs()
+            AudioSessionBridge.onNotificationStopRecord = { mixerId ->
+                onNotificationStopRecord(mixerId)
+            }
         }
+    }
+
+    fun onNotificationStopRecord(mixerId: String) {
+        if (_uiState.value.activeMixerId != mixerId) {
+            setActiveMixer(mixerId)
+        }
+        stopRecord(mixerId)
     }
 
     private fun isRemoteClient(): Boolean =
