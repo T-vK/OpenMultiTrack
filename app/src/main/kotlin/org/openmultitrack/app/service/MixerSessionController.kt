@@ -775,16 +775,22 @@ class MixerSessionController(
     }
 
     fun setRecordView(viewStartSec: Float, viewWindowSec: Float) {
+        setRecordViewWindow(viewWindowSec)
+    }
+
+    fun setRecordViewWindow(viewWindowSec: Float) {
         val bufferMax = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
         val elapsed = _state.value.recordElapsedSec
-        val maxWindow = max(bufferMax, elapsed).coerceAtLeast(1f)
-        val window = viewWindowSec.coerceIn(1f, maxWindow)
-        val maxStart = max(0f, elapsed - window)
+        val (start, window) = org.openmultitrack.app.ui.daw.RecordViewLayout.layout(
+            elapsedSec = elapsed,
+            viewWindowSec = viewWindowSec,
+            bufferMaxSec = bufferMax,
+        )
         _state.update {
             it.copy(
-                recordViewStartSec = viewStartSec.coerceIn(0f, maxStart),
+                recordViewStartSec = start,
                 recordViewWindowSec = window,
-                recordViewFollowPlayhead = false,
+                recordViewFollowPlayhead = true,
             )
         }
     }
@@ -792,12 +798,10 @@ class MixerSessionController(
     fun zoomRecordView(scale: Float, focalSec: Float) {
         val s = _state.value
         val bufferMax = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
-        val elapsed = s.recordElapsedSec
-        val maxWindow = max(bufferMax, elapsed).coerceAtLeast(1f)
         val currentWindow = effectiveRecordViewWindow(s)
+        val maxWindow = org.openmultitrack.app.ui.daw.RecordViewLayout.maxWindowSec(bufferMax, s.recordElapsedSec)
         val newWindow = (currentWindow / scale).coerceIn(1f, maxWindow)
-        val newStart = if (elapsed <= newWindow) 0f else elapsed - newWindow
-        setRecordView(newStart, newWindow)
+        setRecordViewWindow(newWindow)
     }
 
     fun panRecordView(deltaSec: Float) {
@@ -806,14 +810,15 @@ class MixerSessionController(
 
     private fun effectiveRecordViewWindow(s: MixerSessionUiState): Float {
         val buffer = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
-        val maxWindow = max(buffer, s.recordElapsedSec).coerceAtLeast(1f)
+        val maxWindow = org.openmultitrack.app.ui.daw.RecordViewLayout.maxWindowSec(buffer, s.recordElapsedSec)
         return s.recordViewWindowSec.takeIf { it > 0f }?.coerceIn(1f, maxWindow) ?: buffer
     }
 
     private fun withRecordViewFollowPlayhead(s: MixerSessionUiState, elapsedSec: Float): MixerSessionUiState {
         if (!s.recordViewFollowPlayhead) return s
+        val buffer = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
         val window = effectiveRecordViewWindow(s)
-        val start = if (elapsedSec <= window) 0f else elapsedSec - window
+        val start = org.openmultitrack.app.ui.daw.RecordViewLayout.anchoredStartSec(elapsedSec, window)
         return s.copy(
             recordViewStartSec = start,
             recordViewWindowSec = window,

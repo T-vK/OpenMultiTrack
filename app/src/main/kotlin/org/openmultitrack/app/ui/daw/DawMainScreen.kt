@@ -879,12 +879,7 @@ private fun ChannelStripList(
         val waveformAreaStart = innerPad + labelColumnWidth + labelGap
         var waveformWidthPx by remember { mutableFloatStateOf(0f) }
         var gestureActive by remember { mutableStateOf(false) }
-        var gestureViewStart by remember(recordViewStartSec, recordViewWindowSec) {
-            mutableFloatStateOf(recordViewStartSec)
-        }
-        var gestureViewWindow by remember(recordViewStartSec, recordViewWindowSec) {
-            mutableFloatStateOf(recordViewWindowSec)
-        }
+        var gestureViewWindow by remember { mutableFloatStateOf(recordViewWindowSec) }
         val elapsedState by rememberUpdatedState(recordElapsedSec)
         val bufferWindowState by rememberUpdatedState(recordWaveformWindowSec)
         val transformState = rememberTransformableState { zoomChange, _, _ ->
@@ -892,33 +887,29 @@ private fun ChannelStripList(
             if (zoomChange == 1f) return@rememberTransformableState
             gestureActive = true
             val bufferMax = bufferWindowState.coerceIn(5f, 120f)
-            val maxWindow = max(bufferMax, elapsedState).coerceAtLeast(1f)
-            val newWindow = (gestureViewWindow / zoomChange).coerceIn(1f, maxWindow)
-            gestureViewWindow = newWindow
-            gestureViewStart = if (elapsedState <= newWindow) 0f else elapsedState - newWindow
+            val maxWindow = RecordViewLayout.maxWindowSec(bufferMax, elapsedState)
+            gestureViewWindow = (gestureViewWindow / zoomChange).coerceIn(1f, maxWindow)
         }
         LaunchedEffect(transformState.isTransformInProgress) {
             if (!transformState.isTransformInProgress && gestureActive) {
                 gestureActive = false
-                onSetRecordView(gestureViewStart, gestureViewWindow)
+                onSetRecordView(
+                    RecordViewLayout.anchoredStartSec(elapsedState, gestureViewWindow),
+                    gestureViewWindow,
+                )
             }
         }
-        LaunchedEffect(recordViewStartSec, recordViewWindowSec) {
+        LaunchedEffect(recordViewWindowSec) {
             if (!gestureActive && !transformState.isTransformInProgress) {
-                gestureViewStart = recordViewStartSec
                 gestureViewWindow = recordViewWindowSec
             }
-        }
-        val displayViewStart = if (gestureActive || transformState.isTransformInProgress) {
-            gestureViewStart
-        } else {
-            recordViewStartSec
         }
         val displayViewWindow = if (gestureActive || transformState.isTransformInProgress) {
             gestureViewWindow
         } else {
             recordViewWindowSec
         }
+        val displayViewStart = RecordViewLayout.anchoredStartSec(recordElapsedSec, displayViewWindow)
 
         if (visibleStrips.isEmpty()) {
             Column(
