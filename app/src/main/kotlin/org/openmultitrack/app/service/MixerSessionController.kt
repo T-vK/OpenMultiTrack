@@ -454,18 +454,7 @@ class MixerSessionController(
 
     fun stopSoundcheck(resetPosition: Boolean = true) {
         scope.launch {
-            stopPlaybackStatusUpdates()
-            _state.update {
-                it.copy(
-                    isPlaying = false,
-                    transportState = TransportState.IDLE,
-                    playbackPositionSec = if (resetPosition) 0f else it.playbackPositionSec,
-                    soundcheckMeterLevels = emptyMap(),
-                )
-            }
-            captureMutex.withLock {
-                withContext(Dispatchers.IO) { player.stopAndAwait() }
-            }
+            finishPlaybackTransport(resetPosition = resetPosition)
         }
     }
 
@@ -484,6 +473,7 @@ class MixerSessionController(
                     player.seekToFrame(frame)
                 }
             }
+            AudioSessionBridge.rebuildNotification()
         }
     }
 
@@ -613,6 +603,7 @@ class MixerSessionController(
                     stopSoundcheckLocked(skipStateUpdate = true)
                 }
             }
+            AudioSessionBridge.rebuildNotification()
         }
     }
 
@@ -1300,34 +1291,68 @@ class MixerSessionController(
         }
     }
 
+    private suspend fun finishPlaybackTransport(
+        resetPosition: Boolean,
+        cancelStatusJob: Boolean = true,
+    ) {
+        if (cancelStatusJob) {
+            stopPlaybackStatusUpdates()
+        }
+        _state.update {
+            it.copy(
+                isPlaying = false,
+                transportState = TransportState.IDLE,
+                playbackPositionSec = if (resetPosition) 0f else it.playbackPositionSec,
+                soundcheckMeterLevels = emptyMap(),
+            )
+        }
+        captureMutex.withLock {
+            withContext(Dispatchers.IO) { player.stopAndAwait() }
+        }
+        lastMediaProgressSec = -1
+        AudioSessionBridge.rebuildNotification()
+    }
+
     private fun startPlaybackStatusUpdates(sampleRate: Int) {
         playbackStatusJob?.cancel()
         playbackStatusJob = scope.launch {
             var lastPosSec = -1f
             var idleChecks = 0
             var lastAdvanceMs = System.currentTimeMillis()
+            val endToleranceFrames = (sampleRate * PlaybackTransportPolicy.END_TOLERANCE_SEC)
+                .toLong()
+                .coerceAtLeast(1L)
             while (isActive) {
                 val st = player.status
                 val activelyPlaying = st.state == TransportState.PLAYING || player.isPlaying
+                val posSec = if (sampleRate > 0) {
+                    st.positionFrames.toFloat() / sampleRate
+                } else {
+                    _state.value.playbackPositionSec
+                }
+                val durSec = if (sampleRate > 0) {
+                    st.durationFrames.toFloat() / sampleRate
+                } else {
+                    _state.value.playbackDurationSec
+                }
                 if (!activelyPlaying) {
                     idleChecks++
-                    if (idleChecks < 5) {
-                        delay(40)
+                    if (idleChecks < 2) {
+                        delay(16)
                         continue
                     }
-                    val finalPos = if (sampleRate > 0) {
-                        player.status.positionFrames.toFloat() / sampleRate
-                    } else {
-                        _state.value.playbackPositionSec
-                    }
-                    val durationSec = _state.value.playbackDurationSec
-                    val reachedEnd = durationSec > 0f && finalPos >= durationSec - 0.2f
+                    val durationSec = _state.value.playbackDurationSec.coerceAtLeast(durSec)
+                    val reachedEnd = PlaybackTransportPolicy.shouldFinishAtEnd(
+                        positionSec = posSec,
+                        durationSec = durationSec,
+                        loopEnabled = false,
+                    )
                     lastMediaProgressSec = -1
                     _state.update {
                         it.copy(
                             isPlaying = false,
                             transportState = TransportState.IDLE,
-                            playbackPositionSec = if (reachedEnd) 0f else finalPos,
+                            playbackPositionSec = if (reachedEnd) 0f else posSec,
                             soundcheckMeterLevels = emptyMap(),
                             warningMessage = if (reachedEnd) null else it.warningMessage,
                         )
@@ -1336,8 +1361,21 @@ class MixerSessionController(
                     break
                 }
                 idleChecks = 0
-                val posSec = if (sampleRate > 0) st.positionFrames.toFloat() / sampleRate else 0f
-                val durSec = if (sampleRate > 0) st.durationFrames.toFloat() / sampleRate else 0f
+                val loopEnabled = _state.value.soundcheckLoopEnabled
+                val reachedEnd = PlaybackTransportPolicy.shouldFinishAtEnd(
+                    positionFrames = st.positionFrames,
+                    durationFrames = st.durationFrames,
+                    loopEnabled = loopEnabled,
+                    toleranceFrames = endToleranceFrames,
+                ) || PlaybackTransportPolicy.shouldFinishAtEnd(
+                    positionSec = posSec,
+                    durationSec = durSec.coerceAtLeast(_state.value.playbackDurationSec),
+                    loopEnabled = loopEnabled,
+                )
+                if (reachedEnd) {
+                    finishPlaybackTransport(resetPosition = true, cancelStatusJob = false)
+                    break
+                }
                 if (posSec > lastPosSec + 0.02f) {
                     lastPosSec = posSec
                     lastAdvanceMs = System.currentTimeMillis()
@@ -1356,6 +1394,7 @@ class MixerSessionController(
                             )
                         }
                     }
+                    AudioSessionBridge.rebuildNotification()
                     break
                 }
                 _state.update { s ->

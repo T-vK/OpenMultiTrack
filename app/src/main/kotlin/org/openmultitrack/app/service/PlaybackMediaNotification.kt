@@ -73,6 +73,7 @@ class PlaybackMediaNotification(
         val snap = PlaybackNotificationTransport.snapshot(session)
         val display = PlaybackNotificationContent.resolve(context, session, mixerName)
         val chapters = session?.trackmarks?.isNotEmpty() == true
+        val positionBucket = (snap.positionMs / 1_000L).toInt()
         return listOf(
             display.sessionTitle,
             display.totalTimeLine,
@@ -82,6 +83,7 @@ class PlaybackMediaNotification(
             chapters,
             session?.isPlaying,
             session?.selectedSoundcheckDir,
+            positionBucket,
         ).hashCode()
     }
 
@@ -204,7 +206,6 @@ class PlaybackMediaNotification(
 
     private fun dispatchStopPlayback() {
         controller()?.stopSoundcheck()
-        AudioSessionBridge.rebuildNotification()
     }
 
     private fun dispatchNext() {
