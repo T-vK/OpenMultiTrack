@@ -45,12 +45,23 @@ class SoundcheckWaveformTest {
     }
 
     @Test
-    fun scalePeaksForLiveDisplay_usesMonotonicCeiling() {
+    fun scalePeaksForLiveDisplay_usesFrozenCeiling() {
         val loud = floatArrayOf(0.9f, 0.5f, 0.4f)
         val quiet = floatArrayOf(0.3f, 0.2f, 0.1f)
         val afterLoud = scalePeaksForLiveDisplay(loud, normalized = true, peakCeiling = 0f)
         val afterQuiet = scalePeaksForLiveDisplay(quiet, normalized = true, peakCeiling = 0.9f)
         assertThat(afterQuiet[0]).isWithin(0.01f).of(0.3f / 0.9f)
         assertThat(afterQuiet[1]).isGreaterThan(0.15f)
+    }
+
+    @Test
+    fun scalePeaksForLiveDisplay_laterLoudPeakDoesNotShrinkEarlierPeaks() {
+        val early = floatArrayOf(0.2f, 0.18f)
+        val scaledEarly = scalePeaksForLiveDisplay(early, normalized = true, peakCeiling = 0.2f)
+        val later = floatArrayOf(0.2f, 0.18f, 0.95f)
+        val scaledLater = scalePeaksForLiveDisplay(later, normalized = true, peakCeiling = 0.2f)
+        assertThat(scaledLater[0]).isWithin(0.001f).of(scaledEarly[0])
+        assertThat(scaledLater[1]).isWithin(0.001f).of(scaledEarly[1])
+        assertThat(scaledLater[2]).isWithin(0.001f).of(1f)
     }
 }

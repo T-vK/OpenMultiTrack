@@ -841,8 +841,8 @@ internal fun scalePeaksForDisplay(peaks: FloatArray, normalized: Boolean): Float
 }
 
 /**
- * Live recording display scaling uses a monotonic peak ceiling so normalization does not
- * resurrect background gaps in already-recorded timeline columns when the window max drops.
+ * Live recording display scaling uses a session-frozen peak ceiling so already-drawn columns
+ * never rescale when a louder transient arrives later. Louder peaks clip to 1.0 instead.
  */
 internal fun scalePeaksForLiveDisplay(
     peaks: FloatArray,
@@ -852,7 +852,10 @@ internal fun scalePeaksForLiveDisplay(
     if (peaks.isEmpty()) return peaks
     val rawMax = peaks.max()
     if (rawMax <= 1e-6f) return peaks
-    val ceiling = maxOf(peakCeiling, rawMax).coerceAtLeast(1e-6f)
+    val ceiling = when {
+        peakCeiling > 1e-6f -> peakCeiling
+        else -> rawMax
+    }.coerceAtLeast(1e-6f)
     if (normalized) {
         return FloatArray(peaks.size) { i -> (peaks[i] / ceiling).coerceIn(0f, 1f) }
     }

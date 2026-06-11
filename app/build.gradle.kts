@@ -104,6 +104,7 @@ dependencies {
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+    androidTestImplementation(libs.androidx.compose.ui.test.manifest)
 
     testImplementation(libs.junit)
     testImplementation(libs.truth)
@@ -112,5 +113,6 @@ dependencies {
     androidTestImplementation(libs.kotlinx.coroutines.android)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.activity.compose)
     androidTestImplementation(libs.androidx.uiautomator)
 }

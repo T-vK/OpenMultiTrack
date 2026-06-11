@@ -1,9 +1,8 @@
 package org.openmultitrack.app.e2e
 
-import android.graphics.Bitmap
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -12,13 +11,15 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.openmultitrack.app.test.RequiresUsbDevice
 import org.openmultitrack.app.test.UsbDeviceRule
-import org.openmultitrack.app.ui.daw.assertLeftToRightWaveformGrowth
+import org.openmultitrack.app.ui.daw.RecordingProbeFrame
+import org.openmultitrack.app.ui.daw.assertRecordingStabilityProbe
+import org.openmultitrack.app.ui.daw.waveformRightEdgeX
 import org.openmultitrack.domain.remote.RemoteProtocol
 import org.openmultitrack.domain.session.AppMode
 
 /**
- * USB host e2e: while recording, waveform bars must appear left-to-right on screen.
- * Probes vertical-center pixels at second markers 1–9 on cropped screenshots.
+ * USB host e2e: while recording from XR18, the live waveform must grow left-to-right
+ * without interior columns regressing to background (real hardware, variable audio levels).
  */
 @RunWith(AndroidJUnit4::class)
 @RequiresUsbDevice(vendorId = E2eConfig.XR18_VENDOR_ID, productId = E2eConfig.XR18_PRODUCT_ID)
@@ -31,7 +32,8 @@ class HostLiveWaveformLeftToRightE2eTest {
 
     private var harness: E2eMixerHarness? = null
     private val peaksPerSec = RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC
-    private val capacitySlots = (15f * peaksPerSec).toInt()
+    private val windowSec = 15f
+    private val probeSeconds = 9
 
     @After
     fun tearDown() {
@@ -46,42 +48,52 @@ class HostLiveWaveformLeftToRightE2eTest {
             val ctrl = h.bindAndRegisterXr18()
             try {
                 ctrl.setAppMode(AppMode.MULTITRACK_RECORD)
-
-                val frames = linkedMapOf<Int, ImageBitmap>()
-                val peakCounts = linkedMapOf<Int, Int>()
                 delay(400)
                 appRule.runOnActivity { }
-                frames[0] = captureWaveformStrip().asImageBitmap()
-                peakCounts[0] = 0
 
                 ctrl.startRecording()
                 E2eWait.untilRecording(ctrl, timeoutMs = 60_000)
-                for (second in 1..9) {
+
+                val frames = ArrayList<RecordingProbeFrame>(probeSeconds)
+                for (second in 1..probeSeconds) {
                     awaitRecordingElapsed(ctrl, second.toFloat())
                     awaitWaveformPeakCount(ctrl, second * peaksPerSec)
                     val peaks = ctrl.state.value.waveformPeaks.values.firstOrNull()?.peaks?.size ?: 0
                     val strip = awaitWaveformStripAtSecond(
                         second = second,
                         elapsedSec = peaks / peaksPerSec.toFloat(),
-                        capacitySlots = capacitySlots,
+                        capacitySlots = (windowSec * peaksPerSec).toInt(),
                         peaksPerSec = peaksPerSec,
                         timeoutMs = 20_000,
                     )
-                    frames[second] = strip.asImageBitmap()
-                    peakCounts[second] = peaks
+                    frames.add(
+                        RecordingProbeFrame(
+                            checkIndex = second - 1,
+                            elapsedSec = second.toFloat(),
+                            peakCount = peaks,
+                            image = strip.asImageBitmap(),
+                        ),
+                    )
                 }
 
-                assertLeftToRightWaveformGrowth(
-                    framesByElapsedSec = frames,
-                    capacitySlots = capacitySlots,
-                    peaksPerSec = peaksPerSec,
-                    windowSec = 15f,
-                    maxSecond = 9,
+                assertRecordingStabilityProbe(
+                    frames = frames,
+                    windowSec = windowSec,
+                    checksPerSec = 1,
+                    probeSec = probeSeconds,
                     requireDenseInterior = false,
-                    peakCountByFrame = peakCounts,
                 )
+
+                var previousRight = -1
+                frames.forEach { frame ->
+                    val right = waveformRightEdgeX(frame.image)
+                    if (previousRight >= 0) {
+                        assertThat(right).isAtLeast(previousRight)
+                    }
+                    previousRight = right
+                }
+                assertThat(previousRight).isGreaterThan(24)
             } finally {
-                // Avoid native libusb teardown crash; harness tearDown uses clientUnbindOnly().
                 runCatching { ctrl.stopRecording() }
             }
         }
@@ -106,5 +118,4 @@ class HostLiveWaveformLeftToRightE2eTest {
         }
     }
 
-    private fun captureWaveformStrip(): Bitmap = cropFirstWaveformStrip(captureDeviceScreen())
 }
