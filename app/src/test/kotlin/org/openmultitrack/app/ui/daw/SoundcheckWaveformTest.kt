@@ -6,6 +6,15 @@ import org.openmultitrack.sessionio.wav.SessionWaveformOverview
 
 class SoundcheckWaveformTest {
     @Test
+    fun upsamplePeaksLinear_fillsTargetWidth() {
+        val source = floatArrayOf(0f, 1f)
+        val upsampled = upsamplePeaksLinear(source, targetCount = 5)
+        assertThat(upsampled.size).isEqualTo(5)
+        assertThat(upsampled.first()).isWithin(0.001f).of(0f)
+        assertThat(upsampled.last()).isWithin(0.001f).of(1f)
+    }
+
+    @Test
     fun visiblePeaksForViewport_downsamplesToPixelWidth() {
         val peaks = FloatArray(400) { (it % 10) / 10f }
         val overview = SessionWaveformOverview(

@@ -57,6 +57,8 @@
             android:name=".service.SessionTransportReceiver"
             android:exported="false">
             <intent-filter>
+                <action android:name="org.openmultitrack.NOTIFICATION_PAUSE_RECORD" />
+                <action android:name="org.openmultitrack.NOTIFICATION_STOP_RECORD" />
                 <action android:name="org.openmultitrack.NOTIFICATION_TOGGLE_RECORD" />
                 <action android:name="org.openmultitrack.NOTIFICATION_TOGGLE_PLAYBACK" />
                 <action android:name="org.openmultitrack.NOTIFICATION_STOP_PLAYBACK" />

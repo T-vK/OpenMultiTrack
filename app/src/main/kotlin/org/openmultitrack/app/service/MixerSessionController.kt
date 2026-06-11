@@ -92,6 +92,7 @@ data class MixerSessionUiState(
     val captureChannelCount: Int = 0,
     val playbackChannelCount: Int = 0,
     val recordElapsedSec: Float = 0f,
+    val recordStartedAtEpochMs: Long = 0L,
     val recordViewStartSec: Float = 0f,
     val recordViewWindowSec: Float = 0f,
     val recordViewFollowPlayhead: Boolean = true,
@@ -142,6 +143,7 @@ class MixerSessionController(
     private var playbackStatusJob: Job? = null
     private var profile: MixerProfile? = null
     private var lastVuLogNs = 0L
+    private var lastMediaProgressSec = -1
     private var recordingWakeLock: PowerManager.WakeLock? = null
     private var routingConfig: MixerRoutingConfig = MixerRoutingConfig()
     private var cachedSoundcheckDir: String? = null
@@ -545,6 +547,7 @@ class MixerSessionController(
             }
             scope.launch(Dispatchers.IO) {
                 captureMutex.withLock { stopSoundcheckLocked(skipStateUpdate = true) }
+                AudioSessionBridge.rebuildNotification()
             }
         } else {
             _state.update {
@@ -727,6 +730,7 @@ class MixerSessionController(
             )
         }
         startPlaybackStatusUpdates(metadata.sampleRate)
+        AudioSessionBridge.rebuildNotification()
     }
 
     private suspend fun restartSoundcheckPlaybackLocked() {
@@ -990,6 +994,8 @@ class MixerSessionController(
                 }
                 acquireRecordingWakeLock()
                 val bufferWindow = recordWaveformDisplayWindowSec()
+                val startedAt = captureEngine.recordingStartedAtEpochMs() ?: System.currentTimeMillis()
+                lastMediaProgressSec = -1
                 _state.update {
                     it.copy(
                         isRecording = true,
@@ -1006,9 +1012,11 @@ class MixerSessionController(
                             ),
                         ),
                         recordViewFollowPlayhead = true,
+                        recordStartedAtEpochMs = startedAt,
                     )
                 }
                 startCaptureUiUpdates()
+                AudioSessionBridge.rebuildNotification()
             } catch (e: Exception) {
                 OmtLog.e("MixerSession", "startRecording failed", e)
                 _state.update { it.copy(statusMessage = e.message) }
@@ -1041,6 +1049,8 @@ class MixerSessionController(
                     sessionDir.absolutePath,
                 )
                 acquireRecordingWakeLock()
+                val startedAt = captureEngine.recordingStartedAtEpochMs() ?: meta.startedAtEpochMs
+                lastMediaProgressSec = -1
                 _state.update {
                     it.copy(
                         isRecording = true,
@@ -1048,9 +1058,11 @@ class MixerSessionController(
                         statusMessage = "Recording resumed",
                         warningMessage = null,
                         lastRecordingPath = sessionDir.absolutePath,
+                        recordStartedAtEpochMs = startedAt,
                     )
                 }
                 startCaptureUiUpdates()
+                AudioSessionBridge.rebuildNotification()
             } catch (e: Exception) {
                 OmtLog.e("MixerSession", "resumeRecording failed", e)
                 _state.update { it.copy(statusMessage = e.message) }
@@ -1083,6 +1095,28 @@ class MixerSessionController(
         }
     }
 
+    fun pauseRecording() {
+        scope.launch {
+            val session = captureMutex.withLock {
+                withContext(Dispatchers.IO) { captureEngine.pauseRecording() }
+            }
+            releaseRecordingWakeLock()
+            lastMediaProgressSec = -1
+            _state.update {
+                it.copy(
+                    isRecording = false,
+                    transportState = TransportState.IDLE,
+                    lastRecordingPath = session?.filePath ?: it.lastRecordingPath,
+                    statusMessage = "Recording paused",
+                    recordStartedAtEpochMs = 0L,
+                )
+            }
+            resetRecordViewAfterStop()
+            syncVuMeterCapture()
+            AudioSessionBridge.rebuildNotification()
+        }
+    }
+
     fun stopRecording() {
         scope.launch {
             val session = captureMutex.withLock {
@@ -1090,12 +1124,14 @@ class MixerSessionController(
             }
             settings.clearActiveRecording()
             releaseRecordingWakeLock()
+            lastMediaProgressSec = -1
             _state.update {
                 it.copy(
                     isRecording = false,
                     transportState = TransportState.IDLE,
                     lastRecordingPath = session?.filePath ?: it.lastRecordingPath,
                     statusMessage = session?.let { s -> "Saved → ${s.filePath}" } ?: "Stopped",
+                    recordStartedAtEpochMs = 0L,
                 )
             }
             resetRecordViewAfterStop()
@@ -1103,6 +1139,7 @@ class MixerSessionController(
             if (_state.value.appMode.isPlaybackMode) {
                 refreshSoundcheckLibrary()
             }
+            AudioSessionBridge.rebuildNotification()
         }
     }
 
@@ -1287,6 +1324,7 @@ class MixerSessionController(
                     }
                     val durationSec = _state.value.playbackDurationSec
                     val reachedEnd = durationSec > 0f && finalPos >= durationSec - 0.2f
+                    lastMediaProgressSec = -1
                     _state.update {
                         it.copy(
                             isPlaying = false,
@@ -1296,6 +1334,7 @@ class MixerSessionController(
                             warningMessage = if (reachedEnd) null else it.warningMessage,
                         )
                     }
+                    AudioSessionBridge.rebuildNotification()
                     break
                 }
                 idleChecks = 0
@@ -1329,6 +1368,11 @@ class MixerSessionController(
                         playbackDurationSec = durSec.coerceAtLeast(s.playbackDurationSec),
                     )
                 }
+                val mediaSec = posSec.toInt()
+                if (mediaSec != lastMediaProgressSec) {
+                    lastMediaProgressSec = mediaSec
+                    AudioSessionBridge.tickMediaProgress(_state.value)
+                }
                 delay(50)
             }
         }
@@ -1342,7 +1386,10 @@ class MixerSessionController(
         cachedSoundcheckDir = sessionDir
         cachedSoundcheckMetadata = metadata
         restoreSoundcheckStripsFromMetadata(metadata)
-        val windowSec = settings.playbackWaveformWindowSec.coerceIn(30f, 600f)
+        val windowSec = org.openmultitrack.app.ui.daw.SoundcheckViewLayout.initialWindowSec(
+            settings.playbackWaveformWindowSec,
+            durationSec,
+        )
         val channelTotal = metadata.channels.size
         val keepTransport = _state.value.isPlaying && _state.value.selectedSoundcheckDir == sessionDir
         val trackmarks = if (settings.chapterSupportEnabled) {
@@ -1545,11 +1592,17 @@ class MixerSessionController(
                         when {
                             s.isRecording -> {
                                 val elapsed = captureEngine.recordElapsedSec()
-                                withRecordViewFollowPlayhead(s, elapsed).copy(
+                                val updated = withRecordViewFollowPlayhead(s, elapsed).copy(
                                     waveformPeaks = captureEngine.waveformSnapshots(normalize = false),
                                     recordElapsedSec = elapsed,
                                     captureMeterLevels = levels,
                                 )
+                                val mediaSec = elapsed.toInt()
+                                if (mediaSec != lastMediaProgressSec) {
+                                    lastMediaProgressSec = mediaSec
+                                    AudioSessionBridge.tickMediaProgress(updated)
+                                }
+                                updated
                             }
                             s.isMonitoring -> s.copy(
                                 captureMeterLevels = levels,

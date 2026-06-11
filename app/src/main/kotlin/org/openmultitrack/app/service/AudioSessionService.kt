@@ -13,13 +13,8 @@ import android.os.Build
 import android.os.IBinder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import org.openmultitrack.app.MainActivity
 import org.openmultitrack.app.R
 import org.openmultitrack.audio.OmtLog
@@ -35,7 +30,6 @@ class AudioSessionService : Service() {
     private lateinit var remoteControl: RemoteControlManager
     private lateinit var mediaNotification: SessionMediaNotification
     private val notificationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var notificationRefreshJob: Job? = null
     private var lastNotificationSignature: Int? = null
 
     @Volatile
@@ -68,14 +62,16 @@ class AudioSessionService : Service() {
         remoteControl.applyRole(settings.remoteRole)
         AudioSessionBridge.mixerManager = mixerManager
         AudioSessionBridge.activeMixerId = { mixerManager.activeMixerId.value }
-        AudioSessionBridge.refreshNotification = { refreshForegroundNotification(forceRebuild = true) }
+        AudioSessionBridge.rebuildNotification = { refreshForegroundNotification(forceRebuild = true) }
+        AudioSessionBridge.tickMediaProgress = { session ->
+            if (isInForeground) mediaNotification.updateProgress(session)
+        }
         mediaNotification = SessionMediaNotification(this)
         createNotificationChannel()
         OmtLog.i("Service", "AudioSessionService created")
     }
 
     override fun onDestroy() {
-        notificationRefreshJob?.cancel()
         notificationScope.cancel()
         if (::mediaNotification.isInitialized) {
             mediaNotification.release()
@@ -122,7 +118,6 @@ class AudioSessionService : Service() {
                     startForeground(NOTIFICATION_ID, notification)
                 }
                 isInForeground = true
-                startNotificationRefresh()
             } else {
                 refreshForegroundNotification(forceRebuild = true)
             }
@@ -149,16 +144,6 @@ class AudioSessionService : Service() {
         }
     }
 
-    private fun startNotificationRefresh() {
-        if (notificationRefreshJob?.isActive == true) return
-        notificationRefreshJob = notificationScope.launch {
-            while (isActive) {
-                refreshForegroundNotification(forceRebuild = false)
-                delay(1000)
-            }
-        }
-    }
-
     private fun activeSession(): MixerSessionUiState? {
         val activeId = mixerManager.activeMixerId.value ?: return null
         return mixerManager.getOrCreate(activeId).state.value
@@ -178,7 +163,6 @@ class AudioSessionService : Service() {
     }
 
     fun stopForegroundAndSelf() {
-        notificationRefreshJob?.cancel()
         lastNotificationSignature = null
         isInForeground = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -195,15 +179,17 @@ class AudioSessionService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 getString(R.string.notification_channel_name),
-                NotificationManager.IMPORTANCE_LOW,
-            )
+                NotificationManager.IMPORTANCE_DEFAULT,
+            ).apply {
+                setShowBadge(false)
+            }
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
         }
     }
 
     companion object {
-        const val CHANNEL_ID = "audio_session"
+        const val CHANNEL_ID = "audio_session_transport"
         const val NOTIFICATION_ID = 1001
         const val ACTION_STOP_ALL = "org.openmultitrack.STOP_AUDIO_SESSION"
         const val EXTRA_STATUS = "status"

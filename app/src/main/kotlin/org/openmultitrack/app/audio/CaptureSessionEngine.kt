@@ -119,6 +119,8 @@ class CaptureSessionEngine(
 
     fun isSyntheticCapture(): Boolean = syntheticGenerator != null
 
+    fun recordingStartedAtEpochMs(): Long? = recordingStartedAtEpochMs
+
     fun recordElapsedSec(): Float =
         if (sampleRate > 0) framesWritten.toFloat() / sampleRate else 0f
 
@@ -313,7 +315,15 @@ class CaptureSessionEngine(
         )
     }
 
+    suspend fun pauseRecording(): RecordingSession? = lifecycleMutex.withLock {
+        closeRecordingWritersLocked(markComplete = false)
+    }
+
     suspend fun stopRecording(): RecordingSession? = lifecycleMutex.withLock {
+        closeRecordingWritersLocked(markComplete = true)
+    }
+
+    private suspend fun closeRecordingWritersLocked(markComplete: Boolean): RecordingSession? {
         val dir = sessionDir
         val config = recordingConfig
         val resilient = sessionWriter
@@ -330,15 +340,19 @@ class CaptureSessionEngine(
         recordingStartedAtEpochMs = null
         lastMetadataPersistFrames = 0
 
-        if (dir != null && config != null) {
-            SessionMetadata.read(dir)?.markComplete(dir)
+        if (dir != null) {
+            if (markComplete) {
+                SessionMetadata.read(dir)?.markComplete(dir)
+            } else {
+                SessionMetadata.read(dir)?.copy(incomplete = true)?.writeTo(dir)
+            }
         }
 
         if (!needsCapture()) {
             stopCaptureInternalLocked()
         }
 
-        dir?.let {
+        return dir?.let {
             RecordingSession(
                 filePath = it.absolutePath,
                 channelCount = channelCount,

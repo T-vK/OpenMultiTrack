@@ -13,6 +13,8 @@ class SessionTransportReceiver : BroadcastReceiver() {
         val mixerId = AudioSessionBridge.activeMixerId() ?: manager.activeMixerId.value ?: return
         val ctrl = manager.getOrCreate(mixerId)
         when (action) {
+            ACTION_PAUSE_RECORD -> ctrl.pauseRecording()
+            ACTION_STOP_RECORD -> ctrl.stopRecording()
             ACTION_TOGGLE_RECORD -> {
                 val session = ctrl.state.value
                 if (session.isRecording) ctrl.stopRecording() else ctrl.startRecording()
@@ -32,10 +34,12 @@ class SessionTransportReceiver : BroadcastReceiver() {
                 )
             }
         }
-        AudioSessionBridge.refreshNotification()
+        AudioSessionBridge.rebuildNotification()
     }
 
     companion object {
+        const val ACTION_PAUSE_RECORD = "org.openmultitrack.NOTIFICATION_PAUSE_RECORD"
+        const val ACTION_STOP_RECORD = "org.openmultitrack.NOTIFICATION_STOP_RECORD"
         const val ACTION_TOGGLE_RECORD = "org.openmultitrack.NOTIFICATION_TOGGLE_RECORD"
         const val ACTION_TOGGLE_PLAYBACK = "org.openmultitrack.NOTIFICATION_TOGGLE_PLAYBACK"
         const val ACTION_STOP_PLAYBACK = "org.openmultitrack.NOTIFICATION_STOP_PLAYBACK"
@@ -49,5 +53,6 @@ class SessionTransportReceiver : BroadcastReceiver() {
 object AudioSessionBridge {
     var mixerManager: MultiMixerSessionManager? = null
     var activeMixerId: () -> String? = { mixerManager?.activeMixerId?.value }
-    var refreshNotification: () -> Unit = {}
+    var rebuildNotification: () -> Unit = {}
+    var tickMediaProgress: (MixerSessionUiState?) -> Unit = {}
 }

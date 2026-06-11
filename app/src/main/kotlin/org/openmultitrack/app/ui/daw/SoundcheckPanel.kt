@@ -783,7 +783,27 @@ internal fun visiblePeaksForViewport(
     val endIdx = ((viewStartSec + viewWindowSec) * pps).toInt().coerceIn(startIdx, peaks.size)
     if (endIdx <= startIdx) return FloatArray(0)
     val slice = peaks.copyOfRange(startIdx, endIdx)
-    return if (slice.size <= pixelWidth) slice else downsamplePeaksMax(slice, pixelWidth)
+    return when {
+        slice.size > pixelWidth -> downsamplePeaksMax(slice, pixelWidth)
+        slice.size < pixelWidth -> upsamplePeaksLinear(slice, pixelWidth)
+        else -> slice
+    }
+}
+
+internal fun upsamplePeaksLinear(source: FloatArray, targetCount: Int): FloatArray {
+    if (source.isEmpty() || targetCount <= 0) return FloatArray(0)
+    if (source.size >= targetCount) return source
+    if (source.size == 1) return FloatArray(targetCount) { source[0] }
+    val out = FloatArray(targetCount)
+    val scale = (source.size - 1).toFloat() / (targetCount - 1)
+    for (i in 0 until targetCount) {
+        val srcPos = i * scale
+        val i0 = srcPos.toInt().coerceIn(0, source.lastIndex)
+        val i1 = (i0 + 1).coerceAtMost(source.lastIndex)
+        val frac = srcPos - i0
+        out[i] = source[i0] * (1f - frac) + source[i1] * frac
+    }
+    return out
 }
 
 internal fun downsamplePeaksMax(source: FloatArray, targetCount: Int): FloatArray {

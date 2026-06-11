@@ -3,6 +3,7 @@ package org.openmultitrack.app.service
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import org.openmultitrack.app.MainActivity
@@ -32,10 +33,18 @@ object SessionNotificationBuilder {
             .setContentIntent(openIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setShowWhen(false)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+        if (session?.isRecording == true) {
+            val startedAt = session.recordStartedAtEpochMs.takeIf { it > 0L }
+                ?: (System.currentTimeMillis() - (session.recordElapsedSec * 1000f).toLong())
+            builder.setWhen(startedAt)
+                .setShowWhen(true)
+                .setUsesChronometer(true)
+        } else {
+            builder.setShowWhen(false)
+        }
         val compactActions = addTransportActions(context, builder, session)
         builder.setStyle(
             MediaStyle()
@@ -45,7 +54,6 @@ object SessionNotificationBuilder {
         return builder
     }
 
-    /** Static mode label — elapsed/position time is rendered by the system from [MediaSessionCompat]. */
     fun statusLine(session: MixerSessionUiState?): String = when {
         session == null -> "Audio session active"
         session.isRecording -> "Recording"
@@ -63,7 +71,12 @@ object SessionNotificationBuilder {
     ): IntArray {
         val compact = mutableListOf<Int>()
         var actionIndex = 0
-        fun action(requestCode: Int, action: String, label: String): NotificationCompat.Action {
+        fun broadcastAction(
+            requestCode: Int,
+            action: String,
+            label: String,
+            iconRes: Int,
+        ): NotificationCompat.Action {
             val intent = Intent(context, SessionTransportReceiver::class.java).setAction(action)
             val pi = PendingIntent.getBroadcast(
                 context,
@@ -71,7 +84,7 @@ object SessionNotificationBuilder {
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-            return NotificationCompat.Action.Builder(0, label, pi).build()
+            return NotificationCompat.Action.Builder(iconRes, label, pi).build()
         }
         fun addTracked(act: NotificationCompat.Action) {
             builder.addAction(act)
@@ -84,29 +97,97 @@ object SessionNotificationBuilder {
         }
         when {
             session?.isRecording == true -> {
-                addTracked(action(10, SessionTransportReceiver.ACTION_TOGGLE_RECORD, "Stop"))
+                addTracked(
+                    broadcastAction(
+                        10,
+                        SessionTransportReceiver.ACTION_PAUSE_RECORD,
+                        "Pause",
+                        android.R.drawable.ic_media_pause,
+                    ),
+                )
+                addTracked(
+                    broadcastAction(
+                        11,
+                        SessionTransportReceiver.ACTION_STOP_RECORD,
+                        "Stop",
+                        R.drawable.ic_media_stop,
+                    ),
+                )
             }
             session?.appMode == AppMode.MULTITRACK_RECORD -> {
-                addTracked(action(11, SessionTransportReceiver.ACTION_TOGGLE_RECORD, "Record"))
+                addTracked(
+                    broadcastAction(
+                        12,
+                        SessionTransportReceiver.ACTION_TOGGLE_RECORD,
+                        "Record",
+                        android.R.drawable.ic_media_play,
+                    ),
+                )
             }
             session?.appMode?.isPlaybackMode == true -> {
+                val showChapters = session.appMode != AppMode.SIMPLE_PLAY && session.trackmarks.isNotEmpty()
+                if (showChapters) {
+                    addTracked(
+                        broadcastAction(
+                            13,
+                            SessionTransportReceiver.ACTION_PREVIOUS,
+                            "Previous",
+                            android.R.drawable.ic_media_previous,
+                        ),
+                    )
+                }
                 val playLabel = if (session.isPlaying) "Pause" else "Play"
+                val playIcon = if (session.isPlaying) {
+                    android.R.drawable.ic_media_pause
+                } else {
+                    android.R.drawable.ic_media_play
+                }
                 addTracked(
-                    action(12, SessionTransportReceiver.ACTION_TOGGLE_PLAYBACK, playLabel),
+                    broadcastAction(
+                        14,
+                        SessionTransportReceiver.ACTION_TOGGLE_PLAYBACK,
+                        playLabel,
+                        playIcon,
+                    ),
                 )
-                if (session.appMode != AppMode.SIMPLE_PLAY) {
-                    addSilent(action(13, SessionTransportReceiver.ACTION_PREVIOUS, "Prev"))
-                    addSilent(action(14, SessionTransportReceiver.ACTION_NEXT, "Next"))
+                if (showChapters) {
+                    addTracked(
+                        broadcastAction(
+                            15,
+                            SessionTransportReceiver.ACTION_NEXT,
+                            "Next",
+                            android.R.drawable.ic_media_next,
+                        ),
+                    )
                 }
                 if (compact.size < 3) {
-                    addTracked(action(15, SessionTransportReceiver.ACTION_STOP_PLAYBACK, "Stop"))
+                    addTracked(
+                        broadcastAction(
+                            16,
+                            SessionTransportReceiver.ACTION_STOP_PLAYBACK,
+                            "Stop",
+                            R.drawable.ic_media_stop,
+                        ),
+                    )
                 } else {
-                    addSilent(action(15, SessionTransportReceiver.ACTION_STOP_PLAYBACK, "Stop"))
+                    addSilent(
+                        broadcastAction(
+                            16,
+                            SessionTransportReceiver.ACTION_STOP_PLAYBACK,
+                            "Stop",
+                            R.drawable.ic_media_stop,
+                        ),
+                    )
                 }
             }
         }
         addSilent(
-            action(16, SessionTransportReceiver.ACTION_STOP_ALL, context.getString(R.string.notification_stop)),
+            broadcastAction(
+                17,
+                SessionTransportReceiver.ACTION_STOP_ALL,
+                context.getString(R.string.notification_stop),
+                android.R.drawable.ic_menu_close_clear_cancel,
+            ),
         )
         return compact.toIntArray()
     }
