@@ -35,6 +35,7 @@ import org.openmultitrack.app.scribble.Flow8BlePermissions
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import org.openmultitrack.app.device.PrerequisiteKind
+import org.openmultitrack.app.service.SessionTransportActions
 import org.openmultitrack.app.ui.daw.DawMainScreen
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
@@ -261,6 +262,7 @@ class MainActivity : ComponentActivity() {
 
         requestPermissionsForConnectedMixers()
         handleUsbIntent(intent)
+        deliverNotificationTransportIntent(intent)
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -309,6 +311,15 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleUsbIntent(intent)
+        deliverNotificationTransportIntent(intent)
+    }
+
+    private fun deliverNotificationTransportIntent(intent: Intent?) {
+        val action = intent?.action ?: return
+        if (!SessionTransportActions.isNotificationAction(action)) return
+        SessionTransportActions.handle(this, action, fromActivity = true)
+        intent.action = Intent.ACTION_MAIN
+        setIntent(intent)
     }
 
     override fun onDestroy() {

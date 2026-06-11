@@ -70,24 +70,23 @@ object RecordingNotificationBuilder {
         builder: NotificationCompat.Builder,
         recording: Boolean,
     ) {
-        fun broadcastAction(
+        fun action(
             requestCode: Int,
             action: String,
             label: String,
             iconRes: Int,
+            openApp: Boolean = false,
         ): NotificationCompat.Action {
-            val intent = Intent(context, SessionTransportReceiver::class.java).setAction(action)
-            val pi = PendingIntent.getBroadcast(
-                context,
-                requestCode,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
+            val pi = if (openApp) {
+                NotificationActionIntents.mainActivity(context, requestCode, action)
+            } else {
+                NotificationActionIntents.broadcast(context, requestCode, action)
+            }
             return NotificationCompat.Action.Builder(iconRes, label, pi).build()
         }
         if (recording) {
             builder.addAction(
-                broadcastAction(
+                action(
                     10,
                     SessionTransportReceiver.ACTION_PAUSE_RECORD,
                     context.getString(R.string.notification_action_pause),
@@ -95,16 +94,17 @@ object RecordingNotificationBuilder {
                 ),
             )
             builder.addAction(
-                broadcastAction(
+                action(
                     11,
                     SessionTransportReceiver.ACTION_STOP_RECORD,
                     context.getString(R.string.notification_action_stop),
                     R.drawable.ic_media_stop,
+                    openApp = true,
                 ),
             )
         } else {
             builder.addAction(
-                broadcastAction(
+                action(
                     12,
                     SessionTransportReceiver.ACTION_TOGGLE_RECORD,
                     context.getString(R.string.notification_action_record),
@@ -113,7 +113,7 @@ object RecordingNotificationBuilder {
             )
         }
         builder.addAction(
-            broadcastAction(
+            action(
                 17,
                 SessionTransportReceiver.ACTION_STOP_ALL,
                 context.getString(R.string.notification_stop),

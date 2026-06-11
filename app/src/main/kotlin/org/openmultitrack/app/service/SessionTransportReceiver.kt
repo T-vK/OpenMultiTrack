@@ -3,67 +3,11 @@ package org.openmultitrack.app.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import org.openmultitrack.app.MainActivity
-import org.openmultitrack.domain.session.AppMode
-import org.openmultitrack.domain.session.isPlaybackMode
 
 class SessionTransportReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
-        val manager = AudioSessionBridge.mixerManager ?: return
-        val mixerId = AudioSessionBridge.activeMixerId() ?: manager.activeMixerId.value ?: return
-        val ctrl = manager.getOrCreate(mixerId)
-        val rebuildAfterAction = when (action) {
-            ACTION_PAUSE_RECORD -> {
-                ctrl.pauseRecording()
-                false
-            }
-            ACTION_STOP_RECORD -> {
-                val openApp = Intent(context, MainActivity::class.java).apply {
-                    addFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
-                    )
-                }
-                context.startActivity(openApp)
-                AudioSessionBridge.onNotificationStopRecord?.invoke(mixerId)
-                    ?: ctrl.stopRecording()
-                false
-            }
-            ACTION_TOGGLE_RECORD -> {
-                val wasRecording = ctrl.state.value.isRecording
-                if (wasRecording) ctrl.stopRecording() else ctrl.startRecording()
-                false
-            }
-            ACTION_TOGGLE_PLAYBACK -> {
-                if (ctrl.state.value.appMode.isPlaybackMode) {
-                    ctrl.toggleSoundcheckPlayback()
-                }
-                false
-            }
-            ACTION_STOP_PLAYBACK -> {
-                ctrl.stopSoundcheck()
-                false
-            }
-            ACTION_PREVIOUS -> {
-                ctrl.seekToPreviousTrackmark()
-                false
-            }
-            ACTION_NEXT -> {
-                ctrl.seekToNextTrackmark()
-                false
-            }
-            ACTION_STOP_ALL -> {
-                manager.shutdownAll()
-                context.startService(
-                    Intent(context, AudioSessionService::class.java).setAction(AudioSessionService.ACTION_STOP_ALL),
-                )
-                true
-            }
-            else -> false
-        }
-        if (rebuildAfterAction) {
+        if (SessionTransportActions.handle(context, action, fromActivity = false)) {
             AudioSessionBridge.rebuildNotification()
         }
     }
