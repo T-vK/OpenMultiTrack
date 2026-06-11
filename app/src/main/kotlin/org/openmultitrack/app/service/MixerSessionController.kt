@@ -26,6 +26,9 @@ import org.openmultitrack.app.audio.MonitorMixConfig
 import org.openmultitrack.app.audio.PlaybackMixContext
 import org.openmultitrack.app.audio.SessionPlayer
 import org.openmultitrack.app.audio.TransportTrace
+import org.openmultitrack.app.routing.RoutingAutomationBridge
+import org.openmultitrack.app.routing.RoutingHookResult
+import org.openmultitrack.app.routing.SoundcheckTrackChannels
 import org.openmultitrack.app.audio.SyntheticCaptureGenerator
 import org.openmultitrack.app.audio.VirtualMixerProbe
 import org.openmultitrack.app.data.AppSettingsStore
@@ -734,6 +737,9 @@ class MixerSessionController(
             trace?.mark("ensurePlaybackRoute usbStream=${usbStream != null} fd=${usbStream?.fd}")
             val route = ensurePlaybackLocked(descriptor, probe, usbOutputs).getOrThrow()
             trace?.mark("route resolved backend=${route.backend}")
+            if (!routingBeforeSoundcheckLocked(dir, metadata)) {
+                throw IllegalStateException("Soundcheck routing cancelled")
+            }
             val mixContext = PlaybackMixContext(
                 appMode = ui.appMode,
                 sessionChannelCount = metadata.channels.size,
@@ -809,6 +815,7 @@ class MixerSessionController(
         } else {
             player.suspendAndAwait()
             trace?.mark("suspend complete (native engine kept warm)")
+            RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
         }
         if (!skipStateUpdate) {
             _state.update {
@@ -1012,12 +1019,16 @@ class MixerSessionController(
         val prof = profile ?: return
         scope.launch {
             try {
+                var recordingStarted = false
                 captureMutex.withLock {
                     withContext(Dispatchers.IO) {
                         if (!captureEngine.isCaptureActive) {
                             ensureCapture(descriptor, probe).getOrThrow()
                         } else {
                             syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
+                        }
+                        if (!routingBeforeRecordLocked()) {
+                            return@withContext
                         }
                         val writePlan = org.openmultitrack.app.data.RecordingWritePlan.create(
                             storageResolver,
@@ -1033,8 +1044,10 @@ class MixerSessionController(
                                 writePlan = writePlan,
                             ),
                         ).getOrThrow()
+                        recordingStarted = true
                     }
                 }
+                if (!recordingStarted) return@launch
                 val sessionDir = captureEngine.activeSessionDir
                 if (sessionDir != null) {
                     settings.setActiveRecording(prof.id, sessionDir.absolutePath)
@@ -1183,6 +1196,7 @@ class MixerSessionController(
             if (_state.value.appMode.isPlaybackMode) {
                 refreshSoundcheckLibrary()
             }
+            RoutingAutomationBridge.hooks?.afterRecordRestore()
             AudioSessionBridge.rebuildNotification()
         }
     }
@@ -1381,7 +1395,24 @@ class MixerSessionController(
                     player.suspendAndAwait()
                     trace.mark("suspend complete (native engine kept warm)")
                 }
+                RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
             }
+        }
+    }
+
+    private suspend fun routingBeforeRecordLocked(): Boolean {
+        val armed = _state.value.channelStrips.filter { it.armed }.map { it.index }.toSet()
+        return when (RoutingAutomationBridge.hooks?.beforeRecordApply(armed)) {
+            RoutingHookResult.Cancelled -> false
+            else -> true
+        }
+    }
+
+    private suspend fun routingBeforeSoundcheckLocked(dir: File, metadata: SessionMetadata): Boolean {
+        val trackChannels = SoundcheckTrackChannels.indicesWithTracks(dir, metadata)
+        return when (RoutingAutomationBridge.hooks?.beforeSoundcheckApply(trackChannels)) {
+            RoutingHookResult.Cancelled -> false
+            else -> true
         }
     }
 

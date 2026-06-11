@@ -310,6 +310,44 @@ class AppSettingsStore(context: Context) {
         prefs.edit().putString(KEY_APP_MODES_BY_MIXER, root.toString()).apply()
     }
 
+    fun routingAutomationForMixer(mixerId: String): MixerRoutingAutomationConfig {
+        val json = prefs.getString(KEY_ROUTING_AUTOMATION_BY_MIXER, null) ?: return MixerRoutingAutomationConfig()
+        return runCatching {
+            val o = JSONObject(json).optJSONObject(mixerId) ?: return MixerRoutingAutomationConfig()
+            MixerRoutingAutomationConfig(
+                level = RoutingAutomationLevel.entries.getOrElse(o.optInt("level")) {
+                    RoutingAutomationLevel.PROMPT
+                },
+                method = RoutingAutomationMethod.entries.getOrElse(o.optInt("method")) {
+                    RoutingAutomationMethod.PER_CHANNEL
+                },
+                restorePolicy = RoutingRestorePolicy.entries.getOrElse(o.optInt("restorePolicy")) {
+                    RoutingRestorePolicy.RESPECT_LIVE
+                },
+                recordSnapshotSlot = o.optInt("recordSnapshotSlot", 0),
+                soundcheckSnapshotSlot = o.optInt("soundcheckSnapshotSlot", 0),
+                forceRestoreOnConflict = o.optBoolean("forceRestoreOnConflict", false),
+            )
+        }.getOrDefault(MixerRoutingAutomationConfig())
+    }
+
+    fun setRoutingAutomationForMixer(mixerId: String, config: MixerRoutingAutomationConfig) {
+        val root = runCatching {
+            JSONObject(prefs.getString(KEY_ROUTING_AUTOMATION_BY_MIXER, "{}") ?: "{}")
+        }.getOrDefault(JSONObject())
+        root.put(
+            mixerId,
+            JSONObject()
+                .put("level", config.level.ordinal)
+                .put("method", config.method.ordinal)
+                .put("restorePolicy", config.restorePolicy.ordinal)
+                .put("recordSnapshotSlot", config.recordSnapshotSlot)
+                .put("soundcheckSnapshotSlot", config.soundcheckSnapshotSlot)
+                .put("forceRestoreOnConflict", config.forceRestoreOnConflict),
+        )
+        prefs.edit().putString(KEY_ROUTING_AUTOMATION_BY_MIXER, root.toString()).apply()
+    }
+
     fun exportJson(): String = prefs.all.entries.joinToString(prefix = "{", postfix = "}") { (k, v) ->
         """"$k":${if (v is String) "\"$v\"" else v}"""
     }
@@ -351,6 +389,7 @@ class AppSettingsStore(context: Context) {
         private const val KEY_ACTIVE_RECORDING_MIXER = "active_recording_mixer_id"
         private const val KEY_ACTIVE_RECORDING_DIR = "active_recording_session_dir"
         private const val KEY_APP_MODES_BY_MIXER = "app_modes_by_mixer"
+        private const val KEY_ROUTING_AUTOMATION_BY_MIXER = "routing_automation_by_mixer"
         private const val KEY_REMOTE_ROLE = "remote_role"
         private const val KEY_REMOTE_AUTH_TOKEN = "remote_auth_token"
         private const val KEY_REMOTE_HOST_DEVICE_ID = "remote_host_device_id"

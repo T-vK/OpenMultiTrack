@@ -60,6 +60,16 @@ import org.openmultitrack.app.scribble.IncompleteRecordingStore
 import org.openmultitrack.app.scribble.OscLanDiscovery
 import org.openmultitrack.app.scribble.ScribbleImportSupport
 import org.openmultitrack.mixer.behringer.Xr18ScribbleImporter
+import org.openmultitrack.app.data.MixerRoutingAutomationConfig
+import org.openmultitrack.app.data.RoutingAutomationLevel
+import org.openmultitrack.app.routing.PendingRoutingRestore
+import org.openmultitrack.app.routing.RoutingApplyPromptState
+import org.openmultitrack.app.routing.RoutingAutomationBridge
+import org.openmultitrack.app.routing.RoutingAutomationHooksImpl
+import org.openmultitrack.app.routing.RoutingBaselineStore
+import org.openmultitrack.app.routing.RoutingOverrideCoordinator
+import org.openmultitrack.app.routing.RoutingRestorePromptState
+import org.openmultitrack.mixer.behringer.XAirChannelInputState
 import org.openmultitrack.usb.UsbAudioEnumerator
 import org.openmultitrack.usb.UsbAudioProbeService
 
@@ -153,6 +163,13 @@ data class DawUiState(
     val localSpillBufferMinutes: Int = 5,
     val minFreeStorageBytes: Long = 0L,
     val batteryOptimizationIgnored: Boolean = true,
+    val routingApplyPrompt: RoutingApplyPromptState? = null,
+    val routingRestorePrompt: RoutingRestorePromptState? = null,
+    val showInputSources: Boolean = false,
+    val inputSourcesLoading: Boolean = false,
+    val inputSourcesError: String? = null,
+    val inputSourcesByChannel: Map<Int, XAirChannelInputState> = emptyMap(),
+    val routingAutomationConfig: MixerRoutingAutomationConfig = MixerRoutingAutomationConfig(),
 )
 
 fun hasNewerRecordingThanSelected(
@@ -179,6 +196,30 @@ class MainViewModel(
     private val sessionClient: AudioSessionClient,
 ) : ViewModel() {
     private val storageResolver = RecordingStorageResolver(appContext, settings)
+    private val routingBaselineStore = RoutingBaselineStore(appContext)
+    private val routingCoordinator = RoutingOverrideCoordinator(routingBaselineStore)
+    private val routingHooks = RoutingAutomationHooksImpl(
+        settings = settings,
+        coordinator = routingCoordinator,
+        profileProvider = { activeMixerProfile() },
+        onApplyPrompt = { prompt ->
+            _uiState.update { it.copy(routingApplyPrompt = prompt) }
+        },
+        onRestorePrompt = { prompt ->
+            _uiState.update { it.copy(routingRestorePrompt = prompt) }
+        },
+        onStartupRestorePrompt = { pending ->
+            _uiState.update {
+                it.copy(
+                    routingRestorePrompt = RoutingRestorePromptState(
+                        pending.mixerId,
+                        pending.kind,
+                        emptyList(),
+                    ),
+                )
+            }
+        },
+    )
 
     private val _uiState = MutableStateFlow(
         DawUiState(
@@ -237,6 +278,7 @@ class MainViewModel(
     private val soundcheckPromptPending = mutableSetOf<String>()
 
     init {
+        RoutingAutomationBridge.hooks = routingHooks
         sessionClient.onManagerLost {
             observedMixerIds.clear()
             sessionAttached = false
@@ -260,6 +302,7 @@ class MainViewModel(
             }
             attachRemoteControl()
             refreshUsbAndOutputs()
+            viewModelScope.launch { routingHooks.onStartupPendingRestore() }
             AudioSessionBridge.onNotificationStopRecord = { mixerId ->
                 onNotificationStopRecord(mixerId)
             }
@@ -788,7 +831,12 @@ class MainViewModel(
         }
         settings.lastActiveMixerId = id
         sessionClient.withManager { it.setActiveMixer(id) }
-        _uiState.update { it.copy(activeMixerId = id) }
+        _uiState.update {
+            it.copy(
+                activeMixerId = id,
+                routingAutomationConfig = settings.routingAutomationForMixer(id),
+            )
+        }
         onFlow8MixerReady(id)
         onOscMixerReady(id)
     }
@@ -1418,6 +1466,82 @@ class MainViewModel(
         sessionClient.withManager { it.onUsbAttached(device) }
         refreshUsbAndOutputs()
     }
+
+    fun confirmRoutingApply() {
+        routingHooks.confirmApply()
+        _uiState.update { it.copy(routingApplyPrompt = null) }
+    }
+
+    fun cancelRoutingApply() {
+        routingHooks.cancelApply()
+        _uiState.update { it.copy(routingApplyPrompt = null) }
+    }
+
+    fun confirmRoutingRestore() {
+        routingHooks.confirmRestore()
+        _uiState.update { it.copy(routingRestorePrompt = null) }
+    }
+
+    fun cancelRoutingRestore() {
+        routingHooks.cancelRestore()
+        _uiState.update { it.copy(routingRestorePrompt = null) }
+    }
+
+    fun showInputSources(show: Boolean) {
+        _uiState.update {
+            it.copy(
+                showInputSources = show,
+                inputSourcesByChannel = if (show) it.inputSourcesByChannel else emptyMap(),
+                inputSourcesError = null,
+            )
+        }
+        if (show) refreshInputSources()
+    }
+
+    fun refreshInputSources() {
+        val profile = activeMixerProfile() ?: run {
+            _uiState.update {
+                it.copy(inputSourcesError = "No active mixer", inputSourcesLoading = false)
+            }
+            return
+        }
+        if (!ScribbleImportSupport.supportsOsc(profile) || profile.oscHost.isNullOrBlank()) {
+            _uiState.update {
+                it.copy(
+                    inputSourcesLoading = false,
+                    inputSourcesError = "OSC not available for this mixer (XR18 + LAN required)",
+                )
+            }
+            return
+        }
+        _uiState.update { it.copy(inputSourcesLoading = true, inputSourcesError = null) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val channels = routingCoordinator.readInputSources(profile.oscHost!!)
+            _uiState.update {
+                it.copy(
+                    inputSourcesLoading = false,
+                    inputSourcesByChannel = channels,
+                    inputSourcesError = if (channels.isEmpty()) {
+                        "Could not read mixer — check Wi‑Fi and IP"
+                    } else {
+                        null
+                    },
+                )
+            }
+        }
+    }
+
+    fun setRoutingAutomationConfig(mixerId: String, config: MixerRoutingAutomationConfig) {
+        settings.setRoutingAutomationForMixer(mixerId, config)
+        if (_uiState.value.activeMixerId == mixerId) {
+            _uiState.update { it.copy(routingAutomationConfig = config) }
+        }
+    }
+
+    private fun activeMixerProfile(): MixerProfile? =
+        _uiState.value.activeMixerId?.let { id ->
+            _uiState.value.mixers.firstOrNull { it.id == id }
+        }
 
     fun showSettings(show: Boolean) {
         _uiState.update { it.copy(showSettings = show) }

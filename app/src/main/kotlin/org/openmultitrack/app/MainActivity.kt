@@ -225,6 +225,18 @@ class MainActivity : ComponentActivity() {
                         onLoadRecordingIntoSoundcheck = viewModel::loadRecordingIntoSoundcheck,
                         onLoadRecordingIntoSimplePlay = viewModel::loadRecordingIntoSimplePlay,
                         onDismissSoundcheckLoadPrompt = viewModel::dismissSoundcheckLoadPrompt,
+                        onRoutingAutomationConfigChange = { config ->
+                            viewModel.uiState.value.activeMixerId?.let { id ->
+                                viewModel.setRoutingAutomationConfig(id, config)
+                            }
+                        },
+                        onOpenInputSources = { viewModel.showInputSources(true) },
+                        onCloseInputSources = { viewModel.showInputSources(false) },
+                        onRefreshInputSources = viewModel::refreshInputSources,
+                        onConfirmRoutingApply = viewModel::confirmRoutingApply,
+                        onCancelRoutingApply = viewModel::cancelRoutingApply,
+                        onConfirmRoutingRestore = viewModel::confirmRoutingRestore,
+                        onCancelRoutingRestore = viewModel::cancelRoutingRestore,
                         onPostRecordBehaviorChange = viewModel::setPostRecordBehavior,
                         onShowRecordingStorageInfoButtonChange = viewModel::setShowRecordingStorageInfoButton,
                         onAutoShowRecordingStorageTooltipChange = viewModel::setAutoShowRecordingStorageTooltip,

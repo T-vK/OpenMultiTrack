@@ -222,6 +222,14 @@ fun DawMainScreen(
     onLocalSpillBufferMinutesChange: (Int) -> Unit = {},
     onMinFreeStorageBytesChange: (Long) -> Unit = {},
     onOpenBatterySettings: () -> Unit = {},
+    onRoutingAutomationConfigChange: (org.openmultitrack.app.data.MixerRoutingAutomationConfig) -> Unit = {},
+    onOpenInputSources: () -> Unit = {},
+    onCloseInputSources: () -> Unit = {},
+    onRefreshInputSources: () -> Unit = {},
+    onConfirmRoutingApply: () -> Unit = {},
+    onCancelRoutingApply: () -> Unit = {},
+    onConfirmRoutingRestore: () -> Unit = {},
+    onCancelRoutingRestore: () -> Unit = {},
     onRenameSoundcheckSession: (String, String, String) -> Unit = { _, _, _ -> },
     onDeleteSoundcheckSession: (String, String) -> Unit = { _, _ -> },
     lastSelectedSoundcheckSession: (String) -> String? = { null },
@@ -249,6 +257,10 @@ fun DawMainScreen(
         state.mixers.isEmpty()
 
     val activeProfile = activeId?.let { id -> state.mixers.firstOrNull { it.id == id } }
+    val supportsOscRouting = activeProfile?.let {
+        org.openmultitrack.app.scribble.ScribbleImportSupport.supportsOsc(it) &&
+            !it.oscHost.isNullOrBlank()
+    } == true
     val activeRouting = activeId?.let { mixerRoutingById[it] } ?: MixerRoutingConfig()
     val isRecording = session?.isRecording == true
     LaunchedEffect(isRecording, state.autoShowRecordingStorageTooltip, state.showRecordingStorageInfoButton) {
@@ -294,6 +306,8 @@ fun DawMainScreen(
                 minFreeStorageBytes = state.minFreeStorageBytes,
                 batteryOptimizationIgnored = state.batteryOptimizationIgnored,
                 chapterSupportEnabled = state.chapterSupportEnabled,
+                showOscRoutingSettings = supportsOscRouting,
+                routingAutomationConfig = state.routingAutomationConfig,
             ),
             monitorGain = monitorGain,
             onMonitorGainChange = onMonitorGainChange,
@@ -326,6 +340,11 @@ fun DawMainScreen(
             onMinFreeStorageBytesChange = onMinFreeStorageBytesChange,
             onOpenBatterySettings = onOpenBatterySettings,
             onChapterSupportEnabledChange = onChapterSupportEnabledChange,
+            onRoutingAutomationConfigChange = { config ->
+                state.activeMixerId?.let { id ->
+                    onRoutingAutomationConfigChange(config)
+                }
+            },
         )
         return
     }
@@ -458,6 +477,8 @@ fun DawMainScreen(
                     onOpenSettings = onOpenSettings,
                     onStorageTooltipOpenChange = { storageTooltipOpen = it },
                     onOpenLog = onOpenLog,
+                    onOpenInputSources = onOpenInputSources,
+                    showInputSourcesMenu = supportsOscRouting,
                 )
             },
         ) {
@@ -648,6 +669,33 @@ fun DawMainScreen(
             onAdd = onAddMixerDevice,
             onAddVirtualDemo = onAddVirtualDemoMixer,
             onDismiss = onDismissAddMixer,
+        )
+    }
+
+    state.routingApplyPrompt?.let { prompt ->
+        org.openmultitrack.app.ui.routing.RoutingApplyDialog(
+            prompt = prompt,
+            onConfirm = onConfirmRoutingApply,
+            onDismiss = onCancelRoutingApply,
+        )
+    }
+
+    state.routingRestorePrompt?.let { prompt ->
+        org.openmultitrack.app.ui.routing.RoutingRestoreDialog(
+            prompt = prompt,
+            onConfirm = onConfirmRoutingRestore,
+            onDismiss = onCancelRoutingRestore,
+        )
+    }
+
+    if (state.showInputSources) {
+        org.openmultitrack.app.ui.routing.MixerInputSourcesScreen(
+            mixerName = activeProfile?.displayName ?: "Mixer",
+            channels = state.inputSourcesByChannel,
+            loading = state.inputSourcesLoading,
+            error = state.inputSourcesError,
+            onDismiss = onCloseInputSources,
+            onRefresh = onRefreshInputSources,
         )
     }
 

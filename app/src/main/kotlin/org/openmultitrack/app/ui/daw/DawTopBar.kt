@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.Input
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -871,6 +872,8 @@ internal fun DawNavigationDrawer(
     onOpenSettings: () -> Unit,
     onStorageTooltipOpenChange: (Boolean) -> Unit,
     onOpenLog: () -> Unit,
+    onOpenInputSources: () -> Unit = {},
+    showInputSourcesMenu: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     val remoteHighlight = isRemoteClient ||
@@ -1021,6 +1024,16 @@ internal fun DawNavigationDrawer(
                 label = { Text("Settings") },
                 selected = false,
                 onClick = { closeAnd(onOpenSettings) },
+                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+            )
+        }
+        if (showInputSourcesMenu) {
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp))
+            NavigationDrawerItem(
+                icon = { Icon(Icons.Default.Input, contentDescription = null) },
+                label = { Text("Input sources") },
+                selected = false,
+                onClick = { closeAnd(onOpenInputSources) },
                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
             )
         }

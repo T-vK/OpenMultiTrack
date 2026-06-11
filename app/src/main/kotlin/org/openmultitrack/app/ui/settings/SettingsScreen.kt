@@ -77,6 +77,9 @@ data class SettingsUiState(
     val localSpillBufferMinutes: Int = 5,
     val minFreeStorageBytes: Long = 0L,
     val batteryOptimizationIgnored: Boolean = true,
+    val showOscRoutingSettings: Boolean = false,
+    val routingAutomationConfig: org.openmultitrack.app.data.MixerRoutingAutomationConfig =
+        org.openmultitrack.app.data.MixerRoutingAutomationConfig(),
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -114,6 +117,7 @@ fun SettingsScreen(
     onLocalSpillBufferMinutesChange: (Int) -> Unit = {},
     onMinFreeStorageBytesChange: (Long) -> Unit = {},
     onOpenBatterySettings: () -> Unit = {},
+    onRoutingAutomationConfigChange: (org.openmultitrack.app.data.MixerRoutingAutomationConfig) -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -162,6 +166,7 @@ fun SettingsScreen(
             onLocalSpillBufferMinutesChange = onLocalSpillBufferMinutesChange,
             onMinFreeStorageBytesChange = onMinFreeStorageBytesChange,
             onOpenBatterySettings = onOpenBatterySettings,
+            onRoutingAutomationConfigChange = onRoutingAutomationConfigChange,
         )
     }
 }
@@ -200,6 +205,7 @@ private fun SettingsContent(
     onLocalSpillBufferMinutesChange: (Int) -> Unit = {},
     onMinFreeStorageBytesChange: (Long) -> Unit = {},
     onOpenBatterySettings: () -> Unit = {},
+    onRoutingAutomationConfigChange: (org.openmultitrack.app.data.MixerRoutingAutomationConfig) -> Unit = {},
 ) {
     var query by remember { mutableStateOf("") }
     var openCategory by remember { mutableStateOf<SettingsCategory?>(null) }
@@ -228,6 +234,7 @@ private fun SettingsContent(
             onChapterSupportEnabledChange = onChapterSupportEnabledChange,
             onRecordWaveformNormalizedChange = onRecordWaveformNormalizedChange,
             onPlaybackWaveformNormalizedChange = onPlaybackWaveformNormalizedChange,
+            onRoutingAutomationConfigChange = onRoutingAutomationConfigChange,
         )
     }
 
@@ -288,7 +295,7 @@ private fun SettingsContent(
     }
 }
 
-private enum class SettingsCategory(
+internal enum class SettingsCategory(
     val title: String,
     val subtitle: String,
 ) {
@@ -299,6 +306,7 @@ private enum class SettingsCategory(
     AUDIO("Audio", "Monitor level"),
     STORAGE("Storage", "Paths, mirrors, spill buffer"),
     RELIABILITY("Background", "Battery and uninterrupted recording"),
+    OSC("Mixer OSC (XR18)", "Input routing automation"),
 }
 
 @Composable
@@ -746,7 +754,9 @@ private fun buildSettingsRows(
     onChapterSupportEnabledChange: (Boolean) -> Unit,
     onRecordWaveformNormalizedChange: (Boolean) -> Unit,
     onPlaybackWaveformNormalizedChange: (Boolean) -> Unit,
-): List<SettingsRowModel> = listOf(
+    onRoutingAutomationConfigChange: (org.openmultitrack.app.data.MixerRoutingAutomationConfig) -> Unit,
+): List<SettingsRowModel> = buildList {
+    addAll(listOf(
     SettingsDropdownRow(
         id = "post_record_behavior",
         category = SettingsCategory.RECORDING,
@@ -905,4 +915,66 @@ private fun buildSettingsRows(
         label = { it.label },
         onSelect = onStripIconModeChange,
     ),
-)
+    ))
+    if (state.showOscRoutingSettings) {
+        val config = state.routingAutomationConfig
+        add(
+            SettingsDropdownRow(
+                id = "routing_automation_level",
+                category = SettingsCategory.OSC,
+                title = "Mixer routing automation",
+                description = "Switch XR18 input sources on record/play start; restore on stop (LAN).",
+                options = org.openmultitrack.app.data.RoutingAutomationLevel.entries,
+                selected = config.level,
+                label = {
+                    when (it) {
+                        org.openmultitrack.app.data.RoutingAutomationLevel.OFF -> "Off"
+                        org.openmultitrack.app.data.RoutingAutomationLevel.PROMPT -> "Ask before apply/restore"
+                        org.openmultitrack.app.data.RoutingAutomationLevel.AUTO -> "Automatic"
+                    }
+                },
+                onSelect = { onRoutingAutomationConfigChange(config.copy(level = it)) },
+            ),
+        )
+        add(
+            SettingsDropdownRow(
+                id = "routing_automation_method",
+                category = SettingsCategory.OSC,
+                title = "Automation method",
+                description = "Per-channel OSC or recall a mixer snapshot slot (1–64).",
+                options = org.openmultitrack.app.data.RoutingAutomationMethod.entries,
+                selected = config.method,
+                label = {
+                    when (it) {
+                        org.openmultitrack.app.data.RoutingAutomationMethod.PER_CHANNEL ->
+                            "Per-channel input sources"
+                        org.openmultitrack.app.data.RoutingAutomationMethod.SNAPSHOT_SLOT ->
+                            "Mixer snapshot slots"
+                    }
+                },
+                onSelect = { onRoutingAutomationConfigChange(config.copy(method = it)) },
+            ),
+        )
+        add(
+            SettingsDropdownRow(
+                id = "routing_restore_policy",
+                category = SettingsCategory.OSC,
+                title = "Restore policy",
+                description = "How to handle channels changed on the mixer during an override.",
+                options = org.openmultitrack.app.data.RoutingRestorePolicy.entries,
+                selected = config.restorePolicy,
+                label = {
+                    when (it) {
+                        org.openmultitrack.app.data.RoutingRestorePolicy.STRICT ->
+                            "Always restore captured baseline"
+                        org.openmultitrack.app.data.RoutingRestorePolicy.RESPECT_LIVE ->
+                            "Skip engineer-changed channels"
+                        org.openmultitrack.app.data.RoutingRestorePolicy.ASK_ON_CONFLICT ->
+                            "Ask when conflicts detected"
+                    }
+                },
+                onSelect = { onRoutingAutomationConfigChange(config.copy(restorePolicy = it)) },
+            ),
+        )
+    }
+}
