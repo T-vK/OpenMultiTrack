@@ -175,6 +175,7 @@ class MainActivity : ComponentActivity() {
                         onSelectMixer = viewModel::setActiveMixer,
                         onRemoveMixer = viewModel::removeMixer,
                         onAddMixerDevice = viewModel::addMixer,
+                        onAddVirtualSineMixer = viewModel::addVirtualSineMixer,
                         onDismissAddMixer = { viewModel.showAddMixerDialog(false) },
                         onToggleArm = viewModel::toggleArm,
                         onToggleMonitor = viewModel::toggleMonitor,

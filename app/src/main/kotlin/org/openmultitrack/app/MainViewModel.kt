@@ -34,6 +34,7 @@ import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 import org.openmultitrack.domain.channel.ChannelStripState
 import org.openmultitrack.domain.mixer.MixerProfile
+import org.openmultitrack.domain.mixer.VirtualMixer
 import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.isPlaybackMode
 import org.openmultitrack.domain.session.TransportState
@@ -645,6 +646,22 @@ class MainViewModel(
             androidAudioDeviceId = null,
         )
         return mixerStore.findMatchingMixer(desc) != null
+    }
+
+    fun addVirtualSineMixer() {
+        val profile = mixerStore.addVirtualSineMixer()
+        loadMixers()
+        sessionClient.whenReady { mgr ->
+            mgr.registerMixer(profile)
+            val ctrl = mgr.getOrCreate(profile.id)
+            ctrl.setRouting(routingStore.get(profile.id))
+            ctrl.setAppMode(settings.appModeForMixer(profile.id))
+            observeMixerSession(profile.id, mgr)
+            ctrl.attachVirtualSineProbe()
+        }
+        _uiState.update { it.copy(showAddMixerDialog = false) }
+        setActiveMixer(profile.id)
+        showStatus("Test signal ready — sine tones on all channels.", profile.id)
     }
 
     fun addMixer(descriptor: UsbAudioDeviceDescriptor) {
@@ -1719,6 +1736,11 @@ class MainViewModel(
         manager: org.openmultitrack.app.service.MultiMixerSessionManager,
         usbDevices: List<UsbAudioDeviceDescriptor> = _uiState.value.availableUsbDevices,
     ) {
+        if (VirtualMixer.isSineGenerator(profile)) {
+            manager.getOrCreate(profile.id).attachVirtualSineProbe()
+            refreshInterruptedRecording(profile.id, manager)
+            return
+        }
         if (manager.getOrCreate(profile.id).state.value.isRecording) {
             val usb = resolveUsbDevice(profile, usbDevices)
             if (usb != null && enumerator.hasUsbPermission(usb.deviceName)) {

@@ -54,6 +54,7 @@ class CaptureSessionEngine(
     private var fanoutJob: Job? = null
     private var activeRoute: CaptureRoute? = null
     private var activeBackend: AudioBackend? = null
+    private var syntheticGenerator: SyntheticCaptureGenerator? = null
     @Volatile
     private var perChannelWriter: PerChannelWavWriter? = null
     private var legacyWavWriter: WavWriter? = null
@@ -106,9 +107,12 @@ class CaptureSessionEngine(
         get() = usbDegraded
 
     fun isNativeCaptureOwner(): Boolean {
+        if (syntheticGenerator != null) return true
         val backend = activeBackend ?: return false
         return NativeAudioCaptureRegistry.holder(backend) == ownerId
     }
+
+    fun isSyntheticCapture(): Boolean = syntheticGenerator != null
 
     fun recordElapsedSec(): Float =
         if (sampleRate > 0) framesWritten.toFloat() / sampleRate else 0f
@@ -183,6 +187,26 @@ class CaptureSessionEngine(
         clearWaveforms()
         allocateWaveformRings()
         startFanoutLoop(scope, route.backend)
+        Result.success(Unit)
+    }
+
+    suspend fun startSyntheticCapture(
+        scope: CoroutineScope,
+        channelCount: Int,
+        sampleRateHz: Int = 48_000,
+    ): Result<Unit> = lifecycleMutex.withLock {
+        if (isCaptureActive && syntheticGenerator != null) {
+            return Result.success(Unit)
+        }
+        stopCaptureInternalLocked()
+        this.channelCount = channelCount.coerceAtLeast(1)
+        sampleRate = sampleRateHz.coerceAtLeast(1)
+        syntheticGenerator = SyntheticCaptureGenerator(this.channelCount, sampleRate)
+        usbDegraded = false
+        clearWaveforms()
+        allocateWaveformRings()
+        OmtLog.i("CaptureSession", "startSyntheticCapture ch=$channelCount rate=$sampleRate")
+        startFanoutLoop(scope, backend = null)
         Result.success(Unit)
     }
 
@@ -421,6 +445,7 @@ class CaptureSessionEngine(
         }
         activeBackend = null
         activeRoute = null
+        syntheticGenerator = null
     }
 
     private fun currentRecordingSession(): RecordingSession {
@@ -440,44 +465,43 @@ class CaptureSessionEngine(
         monitorOutputDeviceId.set(-1)
     }
 
-    private fun startFanoutLoop(scope: CoroutineScope, backend: AudioBackend) {
+    private fun startFanoutLoop(scope: CoroutineScope, backend: AudioBackend?) {
         val framesPerChunk = SessionRecorder.chunkFramesForChannels(channelCount)
         val scratch = FloatArray(framesPerChunk * channelCount)
         val monitorScratch = FloatArray(framesPerChunk * 2)
         val virtualMicScratch = FloatArray(framesPerChunk * 2)
         var consecutiveEmptyReads = 0
+        val synthetic = syntheticGenerator
 
         fanoutJob = scope.launch(Dispatchers.IO) {
             try {
                 while (isActive) {
                     try {
-                        val rawFrames = if (usbDegraded) {
-                            0
-                        } else {
-                            AudioEngineRouter.readRecordedFrames(scratch, framesPerChunk, backend)
+                        val rawFrames = when {
+                            synthetic != null -> synthetic.fill(scratch, framesPerChunk)
+                            usbDegraded -> 0
+                            backend != null -> AudioEngineRouter.readRecordedFrames(scratch, framesPerChunk, backend)
+                            else -> 0
                         }
                         val frames = rawFrames.coerceIn(0, framesPerChunk)
 
                         if (frames <= 0) {
                             consecutiveEmptyReads++
-                            if (isRecording) {
-                                val advanced = catchUpTimelineToTarget(
-                                    maxFramesPerPass = if (usbDegraded) 65_536 else 8_192,
-                                )
-                                if (advanced > 0 && (usbDegraded || consecutiveEmptyReads > 1)) {
-                                    continue
-                                }
+                            if (isRecording && usbDegraded) {
+                                val advanced = catchUpTimelineToTarget(maxFramesPerPass = 65_536)
+                                if (advanced > 0) continue
                             }
                             Thread.sleep(2)
                             continue
                         }
                         consecutiveEmptyReads = 0
-                        droppedFrames = AudioEngineRouter.recordingDroppedFrames(backend)
+                        if (backend != null) {
+                            droppedFrames = AudioEngineRouter.recordingDroppedFrames(backend)
+                        }
 
                         accumulateWaveformPeaks(scratch, frames, channelCount)
                         maybeEmitWaveformPeaks()
 
-                        catchUpTimelineToTarget(maxFramesPerPass = 4_096)
                         writeRecordingFrames(scratch, frames, channelCount)
                         maybePersistTimeline()
 
@@ -531,8 +555,12 @@ class CaptureSessionEngine(
     private fun writeRecordingFrames(scratch: FloatArray, frames: Int, channels: Int) {
         val writer = perChannelWriter ?: return
         if (!isRecording) return
-        val maxFrames = (sessionTargetFrames() - framesWritten).coerceAtLeast(0)
-        val toWrite = minOf(frames.toLong(), maxFrames).toInt()
+        val toWrite = if (usbDegraded) {
+            val maxFrames = (sessionTargetFrames() - framesWritten).coerceAtLeast(0)
+            minOf(frames.toLong(), maxFrames).toInt()
+        } else {
+            frames
+        }
         if (toWrite <= 0) return
         try {
             writer.writeInterleavedMultiChannel(scratch, toWrite, channels)
@@ -548,8 +576,9 @@ class CaptureSessionEngine(
         return elapsedMs * sampleRate / 1_000L
     }
 
-    /** Inserts silence so [framesWritten] matches the wall-clock session timeline. */
+    /** Inserts silence so [framesWritten] matches wall clock when USB input is degraded. */
     private fun catchUpTimelineToTarget(maxFramesPerPass: Int): Int {
+        if (!usbDegraded) return 0
         val writer = perChannelWriter ?: return 0
         if (!isRecording) return 0
         var written = 0

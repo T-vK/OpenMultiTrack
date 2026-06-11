@@ -121,6 +121,7 @@ fun DawMainScreen(
     onSelectMixer: (String) -> Unit,
     onRemoveMixer: (String) -> Unit,
     onAddMixerDevice: (UsbAudioDeviceDescriptor) -> Unit,
+    onAddVirtualSineMixer: () -> Unit,
     onDismissAddMixer: () -> Unit,
     onToggleArm: (String, Int) -> Unit,
     onToggleMonitor: (String, Int) -> Unit,
@@ -599,7 +600,12 @@ fun DawMainScreen(
         AddMixerDialog(
             devices = state.addableUsbDevices,
             alreadyAddedCount = state.mixers.size,
+            hasVirtualSineMixer = state.mixers.any {
+                it.vendorId == org.openmultitrack.domain.mixer.VirtualMixer.VENDOR_ID &&
+                    it.productId == org.openmultitrack.domain.mixer.VirtualMixer.PRODUCT_ID_SINE
+            },
             onAdd = onAddMixerDevice,
+            onAddVirtualSine = onAddVirtualSineMixer,
             onDismiss = onDismissAddMixer,
         )
     }
@@ -1011,14 +1017,22 @@ private fun ChannelStripRow(
 private fun AddMixerDialog(
     devices: List<UsbAudioDeviceDescriptor>,
     alreadyAddedCount: Int,
+    hasVirtualSineMixer: Boolean,
     onAdd: (UsbAudioDeviceDescriptor) -> Unit,
+    onAddVirtualSine: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add audio interface") },
         text = {
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (!hasVirtualSineMixer) {
+                    TextButton(onClick = onAddVirtualSine) {
+                        Text("Test signal (sine) — no USB")
+                    }
+                    HorizontalDivider()
+                }
                 if (devices.isEmpty()) {
                     Text(
                         if (alreadyAddedCount > 0) {

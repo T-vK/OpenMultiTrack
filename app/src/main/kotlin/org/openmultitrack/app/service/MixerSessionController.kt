@@ -24,6 +24,7 @@ import org.openmultitrack.app.audio.LiveWaveformSnapshot
 import org.openmultitrack.app.audio.MonitorMixConfig
 import org.openmultitrack.app.audio.PlaybackMixContext
 import org.openmultitrack.app.audio.SessionPlayer
+import org.openmultitrack.app.audio.VirtualMixerProbe
 import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.data.RecordingStorageResolver
 import org.openmultitrack.app.root.LoopbackSetup
@@ -33,6 +34,7 @@ import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 import org.openmultitrack.domain.channel.ChannelStripState
 import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.domain.mixer.MixerRoutingConfig
+import org.openmultitrack.domain.mixer.VirtualMixer
 import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.isPlaybackMode
 import org.openmultitrack.domain.session.TransportState
@@ -787,8 +789,19 @@ class MixerSessionController(
         syncVuMeterCapture()
     }
 
-    fun canStartRecording(): Boolean =
-        activeDescriptor != null && activeProbe != null && profile != null
+    fun canStartRecording(): Boolean {
+        val prof = profile ?: return false
+        if (VirtualMixer.isSineGenerator(prof)) {
+            return activeProbe != null
+        }
+        return activeDescriptor != null && activeProbe != null
+    }
+
+    fun attachVirtualSineProbe() {
+        val descriptor = VirtualMixerProbe.usbDescriptor()
+        val probe = VirtualMixerProbe.sineProbeResult()
+        setProbeResult(descriptor, probe)
+    }
 
     fun startRecording() {
         val descriptor = activeDescriptor ?: return
@@ -941,7 +954,9 @@ class MixerSessionController(
                 val descriptor = activeDescriptor ?: return@withLock
                 val probe = activeProbe ?: return@withLock
                 withContext(Dispatchers.IO) {
-                    if (!captureEngine.isCaptureActive || !captureEngine.isNativeCaptureOwner()) {
+                    val needsCapture = !captureEngine.isCaptureActive ||
+                        (!captureEngine.isSyntheticCapture() && !captureEngine.isNativeCaptureOwner())
+                    if (needsCapture) {
                         val result = ensureCapture(descriptor, probe)
                         if (result.isFailure) {
                             OmtLog.w(
@@ -1420,15 +1435,20 @@ class MixerSessionController(
         }
     }
 
-    private fun vuCaptureDesired(): Boolean =
-        isActiveMixer() &&
+    private fun vuCaptureDesired(): Boolean {
+        val prof = profile
+        val hasSource = activeProbe != null && (
+            activeDescriptor != null ||
+                (prof != null && VirtualMixer.isSineGenerator(prof))
+            )
+        return isActiveMixer() &&
             settings.showVuMeters &&
             _state.value.appMode == AppMode.MULTITRACK_RECORD &&
-            activeDescriptor != null &&
-            activeProbe != null &&
+            hasSource &&
             !_state.value.isMonitoring &&
             !_state.value.isRecording &&
             !_state.value.isPlaying
+    }
 
     private fun acquireRecordingWakeLock() {
         val pm = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -1467,6 +1487,19 @@ class MixerSessionController(
         probe: FullUsbProbeResult,
     ): Result<Int> {
         updateWaveformConfig()
+        if (VirtualMixer.isSineGenerator(profile ?: return Result.failure(IllegalStateException("No mixer profile")))) {
+            if (captureEngine.isCaptureActive && captureEngine.isSyntheticCapture()) {
+                return Result.success(captureEngine.activeChannelCount)
+            }
+            return captureEngine.startSyntheticCapture(
+                scope = scope,
+                channelCount = VirtualMixer.SINE_CHANNEL_COUNT,
+                sampleRateHz = VirtualMixer.SAMPLE_RATE_HZ,
+            ).map {
+                syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
+                captureEngine.activeChannelCount
+            }
+        }
         if (captureEngine.isCaptureActive && !captureEngine.isUsbDegraded && captureEngine.isNativeCaptureOwner()) {
             val count = channelCountFromProbe(probe)
             return Result.success(count)

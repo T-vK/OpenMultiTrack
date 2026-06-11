@@ -5,6 +5,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 import org.openmultitrack.domain.mixer.MixerProfile
+import org.openmultitrack.domain.mixer.VirtualMixer
 import java.util.UUID
 
 /** Persists user-added mixer profiles across app restarts. */
@@ -66,6 +67,25 @@ class MixerDeviceStore(context: Context) {
     fun isBehringerAudioInterface(descriptor: UsbAudioDeviceDescriptor): Boolean {
         if (descriptor.isLikelyBehringerMixer) return true
         return descriptor.vendorId == 0x1397
+    }
+
+    fun findVirtualSineMixer(): MixerProfile? =
+        listMixers().firstOrNull { VirtualMixer.isSineGenerator(it) }
+
+    /** Built-in sine-wave test source (no USB hardware). */
+    fun addVirtualSineMixer(): MixerProfile {
+        findVirtualSineMixer()?.let { return it }
+        val profile = MixerProfile(
+            id = UUID.randomUUID().toString(),
+            usbDeviceName = "virtual:sine",
+            vendorId = VirtualMixer.VENDOR_ID,
+            productId = VirtualMixer.PRODUCT_ID_SINE,
+            serialNumber = "virtual-sine",
+            productName = "OMT Test Signal",
+            displayName = VirtualMixer.DISPLAY_NAME,
+        )
+        saveMixer(profile)
+        return profile
     }
 
     private fun matchesSameDevice(profile: MixerProfile, descriptor: UsbAudioDeviceDescriptor): Boolean {
