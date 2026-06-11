@@ -95,29 +95,37 @@ class Xr18RoutingService(
         }.getOrDefault(RoutingConfirmResult(channelIndex, target, live = null))
     }
 
-    override suspend fun applyRecordRouting(channelIndices: Iterable<Int>): Boolean =
-        applyChannelsVerified(channelIndices) { XAirInputSourceCatalog.recordTarget(it) }
+    override suspend fun applyRecordRouting(
+        channelIndices: Iterable<Int>,
+        liveByChannel: Map<Int, XAirChannelInputState>,
+    ): Boolean = applyChannelsVerified(channelIndices, liveByChannel) {
+        XAirInputSourceCatalog.recordTarget(it)
+    }
 
-    override suspend fun applySoundcheckRouting(channelIndices: Iterable<Int>): Boolean =
-        applyChannelsVerified(channelIndices) { XAirInputSourceCatalog.soundcheckTarget(it) }
+    override suspend fun applySoundcheckRouting(
+        channelIndices: Iterable<Int>,
+        liveByChannel: Map<Int, XAirChannelInputState>,
+    ): Boolean = applyChannelsVerified(channelIndices, liveByChannel) {
+        XAirInputSourceCatalog.soundcheckTarget(it)
+    }
 
     override suspend fun restoreChannels(
         baseline: Map<Int, XAirChannelInputState>,
         channels: Set<Int>,
+        liveByChannel: Map<Int, XAirChannelInputState>,
     ): Boolean = withContext(Dispatchers.IO) {
         if (channels.isEmpty()) return@withContext true
+        lastVerifyFailure = null
         runCatching {
             openClient().use { client ->
                 Xr18RoutingOsc.onVerifyFailure = { ch, target, live, replies ->
+                    val result = RoutingConfirmResult(ch, target, live, replies.keys)
+                    lastVerifyFailure = result
                     onVerifyFailure?.invoke(ch, target, live, replies.keys)
                 }
-                for (ch in channels.sorted()) {
-                    val target = baseline[ch] ?: continue
-                    if (!Xr18RoutingOsc.writeAndVerify(client, ch, target)) {
-                        return@withContext false
-                    }
-                }
-                true
+                val ok = Xr18RoutingOsc.restoreChannelsBatch(client, baseline, channels, liveByChannel)
+                if (ok) lastVerifyFailure = null
+                ok
             }
         }.getOrDefault(false)
     }
@@ -149,10 +157,12 @@ class Xr18RoutingService(
 
     private suspend fun applyChannelsVerified(
         channelIndices: Iterable<Int>,
+        liveByChannel: Map<Int, XAirChannelInputState>,
         targetFor: (Int) -> XAirChannelInputState,
     ): Boolean = withContext(Dispatchers.IO) {
         val indices = XAirInputSourceCatalog.routableIndices(channelIndices).toList()
         if (indices.isEmpty()) return@withContext true
+        val targets = indices.associateWith { ch -> targetFor(ch) }
         lastVerifyFailure = null
         runCatching {
             openClient().use { client ->
@@ -161,15 +171,9 @@ class Xr18RoutingService(
                     lastVerifyFailure = result
                     onVerifyFailure?.invoke(ch, target, live, replies.keys)
                 }
-                client.send(OscPath.xremote())
-                for (ch in indices.sorted()) {
-                    val target = targetFor(ch)
-                    if (!Xr18RoutingOsc.writeAndVerify(client, ch, target)) {
-                        return@withContext false
-                    }
-                }
-                lastVerifyFailure = null
-                true
+                val ok = Xr18RoutingOsc.applyChannelTargetsBatch(client, targets, liveByChannel)
+                if (ok) lastVerifyFailure = null
+                ok
             }
         }.getOrDefault(false)
     }

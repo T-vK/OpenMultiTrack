@@ -19,13 +19,20 @@ interface MixerRoutingPort {
         target: XAirChannelInputState,
     ): RoutingConfirmResult
 
-    suspend fun applyRecordRouting(channelIndices: Iterable<Int>): Boolean
+    suspend fun applyRecordRouting(
+        channelIndices: Iterable<Int>,
+        liveByChannel: Map<Int, XAirChannelInputState> = emptyMap(),
+    ): Boolean
 
-    suspend fun applySoundcheckRouting(channelIndices: Iterable<Int>): Boolean
+    suspend fun applySoundcheckRouting(
+        channelIndices: Iterable<Int>,
+        liveByChannel: Map<Int, XAirChannelInputState> = emptyMap(),
+    ): Boolean
 
     suspend fun restoreChannels(
         baseline: Map<Int, XAirChannelInputState>,
         channels: Set<Int>,
+        liveByChannel: Map<Int, XAirChannelInputState> = emptyMap(),
     ): Boolean
 
     suspend fun loadSnapshot(slot: Int): Boolean

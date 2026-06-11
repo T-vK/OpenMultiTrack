@@ -58,7 +58,52 @@ class RoutingAutomationHooksImpl(
     override suspend fun beforeSoundcheckApply(
         profile: MixerProfile,
         trackChannels: Set<Int>,
-    ): RoutingHookResult = beforeApply(profile, RoutingOverrideKind.SOUNDCHECK, trackChannels)
+    ): RoutingHookResult = beforeCapture(profile, RoutingOverrideKind.SOUNDCHECK, trackChannels)
+
+    private suspend fun beforeCapture(
+        profile: MixerProfile,
+        kind: RoutingOverrideKind,
+        channels: Set<Int>,
+    ): RoutingHookResult {
+        val config = settings.routingAutomationForMixer(profile.id)
+        when (val peek = coordinator.peekApply(profile, config, kind, channels)) {
+            is RoutingApplyOutcome.Disabled,
+            is RoutingApplyOutcome.SkippedNoOsc,
+            -> return RoutingHookResult.Skipped
+            is RoutingApplyOutcome.SkippedUnreachable ->
+                return routingFailed(profile, kind, "Mixer not reachable on LAN — check Wi‑Fi and OSC IP")
+            is RoutingApplyOutcome.SkippedEmptyScope ->
+                return routingFailed(profile, kind, "No channels in scope for routing automation")
+            is RoutingApplyOutcome.Applied -> return RoutingHookResult.Proceed
+            is RoutingApplyOutcome.Failed -> return routingFailed(profile, kind, peek.message)
+            is RoutingApplyOutcome.ReadyToApply -> {
+                val deferred = CompletableDeferred<Boolean>()
+                applyDeferred.set(deferred)
+                withContext(Dispatchers.Main.immediate) {
+                    onApplyPrompt(
+                        RoutingApplyPromptState(profile.id, kind, peek.channelCount),
+                    )
+                }
+                if (!deferred.await()) return RoutingHookResult.Cancelled
+            }
+        }
+        return when (
+            val outcome = coordinator.captureOverrideOnly(
+                profile,
+                config,
+                kind,
+                channels,
+            )
+        ) {
+            is RoutingApplyOutcome.Applied -> RoutingHookResult.Proceed
+            is RoutingApplyOutcome.Failed -> routingFailed(profile, kind, outcome.message)
+            is RoutingApplyOutcome.SkippedUnreachable ->
+                routingFailed(profile, kind, "Mixer not reachable on LAN — check Wi‑Fi and OSC IP")
+            is RoutingApplyOutcome.SkippedEmptyScope ->
+                routingFailed(profile, kind, "No channels in scope for routing automation")
+            else -> routingFailed(profile, kind, "Routing capture failed ($outcome)")
+        }
+    }
 
     private suspend fun beforeApply(
         profile: MixerProfile,

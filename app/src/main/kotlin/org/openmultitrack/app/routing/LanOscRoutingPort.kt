@@ -32,17 +32,26 @@ class LanOscRoutingPort(
         delegate.confirmChannelRouting(channelIndex, target)
     }
 
-    override suspend fun applyRecordRouting(channelIndices: Iterable<Int>): Boolean =
-        OscLanSession.withMulticastLock(context) { delegate.applyRecordRouting(channelIndices) }
+    override suspend fun applyRecordRouting(
+        channelIndices: Iterable<Int>,
+        liveByChannel: Map<Int, XAirChannelInputState>,
+    ): Boolean = OscLanSession.withMulticastLock(context) {
+        delegate.applyRecordRouting(channelIndices, liveByChannel)
+    }
 
-    override suspend fun applySoundcheckRouting(channelIndices: Iterable<Int>): Boolean =
-        OscLanSession.withMulticastLock(context) { delegate.applySoundcheckRouting(channelIndices) }
+    override suspend fun applySoundcheckRouting(
+        channelIndices: Iterable<Int>,
+        liveByChannel: Map<Int, XAirChannelInputState>,
+    ): Boolean = OscLanSession.withMulticastLock(context) {
+        delegate.applySoundcheckRouting(channelIndices, liveByChannel)
+    }
 
     override suspend fun restoreChannels(
         baseline: Map<Int, XAirChannelInputState>,
         channels: Set<Int>,
+        liveByChannel: Map<Int, XAirChannelInputState>,
     ): Boolean = OscLanSession.withMulticastLock(context) {
-        delegate.restoreChannels(baseline, channels)
+        delegate.restoreChannels(baseline, channels, liveByChannel)
     }
 
     override suspend fun loadSnapshot(slot: Int): Boolean =

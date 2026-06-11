@@ -64,10 +64,27 @@ class RoutingOverrideCoordinator(
         kind: RoutingOverrideKind,
         channelIndices: Set<Int>,
         recordingActive: Boolean = false,
+        deferOscApply: Boolean = false,
     ): RoutingApplyOutcome {
         val host = profile.oscHost ?: return RoutingApplyOutcome.SkippedNoOsc
         val port = routingFactory(host)
-        return applyInternal(profile, config, kind, channelIndices, recordingActive, port)
+        return applyInternal(profile, config, kind, channelIndices, recordingActive, port, deferOscApply)
+    }
+
+    /**
+     * Saves baseline + override targets without sending OSC.
+     * Used for soundcheck before USB playback route opens.
+     */
+    suspend fun captureOverrideOnly(
+        profile: MixerProfile,
+        config: MixerRoutingAutomationConfig,
+        kind: RoutingOverrideKind,
+        channelIndices: Set<Int>,
+        recordingActive: Boolean = false,
+    ): RoutingApplyOutcome {
+        val host = profile.oscHost ?: return RoutingApplyOutcome.SkippedNoOsc
+        val port = routingFactory(host)
+        return applyInternal(profile, config, kind, channelIndices, recordingActive, port, deferOscApply = true)
     }
 
     suspend fun peekRestore(
@@ -121,9 +138,10 @@ class RoutingOverrideCoordinator(
         if (!port.probe(timeoutMs = 2500)) return RoutingApplyOutcome.SkippedUnreachable
         val channels = XAirInputSourceCatalog.routableIndices(pending.affectedChannels)
         if (channels.isEmpty()) return RoutingApplyOutcome.SkippedEmptyScope
+        val live = port.readAllChannelInputs()
         val ok = when (pending.kind) {
-            RoutingOverrideKind.RECORD -> port.applyRecordRouting(channels)
-            RoutingOverrideKind.SOUNDCHECK -> port.applySoundcheckRouting(channels)
+            RoutingOverrideKind.RECORD -> port.applyRecordRouting(channels, live)
+            RoutingOverrideKind.SOUNDCHECK -> port.applySoundcheckRouting(channels, live)
         }
         return if (ok) {
             RoutingApplyOutcome.Applied(pending.transactionId)
@@ -146,6 +164,7 @@ class RoutingOverrideCoordinator(
         channelIndices: Set<Int>,
         recordingActive: Boolean = false,
         port: MixerRoutingPort? = null,
+        deferOscApply: Boolean = false,
     ): RoutingApplyOutcome {
         val routableChannels = XAirInputSourceCatalog.routableIndices(channelIndices)
         if (routableChannels.isEmpty()) return RoutingApplyOutcome.SkippedEmptyScope
@@ -184,10 +203,14 @@ class RoutingOverrideCoordinator(
         )
         baselineStore.save(pending)
 
+        if (deferOscApply) {
+            return RoutingApplyOutcome.Applied(transactionId)
+        }
+
         val ok = when (config.method) {
             RoutingAutomationMethod.PER_CHANNEL -> when (kind) {
-                RoutingOverrideKind.RECORD -> routing.applyRecordRouting(routableChannels)
-                RoutingOverrideKind.SOUNDCHECK -> routing.applySoundcheckRouting(routableChannels)
+                RoutingOverrideKind.RECORD -> routing.applyRecordRouting(routableChannels, all)
+                RoutingOverrideKind.SOUNDCHECK -> routing.applySoundcheckRouting(routableChannels, all)
             }
             RoutingAutomationMethod.SNAPSHOT_SLOT -> {
                 val slot = pending.snapshotSlot
@@ -226,7 +249,7 @@ class RoutingOverrideCoordinator(
                 pending.affectedChannels.filter { ch -> conflicts.none { it.channelIndex == ch } }.toSet()
             else -> pending.affectedChannels
         }
-        val ok = port.restoreChannels(pending.baselineByChannel, channelsToRestore)
+        val ok = port.restoreChannels(pending.baselineByChannel, channelsToRestore.toSet(), live)
         return if (ok) {
             baselineStore.clear()
             RoutingRestoreOutcome.Restored

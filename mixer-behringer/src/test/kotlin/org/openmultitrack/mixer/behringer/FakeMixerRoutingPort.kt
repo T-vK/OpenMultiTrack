@@ -37,15 +37,30 @@ class FakeMixerRoutingPort(
         return RoutingConfirmResult(channelIndex, target, live)
     }
 
-    override suspend fun applyRecordRouting(channelIndices: Iterable<Int>): Boolean =
-        channelIndices.all { writeChannelInput(it, XAirInputSourceCatalog.recordTarget(it)) }
+    override suspend fun applyRecordRouting(
+        channelIndices: Iterable<Int>,
+        liveByChannel: Map<Int, XAirChannelInputState>,
+    ): Boolean = channelIndices.all { ch ->
+        val target = XAirInputSourceCatalog.recordTarget(ch)
+        val live = liveByChannel[ch]
+        if (live != null && live.matchesRouting(target)) return@all true
+        writeChannelInput(ch, target)
+    }
 
-    override suspend fun applySoundcheckRouting(channelIndices: Iterable<Int>): Boolean =
-        channelIndices.all { writeChannelInput(it, XAirInputSourceCatalog.soundcheckTarget(it)) }
+    override suspend fun applySoundcheckRouting(
+        channelIndices: Iterable<Int>,
+        liveByChannel: Map<Int, XAirChannelInputState>,
+    ): Boolean = channelIndices.all { ch ->
+        val target = XAirInputSourceCatalog.soundcheckTarget(ch)
+        val live = liveByChannel[ch]
+        if (live != null && live.matchesRouting(target)) return@all true
+        writeChannelInput(ch, target)
+    }
 
     override suspend fun restoreChannels(
         baseline: Map<Int, XAirChannelInputState>,
         channels: Set<Int>,
+        liveByChannel: Map<Int, XAirChannelInputState>,
     ): Boolean = channels.all { ch ->
         val st = baseline[ch] ?: return@all true
         writeChannelInput(ch, st)

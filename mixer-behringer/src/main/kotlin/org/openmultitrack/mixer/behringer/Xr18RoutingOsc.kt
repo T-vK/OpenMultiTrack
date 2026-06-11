@@ -2,7 +2,7 @@ package org.openmultitrack.mixer.behringer
 
 /** Low-level X-Air routing OSC read/write with verification. */
 internal object Xr18RoutingOsc {
-    private const val SETTLE_MS = 200L
+    private const val SETTLE_MS = 150L
 
     /** Optional diagnostic hook (set from app layer). */
     var onVerifyFailure: ((channelIndex: Int, target: XAirChannelInputState, live: XAirChannelInputState?, replies: Map<String, List<Any>>) -> Unit)? = null
@@ -42,6 +42,9 @@ internal object Xr18RoutingOsc {
         )
     }
 
+    fun queryPathsForChannels(channelIndices: Collection<Int>): List<String> =
+        channelIndices.sorted().flatMap { channelQueryPaths(it) }
+
     fun confirmAgainst(
         channelIndex: Int,
         target: XAirChannelInputState,
@@ -49,9 +52,16 @@ internal object Xr18RoutingOsc {
         replyPaths: Set<String>,
     ): RoutingConfirmResult = RoutingConfirmResult(channelIndex, target, live, replyPaths)
 
-    suspend fun sendChannelTarget(client: OscUdpClient, channelIndex: Int, target: XAirChannelInputState) {
+    suspend fun sendChannelTarget(
+        client: OscUdpClient,
+        channelIndex: Int,
+        target: XAirChannelInputState,
+        sendXremote: Boolean = true,
+    ) {
         val ch = channelIndex + 1
-        client.send(OscPath.xremote())
+        if (sendXremote) {
+            client.send(OscPath.xremote())
+        }
         if (target.usesUsbReturn) {
             client.send(
                 OscPath.channelConfigRtnsrc(ch),
@@ -114,4 +124,61 @@ internal object Xr18RoutingOsc {
         target: XAirChannelInputState,
         maxAttempts: Int = 5,
     ): Boolean = writeAndConfirm(client, channelIndex, target, maxAttempts).confirmed
+
+    /**
+     * Write only channels that differ from [liveByChannel], then verify all targets in one query batch.
+     * Much faster than per-channel write+query loops when many strips are already correct.
+     */
+    suspend fun applyChannelTargetsBatch(
+        client: OscUdpClient,
+        targets: Map<Int, XAirChannelInputState>,
+        liveByChannel: Map<Int, XAirChannelInputState>,
+        maxBatchAttempts: Int = 3,
+    ): Boolean {
+        if (targets.isEmpty()) return true
+        val needChange = targets.filter { (ch, target) ->
+            val live = liveByChannel[ch]
+            live == null || !live.matchesRouting(target)
+        }
+        if (needChange.isEmpty()) return true
+
+        val queryPaths = queryPathsForChannels(needChange.keys)
+        client.send(OscPath.xremote())
+        repeat(maxBatchAttempts) { attempt ->
+            for ((ch, target) in needChange) {
+                sendChannelTarget(client, ch, target, sendXremote = false)
+            }
+            Thread.sleep(SETTLE_MS * (attempt + 1))
+            val replies = client.query(queryPaths, timeoutMs = 2500, rounds = 3)
+            val allOk = needChange.keys.all { ch ->
+                val target = needChange[ch]!!
+                val live = readChannel(replies, ch)
+                live != null && live.matchesRouting(target)
+            }
+            if (allOk) return true
+            if (attempt == maxBatchAttempts - 1) {
+                val failedCh = needChange.keys.firstOrNull { ch ->
+                    val target = needChange[ch]!!
+                    val live = readChannel(replies, ch)
+                    live == null || !live.matchesRouting(target)
+                }
+                if (failedCh != null) {
+                    val target = needChange[failedCh]!!
+                    val live = readChannel(replies, failedCh)
+                    onVerifyFailure?.invoke(failedCh, target, live, replies)
+                }
+            }
+        }
+        return false
+    }
+
+    suspend fun restoreChannelsBatch(
+        client: OscUdpClient,
+        baseline: Map<Int, XAirChannelInputState>,
+        channels: Set<Int>,
+        liveByChannel: Map<Int, XAirChannelInputState>,
+    ): Boolean {
+        val targets = channels.mapNotNull { ch -> baseline[ch]?.let { ch to it } }.toMap()
+        return applyChannelTargetsBatch(client, targets, liveByChannel)
+    }
 }

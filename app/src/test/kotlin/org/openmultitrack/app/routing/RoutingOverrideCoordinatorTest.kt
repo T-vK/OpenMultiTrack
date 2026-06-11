@@ -52,12 +52,18 @@ class RoutingOverrideCoordinatorTest {
             target: XAirChannelInputState,
         ): RoutingConfirmResult = RoutingConfirmResult(channelIndex, target, channels[channelIndex])
 
-        override suspend fun applyRecordRouting(channelIndices: Iterable<Int>): Boolean {
+        override suspend fun applyRecordRouting(
+            channelIndices: Iterable<Int>,
+            liveByChannel: Map<Int, XAirChannelInputState>,
+        ): Boolean {
             if (!applyShouldSucceed) return false
             return channelIndices.all { writeChannelInput(it, XAirInputSourceCatalog.recordTarget(it)) }
         }
 
-        override suspend fun applySoundcheckRouting(channelIndices: Iterable<Int>): Boolean {
+        override suspend fun applySoundcheckRouting(
+            channelIndices: Iterable<Int>,
+            liveByChannel: Map<Int, XAirChannelInputState>,
+        ): Boolean {
             if (!applyShouldSucceed) return false
             return channelIndices.all { writeChannelInput(it, XAirInputSourceCatalog.soundcheckTarget(it)) }
         }
@@ -65,6 +71,7 @@ class RoutingOverrideCoordinatorTest {
         override suspend fun restoreChannels(
             baseline: Map<Int, XAirChannelInputState>,
             channels: Set<Int>,
+            liveByChannel: Map<Int, XAirChannelInputState>,
         ): Boolean {
             if (!restoreShouldSucceed) return false
             return channels.all { ch ->
