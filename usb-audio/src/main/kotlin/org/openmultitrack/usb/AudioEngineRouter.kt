@@ -1,5 +1,6 @@
 package org.openmultitrack.usb
 
+import android.os.SystemClock
 import org.openmultitrack.audio.NativeAudioEngine
 import org.openmultitrack.audio.NativeEngineStatus
 import org.openmultitrack.audio.NativeUac2AltSetting
@@ -182,22 +183,54 @@ object AudioEngineRouter {
         }
 
     fun startPlayback(route: PlaybackRoute, usbDevice: android.hardware.usb.UsbDevice? = null): NativeEngineStatus {
+        val t0 = SystemClock.elapsedRealtime()
+        fun mark(phase: String) {
+            OmtLog.i("Router", "startPlayback +${SystemClock.elapsedRealtime() - t0}ms $phase")
+        }
+        mark("begin backend=${route.backend}")
         stopPlayback()
+        mark("stopPlayback done")
         return when (route.backend) {
-            AudioBackend.OBOE ->
-                NativeAudioEngine.startPlayback(route.oboeDeviceId, route.channelCount, route.sampleRate)
+            AudioBackend.OBOE -> {
+                val status = NativeAudioEngine.startPlayback(route.oboeDeviceId, route.channelCount, route.sampleRate)
+                mark("Oboe start active=${status.active}")
+                status
+            }
             AudioBackend.UAC2 -> {
                 val stream = route.usbStream ?: return failed("missing usb stream")
                 val alt = route.uac2Alt ?: return failed("missing uac2 alt")
+                mark("claiming UAC2 iface=${alt.interfaceNumber} alt=${alt.alternateSetting} fd=${stream.fd}")
                 val javaClaimed = claimUac2Interface(stream, usbDevice, alt)
-                NativeUac2Engine.startPlayback(stream.fd, alt, javaClaimed)
+                mark("claim done javaClaimed=$javaClaimed, starting native UAC2")
+                val status = NativeUac2Engine.startPlayback(stream.fd, alt, javaClaimed)
+                mark("UAC2 start active=${status.active}")
+                status
             }
         }
     }
 
     fun stopPlayback() {
+        val t0 = SystemClock.elapsedRealtime()
         NativeAudioEngine.stopPlayback()
         NativeUac2Engine.stopPlayback()
+        OmtLog.i("Router", "stopPlayback +${SystemClock.elapsedRealtime() - t0}ms done")
+    }
+
+    /** Opens the usb fd and claims the playback interface without starting isoch streaming. */
+    fun preclaimPlaybackRoute(
+        route: PlaybackRoute,
+        usbDevice: android.hardware.usb.UsbDevice?,
+    ): Boolean {
+        if (route.backend != AudioBackend.UAC2) return true
+        val stream = route.usbStream ?: return false
+        val alt = route.uac2Alt ?: return false
+        val t0 = SystemClock.elapsedRealtime()
+        val ok = claimUac2Interface(stream, usbDevice, alt)
+        OmtLog.i(
+            "Router",
+            "preclaimPlaybackRoute +${SystemClock.elapsedRealtime() - t0}ms iface=${alt.interfaceNumber} → $ok",
+        )
+        return ok
     }
 
     fun writePlaybackFrames(src: FloatArray, frameCount: Int, backend: AudioBackend): Int =

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -158,7 +159,7 @@ internal fun computeToolbarLayout(
 
 private fun AppMode.toolbarIcon(): ImageVector = when (this) {
     AppMode.MULTITRACK_RECORD -> Icons.Default.Album
-    AppMode.VIRTUAL_SOUNDCHECK -> Icons.Default.GraphicEq
+    AppMode.VIRTUAL_SOUNDCHECK -> Icons.Default.Headphones
     AppMode.SIMPLE_PLAY -> Icons.Default.PlayCircle
 }
 

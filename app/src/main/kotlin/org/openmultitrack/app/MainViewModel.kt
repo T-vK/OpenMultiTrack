@@ -938,6 +938,10 @@ class MainViewModel(
     }
 
     fun toggleSoundcheckPlayback(mixerId: String) {
+        org.openmultitrack.app.audio.TransportTrace.instant(
+            "MainViewModel.toggleSoundcheckPlayback mixerId=$mixerId " +
+                "isPlaying=${_uiState.value.sessionByMixer[mixerId]?.isPlaying}",
+        )
         if (isRemoteClient()) {
             val playing = _uiState.value.sessionByMixer[mixerId]?.isPlaying == true
             remoteCommand(

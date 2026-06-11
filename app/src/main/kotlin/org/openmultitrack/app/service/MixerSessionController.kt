@@ -25,6 +25,7 @@ import org.openmultitrack.app.audio.LiveWaveformSnapshot
 import org.openmultitrack.app.audio.MonitorMixConfig
 import org.openmultitrack.app.audio.PlaybackMixContext
 import org.openmultitrack.app.audio.SessionPlayer
+import org.openmultitrack.app.audio.TransportTrace
 import org.openmultitrack.app.audio.SyntheticCaptureGenerator
 import org.openmultitrack.app.audio.VirtualMixerProbe
 import org.openmultitrack.app.data.AppSettingsStore
@@ -210,6 +211,11 @@ class MixerSessionController(
         }
         syncVuMeterCapture()
         refreshStorageEstimate()
+        if (_state.value.appMode.isPlaybackMode) {
+            scope.launch {
+                captureMutex.withLock { warmPlaybackRouteLocked() }
+            }
+        }
     }
 
     fun setProbing(probing: Boolean) {
@@ -222,7 +228,7 @@ class MixerSessionController(
             scope.launch { stopRecording() }
         }
         if (mode == AppMode.MULTITRACK_RECORD) {
-            stopSoundcheck()
+            stopSoundcheckHard()
             refreshStorageEstimate()
         }
         _state.update { it.copy(appMode = mode) }
@@ -230,6 +236,9 @@ class MixerSessionController(
             captureEngine.updateVuMetering(false)
             _state.update { it.copy(isVuMetering = false) }
             refreshSoundcheckLibrary()
+            scope.launch {
+                captureMutex.withLock { warmPlaybackRouteLocked() }
+            }
             _state.update {
                 it.copy(
                     soundcheckViewWindowSec = org.openmultitrack.app.ui.daw.SoundcheckViewLayout.clampWindow(
@@ -297,11 +306,22 @@ class MixerSessionController(
     }
 
     private suspend fun warmPlaybackRouteLocked() {
+        val trace = TransportTrace("warmPlaybackRoute")
         val descriptor = activeDescriptor ?: return
         val probe = activeProbe ?: return
         val usbOutputs = maxPlaybackChannelsFromProbe(probe).coerceAtLeast(1)
-        runCatching { ensurePlaybackLocked(descriptor, probe, usbOutputs) }
-            .onFailure { e -> OmtLog.d("MixerSession", "playback route warmup: ${e.message}") }
+        val route = runCatching { ensurePlaybackLocked(descriptor, probe, usbOutputs).getOrThrow() }
+            .onFailure { e ->
+                trace.mark("ensurePlayback failed: ${e.message}")
+                OmtLog.d("MixerSession", "playback route warmup: ${e.message}")
+            }
+            .getOrNull() ?: return
+        trace.mark("usbStream open fd=${usbStream?.fd} backend=${route.backend}")
+        if (route.backend == org.openmultitrack.usb.AudioBackend.UAC2) {
+            AudioEngineRouter.preclaimPlaybackRoute(route, activeUsbDevice)
+            trace.mark("UAC2 playback interface preclaimed")
+        }
+        trace.mark("done")
     }
 
     fun renameSoundcheckSession(sessionDir: String, newTitle: String) {
@@ -453,7 +473,11 @@ class MixerSessionController(
     }
 
     fun stopSoundcheck(resetPosition: Boolean = true) {
-        finishPlaybackTransport(resetPosition = resetPosition)
+        finishPlaybackTransport(resetPosition = resetPosition, releaseNative = false)
+    }
+
+    private fun stopSoundcheckHard(resetPosition: Boolean = true) {
+        finishPlaybackTransport(resetPosition = resetPosition, releaseNative = true)
     }
 
     fun seekSoundcheck(positionSec: Float) {
@@ -530,6 +554,10 @@ class MixerSessionController(
     }
 
     fun toggleSoundcheckPlayback() {
+        val trace = TransportTrace(
+            if (player.isPlaying || _state.value.isPlaying) "uiPause" else "uiPlay",
+        )
+        trace.mark("toggleSoundcheckPlayback isPlaying=${_state.value.isPlaying} player=${player.isPlaying}")
         if (player.isPlaying || _state.value.isPlaying) {
             val sampleRate = _state.value.soundcheckSampleRate.takeIf { it > 0 } ?: 48_000
             val posSec = if (sampleRate > 0 && player.isPlaying) {
@@ -547,8 +575,12 @@ class MixerSessionController(
                 )
             }
             AudioSessionBridge.refreshPlaybackNotification(_state.value)
+            trace.mark("UI paused, dispatching suspend to IO")
             scope.launch(Dispatchers.IO) {
-                captureMutex.withLock { stopSoundcheckLocked(skipStateUpdate = true) }
+                captureMutex.withLock {
+                    trace.mark("captureMutex acquired for suspend")
+                    stopSoundcheckLocked(skipStateUpdate = true, trace = trace)
+                }
             }
         } else {
             _state.update {
@@ -558,10 +590,12 @@ class MixerSessionController(
                     warningMessage = null,
                 )
             }
+            trace.mark("UI set isPlaying=true, dispatching start to IO")
             scope.launch(Dispatchers.IO) {
                 captureMutex.withLock {
+                    trace.mark("captureMutex acquired for start")
                     try {
-                        startSoundcheckPlaybackLockedFromCurrentPosition()
+                        startSoundcheckPlaybackLockedFromCurrentPosition(trace)
                     } catch (e: Exception) {
                         OmtLog.e("MixerSession", "toggleSoundcheckPlayback failed", e)
                         player.stopAndAwait()
@@ -633,16 +667,18 @@ class MixerSessionController(
         }
     }
 
-    private suspend fun startSoundcheckPlaybackLockedFromCurrentPosition() {
+    private suspend fun startSoundcheckPlaybackLockedFromCurrentPosition(trace: TransportTrace? = null) {
         val dir = _state.value.selectedSoundcheckDir
             ?: throw IllegalStateException("No soundcheck session selected")
+        trace?.mark("loading session metadata")
         val metadata = cachedSoundcheckMetadata?.takeIf { cachedSoundcheckDir == dir }
             ?: withContext(Dispatchers.IO) {
                 SessionMetadata.read(File(dir))?.withResolvedChannels(File(dir))
             }
             ?: throw IllegalStateException("Could not read session metadata")
         val frame = (_state.value.playbackPositionSec * metadata.sampleRate).toLong()
-        startSoundcheckPlaybackLocked(frame)
+        trace?.mark("metadata ready startFrame=$frame usbStream=${usbStream != null}")
+        startSoundcheckPlaybackLocked(frame, trace)
     }
 
     private suspend fun prepareUsbForPlaybackLocked() {
@@ -657,11 +693,12 @@ class MixerSessionController(
         }
     }
 
-    private suspend fun startSoundcheckPlaybackLocked(startFrame: Long) {
+    private suspend fun startSoundcheckPlaybackLocked(startFrame: Long, trace: TransportTrace? = null) {
         val descriptor = activeDescriptor
             ?: throw IllegalStateException("Mixer not connected — reconnect USB")
         val probe = activeProbe
             ?: throw IllegalStateException("Mixer not ready — wait for probe to finish")
+        trace?.mark("startSoundcheckPlaybackLocked startFrame=$startFrame")
         val sessionDir = _state.value.selectedSoundcheckDir
             ?: throw IllegalStateException("No soundcheck session selected")
         val dir = File(sessionDir)
@@ -684,14 +721,19 @@ class MixerSessionController(
                 _state.value.isVuMetering ||
                 (captureEngine.isCaptureActive && !_state.value.isRecording)
             ) {
+                trace?.mark("preparing USB (stopping monitor/VU/capture)")
                 prepareUsbForPlaybackLocked()
+                trace?.mark("USB prepared for playback")
             }
             if (player.isPlaying) {
-                player.stopAndAwait()
+                trace?.mark("player still playing, suspending first")
+                player.suspendAndAwait()
             }
             val ui = _state.value
             val usbOutputs = maxPlaybackChannelsFromProbe(probe).coerceAtLeast(1)
+            trace?.mark("ensurePlaybackRoute usbStream=${usbStream != null} fd=${usbStream?.fd}")
             val route = ensurePlaybackLocked(descriptor, probe, usbOutputs).getOrThrow()
+            trace?.mark("route resolved backend=${route.backend}")
             val mixContext = PlaybackMixContext(
                 appMode = ui.appMode,
                 sessionChannelCount = metadata.channels.size,
@@ -703,6 +745,7 @@ class MixerSessionController(
                 ?.let { (it * metadata.sampleRate).toLong() }
             val loopEnd = ui.soundcheckLoopEndSec?.takeIf { ui.soundcheckLoopEnabled }
                 ?.let { (it * metadata.sampleRate).toLong() }
+            trace?.mark("calling player.playSession")
             player.playSession(
                 scope = scope,
                 sessionDir = dir,
@@ -715,6 +758,7 @@ class MixerSessionController(
                 loopEnabled = ui.soundcheckLoopEnabled,
                 mixContext = mixContext,
             ).getOrThrow()
+            trace?.mark("player.playSession returned")
         }
         val statusMessage = when (_state.value.appMode) {
             AppMode.SIMPLE_PLAY -> "Playing stereo mix to USB 1+2"
@@ -731,8 +775,10 @@ class MixerSessionController(
                 playbackDurationSec = durationSec,
             )
         }
-        startPlaybackStatusUpdates(metadata.sampleRate)
+        trace?.mark("starting playback status updates")
+        startPlaybackStatusUpdates(metadata.sampleRate, trace)
         AudioSessionBridge.rebuildNotification()
+        trace?.mark("startSoundcheckPlaybackLocked complete")
     }
 
     private suspend fun restartSoundcheckPlaybackLocked() {
@@ -742,7 +788,12 @@ class MixerSessionController(
         startSoundcheckPlaybackLocked(frame)
     }
 
-    private suspend fun stopSoundcheckLocked(skipStateUpdate: Boolean = false) {
+    private suspend fun stopSoundcheckLocked(
+        skipStateUpdate: Boolean = false,
+        releaseNative: Boolean = false,
+        trace: TransportTrace? = null,
+    ) {
+        trace?.mark("stopSoundcheckLocked releaseNative=$releaseNative")
         val sampleRate = _state.value.soundcheckSampleRate.takeIf { it > 0 } ?: 48_000
         val posSec = if (sampleRate > 0 && player.isPlaying) {
             player.status.positionFrames.toFloat() / sampleRate
@@ -752,7 +803,13 @@ class MixerSessionController(
         if (!skipStateUpdate) {
             stopPlaybackStatusUpdates()
         }
-        player.stop()
+        if (releaseNative) {
+            player.stopAndAwait()
+            trace?.mark("hard stop complete")
+        } else {
+            player.suspendAndAwait()
+            trace?.mark("suspend complete (native engine kept warm)")
+        }
         if (!skipStateUpdate) {
             _state.update {
                 it.copy(
@@ -1188,7 +1245,11 @@ class MixerSessionController(
         if (deviceName == null || deviceName != desc.deviceName) return
         usbDetachJob?.cancel()
         if (_state.value.isPlaying) {
-            stopSoundcheck()
+            finishPlaybackTransport(resetPosition = false, releaseNative = true)
+        } else {
+            scope.launch(Dispatchers.IO) {
+                captureMutex.withLock { player.stop() }
+            }
         }
         captureEngine.setUsbDegraded(true)
         _state.update {
@@ -1292,7 +1353,10 @@ class MixerSessionController(
     private fun finishPlaybackTransport(
         resetPosition: Boolean,
         cancelStatusJob: Boolean = true,
+        releaseNative: Boolean = false,
     ) {
+        val trace = TransportTrace(if (releaseNative) "uiStopHard" else "uiStopSuspend")
+        trace.mark("finishPlaybackTransport resetPosition=$resetPosition releaseNative=$releaseNative")
         if (cancelStatusJob) {
             stopPlaybackStatusUpdates()
         }
@@ -1306,19 +1370,28 @@ class MixerSessionController(
         }
         lastMediaProgressSec = -1
         AudioSessionBridge.refreshPlaybackNotification(_state.value)
+        trace.mark("UI state updated, dispatching stop to IO")
         scope.launch(Dispatchers.IO) {
             captureMutex.withLock {
-                player.stopAndAwait()
+                trace.mark("captureMutex acquired for stop")
+                if (releaseNative) {
+                    player.stopAndAwait()
+                    trace.mark("hard stop complete")
+                } else {
+                    player.suspendAndAwait()
+                    trace.mark("suspend complete (native engine kept warm)")
+                }
             }
         }
     }
 
-    private fun startPlaybackStatusUpdates(sampleRate: Int) {
+    private fun startPlaybackStatusUpdates(sampleRate: Int, trace: TransportTrace? = null) {
         playbackStatusJob?.cancel()
         playbackStatusJob = scope.launch {
             var lastPosSec = -1f
             var idleChecks = 0
             var lastAdvanceMs = System.currentTimeMillis()
+            var loggedFirstCursorAdvance = false
             val endToleranceFrames = (sampleRate * PlaybackTransportPolicy.END_TOLERANCE_SEC)
                 .toLong()
                 .coerceAtLeast(1L)
@@ -1375,10 +1448,15 @@ class MixerSessionController(
                     loopEnabled = loopEnabled,
                 )
                 if (reachedEnd) {
-                    finishPlaybackTransport(resetPosition = true, cancelStatusJob = false)
+                    finishPlaybackTransport(resetPosition = true, cancelStatusJob = false, releaseNative = false)
+                    trace?.mark("playback reached end, suspended for fast replay")
                     break
                 }
                 if (posSec > lastPosSec + 0.02f) {
+                    if (!loggedFirstCursorAdvance) {
+                        loggedFirstCursorAdvance = true
+                        trace?.mark("UI cursor first advanced to ${"%.3f".format(posSec)}s")
+                    }
                     lastPosSec = posSec
                     lastAdvanceMs = System.currentTimeMillis()
                 } else if (
@@ -1849,6 +1927,16 @@ class MixerSessionController(
     }
 
     private suspend fun releaseCaptureIfIdleLocked() {
+        if (_state.value.appMode.isPlaybackMode && activeDescriptor != null) {
+            if (!captureEngine.isRecording &&
+                !_state.value.isMonitoring &&
+                !vuCaptureDesired()
+            ) {
+                captureEngine.updateVuMetering(false)
+                withContext(Dispatchers.IO) { captureEngine.stopCapture() }
+            }
+            return
+        }
         if (!captureEngine.isRecording &&
             !_state.value.isMonitoring &&
             !_state.value.isPlaying &&
@@ -1876,10 +1964,12 @@ class MixerSessionController(
         val device = enumerator.getUsbDevice(descriptor.deviceName)
             ?: return Result.failure(IllegalStateException("USB device not found"))
         if (usbStream == null) {
+            OmtLog.i("MixerSession", "ensurePlayback opening USB stream for ${descriptor.deviceName}")
             val stream = openStream(descriptor)
                 ?: return Result.failure(IllegalStateException("Could not open USB device"))
             usbStream = stream
             activeUsbDevice = device
+            OmtLog.i("MixerSession", "ensurePlayback USB stream open fd=${stream.fd}")
         }
         val route = AudioEngineRouter.resolvePlaybackRoute(probe, usbStream, channelCount)
             ?: return Result.failure(IllegalStateException("No playback route"))

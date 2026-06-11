@@ -5,6 +5,7 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbManager
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import org.openmultitrack.audio.OmtLog
 import java.io.File
 
@@ -24,6 +25,7 @@ class UsbAudioStreamHandle private constructor(
             ?: -1
 
     fun claimInterface(device: UsbDevice, interfaceNumber: Int, alternateSetting: Int = -1): Boolean {
+        val t0 = SystemClock.elapsedRealtime()
         val conn = connection ?: return false
         for (i in 0 until device.interfaceCount) {
             val iface = device.getInterface(i)
@@ -39,7 +41,11 @@ class UsbAudioStreamHandle private constructor(
             val altOk = runCatching { conn.setInterface(iface) }
                 .onFailure { OmtLog.w("UsbStream", "setInterface exception iface=$interfaceNumber", it) }
                 .getOrDefault(false)
-            OmtLog.i("UsbStream", "claimInterface $interfaceNumber alt=${iface.alternateSetting} → $altOk")
+            OmtLog.i(
+                "UsbStream",
+                "claimInterface $interfaceNumber alt=${iface.alternateSetting} → $altOk " +
+                    "+${SystemClock.elapsedRealtime() - t0}ms",
+            )
             return altOk
         }
         OmtLog.w("UsbStream", "interface $interfaceNumber not found on ${device.deviceName}")
@@ -47,12 +53,15 @@ class UsbAudioStreamHandle private constructor(
     }
 
     override fun close() {
+        val t0 = SystemClock.elapsedRealtime()
         runCatching { connection?.close() }
         runCatching { ownedPfd?.close() }
+        OmtLog.i("UsbStream", "close +${SystemClock.elapsedRealtime() - t0}ms fd=$fd")
     }
 
     companion object {
         fun open(context: Context, usbManager: UsbManager, device: UsbDevice): UsbAudioStreamHandle? {
+            val t0 = SystemClock.elapsedRealtime()
             UsbPermissionHelper.ensurePermission(context, usbManager, device)
             val hasPermission = usbManager.hasPermission(device)
             OmtLog.d(
@@ -70,11 +79,17 @@ class UsbAudioStreamHandle private constructor(
                 .onFailure { OmtLog.w("UsbStream", "openDevice exception for ${device.deviceName}", it) }
                 .getOrNull()
             if (connection != null) {
-                OmtLog.i("UsbStream", "openDevice ok fd=${connection.fileDescriptor}")
+                OmtLog.i(
+                    "UsbStream",
+                    "openDevice ok fd=${connection.fileDescriptor} +${SystemClock.elapsedRealtime() - t0}ms",
+                )
                 return UsbAudioStreamHandle(connection, null)
             }
 
-            OmtLog.w("UsbStream", "all open paths failed for ${device.deviceName}")
+            OmtLog.w(
+                "UsbStream",
+                "all open paths failed for ${device.deviceName} +${SystemClock.elapsedRealtime() - t0}ms",
+            )
             return null
         }
 
