@@ -4,6 +4,11 @@ package org.openmultitrack.mixer.behringer
 object XAirInputSourceCatalog {
     const val CHANNEL_COUNT = 16
 
+    fun isRoutable(channelIndex: Int): Boolean = channelIndex in 0 until CHANNEL_COUNT
+
+    fun routableIndices(indices: Iterable<Int>): Set<Int> =
+        indices.filter { isRoutable(it) }.toSet()
+
     fun insrcLabel(value: Int): String = when (value) {
         0 -> "OFF"
         in 1..16 -> "IN%02d".format(value)

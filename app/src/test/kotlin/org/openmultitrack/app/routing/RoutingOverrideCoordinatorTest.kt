@@ -200,6 +200,31 @@ class RoutingOverrideCoordinatorTest {
     }
 
     @Test
+    fun applyConfirmed_ignoresNonRoutableChannels() = runBlocking {
+        val store = MemoryBaselineStore()
+        val port = TestRoutingPort(
+            channels = mutableMapOf(
+                0 to XAirChannelInputState(0, 0, 1),
+                16 to XAirChannelInputState(0, 0, 1),
+            ),
+        )
+        val coordinator = RoutingOverrideCoordinator(store) { port }
+        val config = MixerRoutingAutomationConfig(level = RoutingAutomationLevel.AUTO)
+
+        val outcome = coordinator.applyConfirmed(
+            xr18Profile,
+            config,
+            RoutingOverrideKind.RECORD,
+            setOf(0, 16, 17),
+        )
+
+        assertThat(outcome).isInstanceOf(RoutingApplyOutcome.Applied::class.java)
+        val pending = store.load()
+        assertThat(pending?.affectedChannels).containsExactly(0)
+        assertThat(port.readChannelInput(0)?.usesUsbReturn).isFalse()
+    }
+
+    @Test
     fun pendingRoundTrip_json() {
         val pending = PendingRoutingRestore(
             transactionId = "abc",

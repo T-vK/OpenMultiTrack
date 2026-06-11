@@ -67,6 +67,15 @@ class E2eMixerHarness(
         return ctrl
     }
 
+    fun applyOscHostOnActiveMixer(oscHost: String) {
+        val store = MixerDeviceStore(context)
+        val profile = store.listMixers().first { it.id == mixerId }
+        val updated = profile.copy(oscHost = oscHost)
+        store.saveMixer(updated)
+        manager.getOrCreate(mixerId).setProfile(updated)
+        syncUiWithHarnessMixer(mixerId)
+    }
+
     /** Ensures MainActivity observes the harness-registered mixer (channels + waveforms on screen). */
     private fun syncUiWithHarnessMixer(mixerId: String) {
         appHost.runOnActivity { activity ->

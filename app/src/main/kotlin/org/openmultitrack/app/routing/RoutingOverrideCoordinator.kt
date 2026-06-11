@@ -45,14 +45,15 @@ class RoutingOverrideCoordinator(
         channelIndices: Set<Int>,
     ): RoutingApplyOutcome {
         if (!isEligible(profile, config)) return RoutingApplyOutcome.Disabled
-        if (channelIndices.isEmpty()) return RoutingApplyOutcome.SkippedEmptyScope
+        val routable = XAirInputSourceCatalog.routableIndices(channelIndices)
+        if (routable.isEmpty()) return RoutingApplyOutcome.SkippedEmptyScope
         val host = profile.oscHost ?: return RoutingApplyOutcome.SkippedNoOsc
         val port = routingFactory(host)
         if (!port.probe(timeoutMs = 2500)) return RoutingApplyOutcome.SkippedUnreachable
         if (config.level == RoutingAutomationLevel.PROMPT) {
-            return RoutingApplyOutcome.ReadyToApply(channelIndices.size, kind)
+            return RoutingApplyOutcome.ReadyToApply(routable.size, kind)
         }
-        return applyInternal(profile, config, kind, channelIndices, port = port)
+        return applyInternal(profile, config, kind, routable, port = port)
     }
 
     fun createRoutingPort(host: String): MixerRoutingPort = routingFactory(host)
@@ -115,16 +116,18 @@ class RoutingOverrideCoordinator(
         recordingActive: Boolean = false,
         port: MixerRoutingPort? = null,
     ): RoutingApplyOutcome {
+        val routableChannels = XAirInputSourceCatalog.routableIndices(channelIndices)
+        if (routableChannels.isEmpty()) return RoutingApplyOutcome.SkippedEmptyScope
         val host = profile.oscHost ?: return RoutingApplyOutcome.SkippedNoOsc
         val routing = port ?: routingFactory(host)
         if (!routing.probe(timeoutMs = 2500)) return RoutingApplyOutcome.SkippedUnreachable
 
         val all = routing.readAllChannelInputs()
-        val baseline = channelIndices.associateWith { ch -> all[ch] }.filterValues { it != null }
+        val baseline = routableChannels.associateWith { ch -> all[ch] }.filterValues { it != null }
             .mapValues { it.value!! }
         if (baseline.isEmpty()) return RoutingApplyOutcome.Failed("Could not read mixer routing")
 
-        val overrideTargets = channelIndices.associateWith { ch ->
+        val overrideTargets = routableChannels.associateWith { ch ->
             when (kind) {
                 RoutingOverrideKind.RECORD -> XAirInputSourceCatalog.recordTarget(ch)
                 RoutingOverrideKind.SOUNDCHECK -> XAirInputSourceCatalog.soundcheckTarget(ch)
@@ -137,7 +140,7 @@ class RoutingOverrideCoordinator(
             mixerId = profile.id,
             oscHost = host,
             kind = kind,
-            affectedChannels = channelIndices,
+            affectedChannels = routableChannels,
             baselineByChannel = baseline,
             overrideByChannel = overrideTargets,
             method = config.method,
@@ -152,8 +155,8 @@ class RoutingOverrideCoordinator(
 
         val ok = when (config.method) {
             RoutingAutomationMethod.PER_CHANNEL -> when (kind) {
-                RoutingOverrideKind.RECORD -> routing.applyRecordRouting(channelIndices)
-                RoutingOverrideKind.SOUNDCHECK -> routing.applySoundcheckRouting(channelIndices)
+                RoutingOverrideKind.RECORD -> routing.applyRecordRouting(routableChannels)
+                RoutingOverrideKind.SOUNDCHECK -> routing.applySoundcheckRouting(routableChannels)
             }
             RoutingAutomationMethod.SNAPSHOT_SLOT -> {
                 val slot = pending.snapshotSlot
@@ -166,8 +169,13 @@ class RoutingOverrideCoordinator(
         }
         if (!ok) {
             baselineStore.clear()
+            val detail = Xr18RoutingService.lastVerifyFailure?.report()
             return RoutingApplyOutcome.Failed(
-                "Mixer routing not confirmed — query after OSC write did not match target (see Log viewer)",
+                if (detail != null) {
+                    "Mixer routing not confirmed — $detail"
+                } else {
+                    "Mixer routing not confirmed — query after OSC write did not match target (see Log viewer)"
+                },
             )
         }
         return RoutingApplyOutcome.Applied(transactionId)

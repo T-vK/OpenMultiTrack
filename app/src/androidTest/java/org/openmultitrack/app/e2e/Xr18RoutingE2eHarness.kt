@@ -3,9 +3,14 @@ package org.openmultitrack.app.e2e
 import android.content.Context
 import android.util.Log
 import com.google.common.truth.Truth.assertWithMessage
+import org.openmultitrack.app.data.AppSettingsStore
+import org.openmultitrack.app.data.MixerDeviceStore
+import org.openmultitrack.app.data.MixerRoutingAutomationConfig
+import org.openmultitrack.app.data.RoutingAutomationLevel
 import org.openmultitrack.app.routing.LanOscRoutingPort
 import org.openmultitrack.app.routing.OscLanSession
 import org.openmultitrack.app.scribble.OscLanDiscovery
+import org.openmultitrack.app.service.MixerSessionController
 import org.openmultitrack.mixer.behringer.MixerRoutingPort
 import org.openmultitrack.mixer.behringer.RoutingConfirmResult
 import org.openmultitrack.mixer.behringer.XAirChannelInputState
@@ -66,4 +71,37 @@ object Xr18RoutingE2eHarness {
 
     fun adTarget(channelIndex: Int): XAirChannelInputState =
         XAirInputSourceCatalog.recordTarget(channelIndex)
+
+    /** Discover OSC, persist host on profile, enable AUTO routing for e2e. */
+    suspend fun configureProfileForRouting(context: Context, mixerId: String): Pair<String, MixerRoutingPort> {
+        val oscHost = discoverOscHost(context)
+        val store = MixerDeviceStore(context)
+        val profile = store.listMixers().first { it.id == mixerId }
+        store.saveMixer(profile.copy(oscHost = oscHost))
+        AppSettingsStore(context).setRoutingAutomationForMixer(
+            mixerId,
+            MixerRoutingAutomationConfig(level = RoutingAutomationLevel.AUTO),
+        )
+        Log.i(TAG, "routing AUTO mixer=$mixerId oscHost=$oscHost")
+        return oscHost to routingPort(context, oscHost)
+    }
+
+    fun routableArmedChannels(ctrl: MixerSessionController): Set<Int> =
+        ctrl.state.value.channelStrips
+            .filter { it.armed }
+            .map { it.index }
+            .let { XAirInputSourceCatalog.routableIndices(it) }
+
+    suspend fun assertChannelsConfirmed(
+        port: MixerRoutingPort,
+        channels: Set<Int>,
+        targetFor: (Int) -> XAirChannelInputState,
+        step: String,
+    ) {
+        for (ch in channels.sorted()) {
+            val target = targetFor(ch)
+            val result = port.confirmChannelRouting(ch, target)
+            assertConfirmed("$step CH${ch + 1}", result)
+        }
+    }
 }

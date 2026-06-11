@@ -66,7 +66,13 @@ adb_dev install -r "$ROOT/app/build/outputs/apk/androidTest/debug/app-debug-andr
 EXTRA=()
 [[ -n "$OSC_HOST" ]] && EXTRA+=(-e osc_host "$OSC_HOST")
 
-log "running Xr18RoutingOscE2eTest (logcat: adb -s $SERIAL logcat -s Xr18RoutingE2e:I)"
-adb_dev shell am instrument -w "${EXTRA[@]}" \
-  -e class org.openmultitrack.app.e2e.Xr18RoutingOscE2eTest \
-  org.openmultitrack.test/androidx.test.runner.AndroidJUnitRunner
+run_test() {
+  local class_name="$1"
+  log "running $class_name (logcat: adb -s $SERIAL logcat -s Xr18RoutingE2e:I RoutingHooks:W Xr18Routing:W)"
+  adb_dev shell am instrument -w "${EXTRA[@]}" \
+    -e class "$class_name" \
+    org.openmultitrack.test/androidx.test.runner.AndroidJUnitRunner
+}
+
+run_test org.openmultitrack.app.e2e.Xr18RoutingOscE2eTest
+run_test org.openmultitrack.app.e2e.Xr18RoutingAppE2eTest

@@ -28,6 +28,10 @@ class Xr18RoutingService(
             live: XAirChannelInputState?,
             replyPaths: Set<String>,
         ) -> Unit)? = null
+
+        /** Last failed write+query verification (for user-facing error detail). */
+        @Volatile
+        var lastVerifyFailure: RoutingConfirmResult? = null
     }
     override suspend fun probe(timeoutMs: Long): Boolean = withContext(Dispatchers.IO) {
         runCatching {
@@ -147,11 +151,14 @@ class Xr18RoutingService(
         channelIndices: Iterable<Int>,
         targetFor: (Int) -> XAirChannelInputState,
     ): Boolean = withContext(Dispatchers.IO) {
-        val indices = channelIndices.toList()
+        val indices = XAirInputSourceCatalog.routableIndices(channelIndices).toList()
         if (indices.isEmpty()) return@withContext true
+        lastVerifyFailure = null
         runCatching {
             openClient().use { client ->
                 Xr18RoutingOsc.onVerifyFailure = { ch, target, live, replies ->
+                    val result = RoutingConfirmResult(ch, target, live, replies.keys)
+                    lastVerifyFailure = result
                     onVerifyFailure?.invoke(ch, target, live, replies.keys)
                 }
                 client.send(OscPath.xremote())
@@ -161,6 +168,7 @@ class Xr18RoutingService(
                         return@withContext false
                     }
                 }
+                lastVerifyFailure = null
                 true
             }
         }.getOrDefault(false)
