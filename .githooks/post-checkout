@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Warn when leaving main; block newly created branches by returning to main.
+set -euo pipefail
+
+# post-checkout: <previous-head> <new-head> <branch-checkout-flag>
+branch="$(git branch --show-current 2>/dev/null || true)"
+branch_checkout="${3:-0}"
+
+if [[ -z "$branch" || "$branch" == "main" ]]; then
+  exit 0
+fi
+
+cat >&2 <<EOF
+
+*** WARNING: you are on "$branch", not main. ***
+
+This project commits directly to main only — no feature branches, no PRs.
+  git checkout main
+
+EOF
+
+# branch-checkout-flag=1 means checkout switched branches (including "git checkout -b …")
+if [[ "$branch_checkout" == "1" ]]; then
+  cat >&2 <<EOF
+Rejected: branch "$branch" is not allowed. Returning to main.
+
+To work on changes: stay on main, commit, and push origin main.
+EOF
+  git checkout main >/dev/null 2>&1 || true
+  exit 1
+fi
+
+exit 0

@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
-# Block commits on cursor/* branches — commit directly to main instead.
+# Only allow commits on main — commit directly to main, never on feature branches.
 set -euo pipefail
 
 branch="$(git branch --show-current 2>/dev/null || true)"
 
-if [[ "$branch" == cursor/* ]]; then
-  cat >&2 <<'EOF'
-Rejected: branch names must not start with "cursor/".
+if [[ -z "$branch" ]]; then
+  exit 0
+fi
 
-Please commit directly to main and do not create pull requests.
+if [[ "$branch" != "main" ]]; then
+  cat >&2 <<EOF
+Rejected: commits are only allowed on branch "main" (current: "$branch").
+
+This project does not use feature branches or pull requests.
+  git checkout main
+
+Then commit and push directly to main.
 EOF
   exit 1
 fi
