@@ -15,6 +15,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import org.openmultitrack.app.MainActivity
 import org.openmultitrack.app.R
 import org.openmultitrack.audio.OmtLog
@@ -31,6 +34,7 @@ class AudioSessionService : Service() {
     private lateinit var mediaNotification: SessionMediaNotification
     private val notificationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var lastNotificationSignature: Int? = null
+    private var mediaProgressJobActive = false
 
     @Volatile
     var isInForeground: Boolean = false
@@ -67,6 +71,7 @@ class AudioSessionService : Service() {
             if (isInForeground) mediaNotification.updateProgress(session)
         }
         mediaNotification = SessionMediaNotification(this)
+        startMediaProgressTicker()
         createNotificationChannel()
         OmtLog.i("Service", "AudioSessionService created")
     }
@@ -147,6 +152,22 @@ class AudioSessionService : Service() {
     private fun activeSession(): MixerSessionUiState? {
         val activeId = mixerManager.activeMixerId.value ?: return null
         return mixerManager.getOrCreate(activeId).state.value
+    }
+
+    /** Keeps MediaSession position/subtitle fresh without reposting the notification. */
+    private fun startMediaProgressTicker() {
+        if (mediaProgressJobActive) return
+        mediaProgressJobActive = true
+        notificationScope.launch {
+            while (isActive) {
+                delay(1_000)
+                if (!isInForeground) continue
+                val session = activeSession() ?: continue
+                if (session.isRecording || session.isPlaying) {
+                    mediaNotification.updateProgress(session)
+                }
+            }
+        }
     }
 
     private fun buildAndPostNotification(): Notification {

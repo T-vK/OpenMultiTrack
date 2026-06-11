@@ -22,4 +22,9 @@
     <string name="notification_channel_name">Audio session</string>
     <string name="notification_title">OpenMultiTrack</string>
     <string name="notification_stop">Stop all</string>
+    <string name="notification_action_play">Play</string>
+    <string name="notification_action_pause">Pause</string>
+    <string name="notification_action_stop">Stop</string>
+    <string name="notification_action_previous">Previous</string>
+    <string name="notification_action_next">Next</string>
 </resources>

@@ -3,7 +3,7 @@ package org.openmultitrack.app.service
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.os.SystemClock
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import org.openmultitrack.app.MainActivity
@@ -20,6 +20,7 @@ object SessionNotificationBuilder {
     ): NotificationCompat.Builder {
         val title = mixerName ?: context.getString(R.string.notification_title)
         val subtitle = statusLine(session)
+        val timeSubtitle = timeSubtitle(session)
         val openIntent = PendingIntent.getActivity(
             context,
             0,
@@ -28,29 +29,29 @@ object SessionNotificationBuilder {
         )
         val builder = NotificationCompat.Builder(context, AudioSessionService.CHANNEL_ID)
             .setContentTitle(title)
-            .setContentText(subtitle)
+            .setContentText(timeSubtitle ?: subtitle)
+            .setSubText(if (timeSubtitle != null) subtitle else null)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(openIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setShowWhen(false)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-        if (session?.isRecording == true) {
-            val startedAt = session.recordStartedAtEpochMs.takeIf { it > 0L }
-                ?: (System.currentTimeMillis() - (session.recordElapsedSec * 1000f).toLong())
-            builder.setWhen(startedAt)
-                .setShowWhen(true)
-                .setUsesChronometer(true)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            val compactActions = addLegacyTransportActions(context, builder, session)
+            builder.setStyle(
+                MediaStyle()
+                    .setMediaSession(media.sessionToken())
+                    .setShowActionsInCompactView(*compactActions),
+            )
         } else {
-            builder.setShowWhen(false)
+            builder.setStyle(
+                MediaStyle()
+                    .setMediaSession(media.sessionToken()),
+            )
         }
-        val compactActions = addTransportActions(context, builder, session)
-        builder.setStyle(
-            MediaStyle()
-                .setMediaSession(media.sessionToken())
-                .setShowActionsInCompactView(*compactActions),
-        )
         return builder
     }
 
@@ -64,7 +65,24 @@ object SessionNotificationBuilder {
         else -> "Audio session active"
     }
 
-    private fun addTransportActions(
+    private fun timeSubtitle(session: MixerSessionUiState?): String? = when {
+        session?.isRecording == true ->
+            SessionNotificationTransport.formatTimestamp(
+                session.recordElapsedSec,
+                null,
+                unknownTotal = true,
+            )
+        session?.appMode?.isPlaybackMode == true && (session.isPlaying || session.playbackDurationSec > 0f) ->
+            SessionNotificationTransport.formatTimestamp(
+                session.playbackPositionSec,
+                session.playbackDurationSec.takeIf { it > 0f },
+                unknownTotal = session.playbackDurationSec <= 0f,
+            )
+        else -> null
+    }
+
+    /** Pre-Android 13 devices read actions from the notification itself. */
+    private fun addLegacyTransportActions(
         context: Context,
         builder: NotificationCompat.Builder,
         session: MixerSessionUiState?,
@@ -101,7 +119,7 @@ object SessionNotificationBuilder {
                     broadcastAction(
                         10,
                         SessionTransportReceiver.ACTION_PAUSE_RECORD,
-                        "Pause",
+                        context.getString(R.string.notification_action_pause),
                         android.R.drawable.ic_media_pause,
                     ),
                 )
@@ -109,7 +127,7 @@ object SessionNotificationBuilder {
                     broadcastAction(
                         11,
                         SessionTransportReceiver.ACTION_STOP_RECORD,
-                        "Stop",
+                        context.getString(R.string.notification_action_stop),
                         R.drawable.ic_media_stop,
                     ),
                 )
@@ -136,7 +154,11 @@ object SessionNotificationBuilder {
                         ),
                     )
                 }
-                val playLabel = if (session.isPlaying) "Pause" else "Play"
+                val playLabel = if (session.isPlaying) {
+                    context.getString(R.string.notification_action_pause)
+                } else {
+                    context.getString(R.string.notification_action_play)
+                }
                 val playIcon = if (session.isPlaying) {
                     android.R.drawable.ic_media_pause
                 } else {
@@ -160,25 +182,14 @@ object SessionNotificationBuilder {
                         ),
                     )
                 }
-                if (compact.size < 3) {
-                    addTracked(
-                        broadcastAction(
-                            16,
-                            SessionTransportReceiver.ACTION_STOP_PLAYBACK,
-                            "Stop",
-                            R.drawable.ic_media_stop,
-                        ),
-                    )
-                } else {
-                    addSilent(
-                        broadcastAction(
-                            16,
-                            SessionTransportReceiver.ACTION_STOP_PLAYBACK,
-                            "Stop",
-                            R.drawable.ic_media_stop,
-                        ),
-                    )
-                }
+                addTracked(
+                    broadcastAction(
+                        16,
+                        SessionTransportReceiver.ACTION_STOP_PLAYBACK,
+                        context.getString(R.string.notification_action_stop),
+                        R.drawable.ic_media_stop,
+                    ),
+                )
             }
         }
         addSilent(
