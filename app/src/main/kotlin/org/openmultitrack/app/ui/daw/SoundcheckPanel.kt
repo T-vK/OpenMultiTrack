@@ -839,3 +839,23 @@ internal fun scalePeaksForDisplay(peaks: FloatArray, normalized: Boolean): Float
     val gain = if (maxPeak < 0.15f) 1f / maxPeak else 1f
     return FloatArray(peaks.size) { i -> (peaks[i] * gain).coerceIn(0f, 1f) }
 }
+
+/**
+ * Live recording display scaling uses a monotonic peak ceiling so normalization does not
+ * resurrect background gaps in already-recorded timeline columns when the window max drops.
+ */
+internal fun scalePeaksForLiveDisplay(
+    peaks: FloatArray,
+    normalized: Boolean,
+    peakCeiling: Float,
+): FloatArray {
+    if (peaks.isEmpty()) return peaks
+    val rawMax = peaks.max()
+    if (rawMax <= 1e-6f) return peaks
+    val ceiling = maxOf(peakCeiling, rawMax).coerceAtLeast(1e-6f)
+    if (normalized) {
+        return FloatArray(peaks.size) { i -> (peaks[i] / ceiling).coerceIn(0f, 1f) }
+    }
+    val gain = if (ceiling < 0.15f) 1f / ceiling else 1f
+    return FloatArray(peaks.size) { i -> (peaks[i] * gain).coerceIn(0f, 1f) }
+}

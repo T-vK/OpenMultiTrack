@@ -22,6 +22,94 @@ fun timelineSecondCenterX(second: Int, capacitySlots: Int, peaksPerSec: Int, ima
 fun recordedRegionEndX(imageWidth: Int, elapsedSec: Float, windowSec: Float): Int =
     (imageWidth * (elapsedSec / windowSec).coerceIn(0f, 1f)).toInt().coerceIn(0, imageWidth)
 
+const val RECORDING_STABILITY_CHECKS_PER_SEC = 10
+const val RECORDING_STABILITY_PROBE_SEC = 5
+
+/** Interior lock boundary: excludes the live growth frontier from monotonic checks. */
+fun interiorLockEndX(
+    imageWidth: Int,
+    elapsedSec: Float,
+    windowSec: Float,
+    frontierSec: Float = 0.2f,
+): Int = recordedRegionEndX(imageWidth, (elapsedSec - frontierSec).coerceAtLeast(0f), windowSec)
+
+data class RecordingProbeFrame(
+    val checkIndex: Int,
+    val elapsedSec: Float,
+    val peakCount: Int,
+    val image: ImageBitmap,
+)
+
+/**
+ * Tracks columns that have ever shown bar pixels in the recorded interior.
+ * Once a column has been painted, background must never reappear there.
+ */
+class RecordedColumnLock(private val width: Int) {
+    private val everBar = BooleanArray(width)
+
+    fun lockObserved(occupancy: BooleanArray, upToX: Int, margin: Int) {
+        val end = upToX.coerceIn(margin, width)
+        for (x in margin until end) {
+            if (occupancy[x]) everBar[x] = true
+        }
+    }
+
+    fun lockedColumnCount(margin: Int = 0): Int =
+        (margin until width).count { everBar[it] }
+
+    fun assertNoBackgroundRegression(occupancy: BooleanArray, checkIndex: Int, elapsedSec: Float, margin: Int) {
+        val regressions = mutableListOf<Int>()
+        for (x in margin until width) {
+            if (everBar[x] && !occupancy[x]) regressions.add(x)
+        }
+        check(regressions.isEmpty()) {
+            "check $checkIndex @ ${"%.2f".format(elapsedSec)}s: ${regressions.size} columns regressed " +
+                "to background (first x: ${regressions.take(12)}) — " +
+                "recorded waveform must never lose bar pixels"
+        }
+    }
+}
+
+/**
+ * Runs [checksPerSec] × [probeSec] pixel probes (default 10/s for 5s = 50 checks).
+ * Fails when any previously-painted interior column becomes background again.
+ */
+fun assertRecordingStabilityProbe(
+    frames: List<RecordingProbeFrame>,
+    windowSec: Float,
+    checksPerSec: Int = RECORDING_STABILITY_CHECKS_PER_SEC,
+    probeSec: Int = RECORDING_STABILITY_PROBE_SEC,
+    requireDenseInterior: Boolean = true,
+    minDenseOccupiedFraction: Float = 0.92f,
+    maxGapPx: Int = 4,
+) {
+    val requiredChecks = checksPerSec * probeSec
+    check(frames.size >= requiredChecks) {
+        "need ≥$requiredChecks checks ($checksPerSec/s for ${probeSec}s), got ${frames.size}"
+    }
+    val lock = RecordedColumnLock(frames.first().image.asAndroidBitmap().width)
+    frames.take(requiredChecks).forEach { frame ->
+        val bitmap = frame.image.asAndroidBitmap()
+        val margin = waveformInteriorXMargin(bitmap)
+        val bg = estimateWaveformStripBackground(bitmap)
+        val recordedEnd = recordedRegionEndX(bitmap.width, frame.elapsedSec, windowSec)
+        val lockEnd = interiorLockEndX(bitmap.width, frame.elapsedSec, windowSec)
+        val occupancy = waveformColumnOccupancy(bitmap, margin, recordedEnd.coerceAtLeast(lockEnd), bg)
+        if (lockEnd > margin + 8) {
+            lock.assertNoBackgroundRegression(occupancy, frame.checkIndex, frame.elapsedSec, margin)
+        }
+        if (requireDenseInterior && lockEnd > margin + 20) {
+            assertRecordedRegionDense(
+                bitmap = bitmap,
+                recordedEndX = lockEnd,
+                minOccupiedFraction = minDenseOccupiedFraction,
+                maxGapPx = maxGapPx,
+            )
+        }
+        lock.lockObserved(occupancy, lockEnd, margin)
+    }
+}
+
 /**
  * Per-column occupancy: true when the vertical mid-band at [x] contains waveform bar pixels.
  */

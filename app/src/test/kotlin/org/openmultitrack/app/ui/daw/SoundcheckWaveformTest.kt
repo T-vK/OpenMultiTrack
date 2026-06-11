@@ -43,4 +43,14 @@ class SoundcheckWaveformTest {
         val scaled = scalePeaksForDisplay(quiet, normalized = false)
         assertThat(scaled.max()).isWithin(0.01f).of(1f)
     }
+
+    @Test
+    fun scalePeaksForLiveDisplay_usesMonotonicCeiling() {
+        val loud = floatArrayOf(0.9f, 0.5f, 0.4f)
+        val quiet = floatArrayOf(0.3f, 0.2f, 0.1f)
+        val afterLoud = scalePeaksForLiveDisplay(loud, normalized = true, peakCeiling = 0f)
+        val afterQuiet = scalePeaksForLiveDisplay(quiet, normalized = true, peakCeiling = 0.9f)
+        assertThat(afterQuiet[0]).isWithin(0.01f).of(0.3f / 0.9f)
+        assertThat(afterQuiet[1]).isGreaterThan(0.15f)
+    }
 }

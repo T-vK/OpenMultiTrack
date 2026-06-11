@@ -198,6 +198,9 @@ internal fun LiveWaveformStrip(
 ) {
     val hasDrawableData = peaks.isNotEmpty() && windowSec > 0f && elapsedSec > 0f
     var lockedWidthPx by remember { mutableFloatStateOf(0f) }
+    var livePeakCeiling by remember { mutableFloatStateOf(0f) }
+    val rawMax = peaks.maxOrNull() ?: 0f
+    if (rawMax > livePeakCeiling) livePeakCeiling = rawMax
     val outline = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
     val shape = RoundedCornerShape(3.dp)
     Box(
@@ -217,7 +220,7 @@ internal fun LiveWaveformStrip(
             if (h <= 0f) return@Canvas
             val drawWidth = lockedWidthPx.takeIf { it > 0f } ?: size.width
             if (drawWidth <= 0f) return@Canvas
-            val scaledPeaks = scalePeaksForDisplay(peaks, normalized)
+            val scaledPeaks = scalePeaksForLiveDisplay(peaks, normalized, livePeakCeiling)
             val slotPeaks = liveWaveformSlotPeaks(
                 peaks = scaledPeaks,
                 windowSec = windowSec,

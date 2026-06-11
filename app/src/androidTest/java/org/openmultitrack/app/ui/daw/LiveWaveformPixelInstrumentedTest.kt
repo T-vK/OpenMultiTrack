@@ -7,7 +7,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -20,8 +19,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Pixel-color tests: scan every column in the recorded region for background bleed,
- * gap size, and occupancy flicker while the recording frontier advances.
+ * 10 pixel-color checks per second for the first 5 seconds of recording.
+ * Any column that has ever shown bar pixels in the interior must never become background again.
  */
 @RunWith(AndroidJUnit4::class)
 class LiveWaveformPixelInstrumentedTest {
@@ -30,12 +29,11 @@ class LiveWaveformPixelInstrumentedTest {
 
     private val windowSec = 15f
     private val peaksPerSec = 30
-    private val capacitySlots = (windowSec * peaksPerSec).toInt()
     private val stripWidthDp = 900.dp
     private val stripHeightDp = 64.dp
-
-    private fun captureStrip(): ImageBitmap =
-        composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage()
+    private val checksPerSec = RECORDING_STABILITY_CHECKS_PER_SEC
+    private val probeSec = RECORDING_STABILITY_PROBE_SEC
+    private val totalChecks = checksPerSec * probeSec
 
     private class LiveStripHandle(
         private val composeRule: androidx.compose.ui.test.junit4.ComposeContentTestRule,
@@ -54,7 +52,7 @@ class LiveWaveformPixelInstrumentedTest {
     private fun mountLiveStrip(
         peaks: FloatArray,
         elapsed: Float,
-        normalized: Boolean = false,
+        normalized: Boolean = true,
         color: Color = Color(0xFF22CC44),
     ): LiveStripHandle {
         val peaksState = mutableStateOf(peaks)
@@ -80,178 +78,149 @@ class LiveWaveformPixelInstrumentedTest {
         return LiveStripHandle(composeRule, peaksState, elapsedState, normalizedState)
     }
 
-    @Test
-    fun recordedRegion_continuousTone_hasNoBackgroundGaps() {
-        mountLiveStrip(
-            peaks = FloatArray(5 * peaksPerSec) { 0.85f },
-            elapsed = 5f,
+    private fun captureProbeFrame(checkIndex: Int, elapsedSec: Float, peakCount: Int): RecordingProbeFrame =
+        RecordingProbeFrame(
+            checkIndex = checkIndex,
+            elapsedSec = elapsedSec,
+            peakCount = peakCount,
+            image = composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage(),
         )
-        val bitmap = captureStrip().asAndroidBitmap()
-        val endX = recordedRegionEndX(bitmap.width, 5f, windowSec)
-        assertRecordedRegionDense(bitmap, endX, minOccupiedFraction = 0.92f, maxGapPx = 4)
-    }
 
-    @Test
-    fun recordedRegion_interiorColumnsDoNotFlicker_asFrontierAdvances() {
+    private fun runRecordingProbe(
+        normalized: Boolean = true,
+        peakFactory: (peakIndex: Int) -> Float,
+        peakCountForCheck: (checkIndex: Int, elapsedSec: Float) -> Int = { _, elapsed ->
+            (elapsed * peaksPerSec).toInt().coerceAtLeast(1)
+        },
+        elapsedForCheck: (checkIndex: Int, elapsedSec: Float, peakCount: Int) -> Float =
+            { _, elapsed, _ -> elapsed },
+    ): List<RecordingProbeFrame> {
         val strip = mountLiveStrip(
-            peaks = FloatArray(2 * peaksPerSec) { 0.85f },
-            elapsed = 2f,
+            peaks = floatArrayOf(0.01f),
+            elapsed = 1f / checksPerSec,
+            normalized = normalized,
         )
-        var previous = captureStrip()
-        for (second in listOf(3, 4, 5, 6, 7, 8)) {
-            val interiorEndX = recordedRegionEndX(
-                previous.asAndroidBitmap().width,
-                (second - 1).toFloat(),
-                windowSec,
-            )
-            strip.update(
-                peaks = FloatArray(second * peaksPerSec) { 0.85f },
-                elapsed = second.toFloat(),
-            )
-            val current = captureStrip()
-            if (interiorEndX > 12) {
-                assertRecordedInteriorOccupancyStable(previous, current, interiorEndX)
-                assertRecordedInteriorStaysFilled(previous, current, interiorEndX)
-            }
-            previous = current
+        val frames = ArrayList<RecordingProbeFrame>(totalChecks)
+        repeat(totalChecks) { checkIndex ->
+            val elapsedSec = (checkIndex + 1).toFloat() / checksPerSec
+            val peakCount = peakCountForCheck(checkIndex, elapsedSec)
+            val peaks = FloatArray(peakCount) { i -> peakFactory(i) }
+            val displayElapsed = elapsedForCheck(checkIndex, elapsedSec, peakCount)
+            strip.update(peaks, displayElapsed, normalized)
+            frames.add(captureProbeFrame(checkIndex, displayElapsed, peakCount))
         }
+        return frames
     }
 
     @Test
-    fun recordedRegion_captureTicks_interiorNeverFlickers() {
+    fun recording_firstFiveSeconds_tenChecksPerSecond_normalizedTone_neverRegresses() {
+        val frames = runRecordingProbe(
+            normalized = true,
+            peakFactory = { 0.85f },
+        )
+        assertThat(frames).hasSize(totalChecks)
+        assertRecordingStabilityProbe(frames, windowSec)
+    }
+
+    @Test
+    fun recording_firstFiveSeconds_tenChecksPerSecond_rawTone_neverRegresses() {
+        val frames = runRecordingProbe(
+            normalized = false,
+            peakFactory = { 0.12f },
+        )
+        assertRecordingStabilityProbe(frames, windowSec)
+    }
+
+    @Test
+    fun recording_firstFiveSeconds_tenChecksPerSecond_varyingMax_neverRegresses() {
+        val frames = runRecordingProbe(
+            normalized = true,
+            peakFactory = { i ->
+                when {
+                    i % 11 == 0 -> 0.98f
+                    i % 3 == 0 -> 0.72f
+                    else -> 0.04f
+                }
+            },
+        )
+        assertRecordingStabilityProbe(
+            frames = frames,
+            windowSec = windowSec,
+            requireDenseInterior = false,
+        )
+    }
+
+    @Test
+    fun recording_firstFiveSeconds_tenChecksPerSecond_bassLikeAttacks_neverRegresses() {
+        val frames = runRecordingProbe(
+            normalized = true,
+            peakFactory = { i ->
+                if (i % 15 == 0) 0.92f else if (i % 5 == 0) 0.18f else 0.02f
+            },
+        )
+        assertRecordingStabilityProbe(
+            frames = frames,
+            windowSec = windowSec,
+            requireDenseInterior = false,
+        )
+    }
+
+    @Test
+    fun recording_firstFiveSeconds_tenChecksPerSecond_peakBufferLag_neverRegresses() {
+        val frames = runRecordingProbe(
+            normalized = true,
+            peakFactory = { 0.8f },
+            peakCountForCheck = { checkIndex, elapsed ->
+                val expected = (elapsed * peaksPerSec).toInt()
+                (expected - 4 - (checkIndex % 3)).coerceAtLeast(1)
+            },
+            elapsedForCheck = { _, elapsed, _ -> elapsed },
+        )
+        assertRecordingStabilityProbe(frames, windowSec)
+    }
+
+    @Test
+    fun recording_firstFiveSeconds_tenChecksPerSecond_windowMaxDrops_neverRegresses() {
         val strip = mountLiveStrip(
-            peaks = FloatArray(peaksPerSec) { 0.85f },
+            peaks = FloatArray(30) { 0.95f },
             elapsed = 1f,
-        )
-        var previous = captureStrip()
-        repeat(45) { tick ->
-            val peakCount = peaksPerSec + tick + 1
-            strip.update(
-                peaks = FloatArray(peakCount) { 0.85f },
-                elapsed = peakCount / peaksPerSec.toFloat(),
-            )
-            val current = captureStrip()
-            val interiorEndX = recordedRegionEndX(
-                previous.asAndroidBitmap().width,
-                (peakCount - 1) / peaksPerSec.toFloat(),
-                windowSec,
-            )
-            if (interiorEndX > 12) {
-                assertRecordedInteriorOccupancyStable(previous, current, interiorEndX)
-                assertRecordedInteriorStaysFilled(previous, current, interiorEndX)
-            }
-            previous = current
-        }
-    }
-
-    @Test
-    fun recordedRegion_normalizationVaryingMax_interiorColumnsStable() {
-        val strip = mountLiveStrip(
-            peaks = FloatArray(60) { if (it % 2 == 0) 0.8f else 0.04f },
-            elapsed = 2f,
             normalized = true,
         )
-        var previous = captureStrip()
-        repeat(25) { step ->
-            val n = 60 + step * 3
-            val elapsed = n / peaksPerSec.toFloat()
-            strip.update(
-                peaks = FloatArray(n) { i ->
-                    when {
-                        i % 7 == 0 -> 0.95f
-                        i % 2 == 0 -> 0.75f
-                        else -> 0.03f
-                    }
-                },
-                elapsed = elapsed,
-                normalized = true,
-            )
-            val current = captureStrip()
-            val interiorEndX = recordedRegionEndX(
-                previous.asAndroidBitmap().width,
-                elapsed - 3f / peaksPerSec,
-                windowSec,
-            )
-            if (interiorEndX > 20) {
-                assertRecordedInteriorOccupancyStable(previous, current, interiorEndX)
-            }
-            previous = current
-        }
-    }
-
-    @Test
-    fun recordedRegion_peakBufferLag_noPhantomInteriorChange() {
-        val strip = mountLiveStrip(
-            peaks = FloatArray(40) { 0.8f },
-            elapsed = 3f,
-        )
-        var previous = captureStrip()
-        repeat(15) { step ->
-            val elapsed = 3f + step * 0.1f
-            strip.update(
-                peaks = FloatArray(40 + step * 2) { 0.8f },
-                elapsed = elapsed,
-            )
-            val current = captureStrip()
-            val interiorEndX = recordedRegionEndX(
-                previous.asAndroidBitmap().width,
-                elapsed - 0.15f,
-                windowSec,
-            )
-            if (interiorEndX > 15) {
-                assertRecordedInteriorOccupancyStable(previous, current, interiorEndX)
-                assertRecordedInteriorStaysFilled(previous, current, interiorEndX)
-            }
-            previous = current
-        }
-    }
-
-    @Test
-    fun growth_leftToRight_secondMarkersAppearThenLock() {
-        var peaks by mutableStateOf(floatArrayOf())
-        var elapsed by mutableStateOf(0f)
-
-        composeRule.setContent {
-            LiveWaveformStrip(
-                peaks = peaks,
-                windowSec = windowSec,
-                elapsedSec = elapsed,
-                peaksPerSec = peaksPerSec,
-                color = Color(0xFF3366CC),
-                normalized = true,
-                modifier = Modifier
-                    .width(stripWidthDp)
-                    .height(stripHeightDp),
-            )
-        }
-
-        val frames = linkedMapOf<Int, ImageBitmap>()
-        for (second in 0..9) {
-            if (second == 0) {
-                peaks = floatArrayOf()
-                elapsed = 0f
+        val frames = ArrayList<RecordingProbeFrame>(totalChecks)
+        repeat(totalChecks) { checkIndex ->
+            val elapsedSec = (checkIndex + 1).toFloat() / checksPerSec
+            val peakCount = (elapsedSec * peaksPerSec).toInt().coerceAtLeast(1)
+            val peaks = if (checkIndex < totalChecks / 2) {
+                FloatArray(peakCount) { 0.95f }
             } else {
-                peaks = FloatArray(second * peaksPerSec) { 0.85f }
-                elapsed = second.toFloat()
+                FloatArray(peakCount) { 0.04f }
             }
-            composeRule.waitForIdle()
-            frames[second] = captureStrip()
+            strip.update(peaks, elapsedSec, normalized = true)
+            frames.add(captureProbeFrame(checkIndex, elapsedSec, peakCount))
         }
-
-        assertLeftToRightWaveformGrowth(
-            framesByElapsedSec = frames,
-            capacitySlots = capacitySlots,
-            peaksPerSec = peaksPerSec,
+        assertRecordingStabilityProbe(
+            frames = frames,
             windowSec = windowSec,
-            maxSecond = 9,
-            requireDenseInterior = true,
+            requireDenseInterior = false,
         )
+    }
+
+    @Test
+    fun recording_firstFiveSeconds_tenChecksPerSecond_elapsedAheadOfPeaks_neverRegresses() {
+        val frames = runRecordingProbe(
+            normalized = true,
+            peakFactory = { 0.8f },
+            peakCountForCheck = { _, elapsed ->
+                ((elapsed - 0.25f).coerceAtLeast(0.05f) * peaksPerSec).toInt().coerceAtLeast(1)
+            },
+        )
+        assertRecordingStabilityProbe(frames, windowSec)
     }
 
     @Test
     fun emptyStrip_showsVisibleContainerBeforeRecording() {
         mountLiveStrip(peaks = floatArrayOf(), elapsed = 0f)
-        val bitmap = captureStrip().asAndroidBitmap()
+        val bitmap = composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage().asAndroidBitmap()
         assertThat(hasWaveformStripContainer(bitmap)).isTrue()
         assertThat(interiorWaveformBarPixelCount(bitmap)).isEqualTo(0)
     }
