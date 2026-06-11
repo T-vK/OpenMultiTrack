@@ -65,6 +65,12 @@ data class SettingsUiState(
     val additionalLibraryRoots: List<String> = emptyList(),
     val autoScanRemovableMedia: Boolean = true,
     val storageVolumeOptions: List<org.openmultitrack.app.data.StorageVolumeOption> = emptyList(),
+    val redundantRecordingRoots: List<String> = emptyList(),
+    val alwaysIncludeOpenMultiTrackFolders: Boolean = true,
+    val localSpillBufferEnabled: Boolean = true,
+    val localSpillBufferMinutes: Int = 5,
+    val minFreeStorageBytes: Long = 0L,
+    val batteryOptimizationIgnored: Boolean = true,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -94,6 +100,13 @@ fun SettingsScreen(
     onAddAdditionalLibraryRoot: (String) -> Unit = {},
     onRemoveAdditionalLibraryRoot: (String) -> Unit = {},
     onAutoScanRemovableMediaChange: (Boolean) -> Unit = {},
+    onAddRedundantRecordingRoot: (String) -> Unit = {},
+    onRemoveRedundantRecordingRoot: (String) -> Unit = {},
+    onAlwaysIncludeOpenMultiTrackFoldersChange: (Boolean) -> Unit = {},
+    onLocalSpillBufferEnabledChange: (Boolean) -> Unit = {},
+    onLocalSpillBufferMinutesChange: (Int) -> Unit = {},
+    onMinFreeStorageBytesChange: (Long) -> Unit = {},
+    onOpenBatterySettings: () -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -134,6 +147,13 @@ fun SettingsScreen(
             onAddAdditionalLibraryRoot = onAddAdditionalLibraryRoot,
             onRemoveAdditionalLibraryRoot = onRemoveAdditionalLibraryRoot,
             onAutoScanRemovableMediaChange = onAutoScanRemovableMediaChange,
+            onAddRedundantRecordingRoot = onAddRedundantRecordingRoot,
+            onRemoveRedundantRecordingRoot = onRemoveRedundantRecordingRoot,
+            onAlwaysIncludeOpenMultiTrackFoldersChange = onAlwaysIncludeOpenMultiTrackFoldersChange,
+            onLocalSpillBufferEnabledChange = onLocalSpillBufferEnabledChange,
+            onLocalSpillBufferMinutesChange = onLocalSpillBufferMinutesChange,
+            onMinFreeStorageBytesChange = onMinFreeStorageBytesChange,
+            onOpenBatterySettings = onOpenBatterySettings,
         )
     }
 }
@@ -164,6 +184,13 @@ private fun SettingsContent(
     onAddAdditionalLibraryRoot: (String) -> Unit = {},
     onRemoveAdditionalLibraryRoot: (String) -> Unit = {},
     onAutoScanRemovableMediaChange: (Boolean) -> Unit = {},
+    onAddRedundantRecordingRoot: (String) -> Unit = {},
+    onRemoveRedundantRecordingRoot: (String) -> Unit = {},
+    onAlwaysIncludeOpenMultiTrackFoldersChange: (Boolean) -> Unit = {},
+    onLocalSpillBufferEnabledChange: (Boolean) -> Unit = {},
+    onLocalSpillBufferMinutesChange: (Int) -> Unit = {},
+    onMinFreeStorageBytesChange: (Long) -> Unit = {},
+    onOpenBatterySettings: () -> Unit = {},
 ) {
     var query by remember { mutableStateOf("") }
     val normalizedQuery = query.trim().lowercase()
@@ -201,7 +228,13 @@ private fun SettingsContent(
     }
     val showStorageSection = normalizedQuery.isEmpty() ||
         "storage".contains(normalizedQuery) ||
-        "recording".contains(normalizedQuery)
+        "recording".contains(normalizedQuery) ||
+        "reliability".contains(normalizedQuery) ||
+        "battery".contains(normalizedQuery)
+    val showReliabilitySection = normalizedQuery.isEmpty() ||
+        "reliability".contains(normalizedQuery) ||
+        "battery".contains(normalizedQuery) ||
+        "background".contains(normalizedQuery)
 
     Column(modifier = modifier) {
         OutlinedTextField(
@@ -269,16 +302,66 @@ private fun SettingsContent(
                             effectiveStorageRootPath = state.effectiveStorageRootPath,
                             storageRootPath = state.storageRootPath,
                             additionalLibraryRoots = state.additionalLibraryRoots,
+                            redundantRecordingRoots = state.redundantRecordingRoots,
                             autoScanRemovableMedia = state.autoScanRemovableMedia,
+                            alwaysIncludeOpenMultiTrackFolders = state.alwaysIncludeOpenMultiTrackFolders,
+                            localSpillBufferEnabled = state.localSpillBufferEnabled,
+                            localSpillBufferMinutes = state.localSpillBufferMinutes,
+                            minFreeStorageBytes = state.minFreeStorageBytes,
                             storageVolumeOptions = state.storageVolumeOptions,
                             onSetStorageRootPath = onSetStorageRootPath,
                             onAddAdditionalLibraryRoot = onAddAdditionalLibraryRoot,
                             onRemoveAdditionalLibraryRoot = onRemoveAdditionalLibraryRoot,
+                            onAddRedundantRecordingRoot = onAddRedundantRecordingRoot,
+                            onRemoveRedundantRecordingRoot = onRemoveRedundantRecordingRoot,
                             onAutoScanRemovableMediaChange = onAutoScanRemovableMediaChange,
+                            onAlwaysIncludeOpenMultiTrackFoldersChange = onAlwaysIncludeOpenMultiTrackFoldersChange,
+                            onLocalSpillBufferEnabledChange = onLocalSpillBufferEnabledChange,
+                            onLocalSpillBufferMinutesChange = onLocalSpillBufferMinutesChange,
+                            onMinFreeStorageBytesChange = onMinFreeStorageBytesChange,
+                        )
+                    }
+                }
+                if (showReliabilitySection) {
+                    item(key = "reliability-section") {
+                        SettingsReliabilitySection(
+                            batteryOptimizationIgnored = state.batteryOptimizationIgnored,
+                            onOpenBatterySettings = onOpenBatterySettings,
                         )
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SettingsReliabilitySection(
+    batteryOptimizationIgnored: Boolean,
+    onOpenBatterySettings: () -> Unit,
+) {
+    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+    Text(
+        "Background reliability",
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        fontWeight = FontWeight.SemiBold,
+    )
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Text("Battery optimization", style = MaterialTheme.typography.bodyLarge)
+        Text(
+            if (batteryOptimizationIgnored) {
+                "OpenMultiTrack is allowed to run in the background during recording."
+            } else {
+                "Android may pause recording in the background. Disable battery optimization for uninterrupted multitrack capture."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = 6.dp),
+        )
+        OutlinedButton(onClick = onOpenBatterySettings, modifier = Modifier.fillMaxWidth()) {
+            Text(if (batteryOptimizationIgnored) "Review battery settings" else "Disable battery optimization")
         }
     }
 }

@@ -145,6 +145,12 @@ data class DawUiState(
     val additionalLibraryRoots: List<String> = emptyList(),
     val autoScanRemovableMedia: Boolean = true,
     val storageVolumeOptions: List<StorageVolumeOption> = emptyList(),
+    val redundantRecordingRoots: List<String> = emptyList(),
+    val alwaysIncludeOpenMultiTrackFolders: Boolean = true,
+    val localSpillBufferEnabled: Boolean = true,
+    val localSpillBufferMinutes: Int = 5,
+    val minFreeStorageBytes: Long = 0L,
+    val batteryOptimizationIgnored: Boolean = true,
 )
 
 fun hasNewerRecordingThanSelected(
@@ -195,6 +201,13 @@ class MainViewModel(
             effectiveStorageRootPath = storageResolver.defaultRecordingRoot().absolutePath,
             additionalLibraryRoots = settings.additionalLibraryRoots,
             autoScanRemovableMedia = settings.autoScanRemovableMedia,
+            redundantRecordingRoots = settings.redundantRecordingRoots,
+            alwaysIncludeOpenMultiTrackFolders = settings.alwaysIncludeOpenMultiTrackFolders,
+            localSpillBufferEnabled = settings.localSpillBufferEnabled,
+            localSpillBufferMinutes = settings.localSpillBufferMinutes,
+            minFreeStorageBytes = settings.minFreeStorageBytes,
+            batteryOptimizationIgnored = org.openmultitrack.app.data.StorageAccessHelper
+                .isIgnoringBatteryOptimizations(appContext),
         ),
     )
     val uiState: StateFlow<DawUiState> = _uiState.asStateFlow()
@@ -211,6 +224,8 @@ class MainViewModel(
     val bluetoothPermissionRequests: SharedFlow<Unit> = _bluetoothPermissionRequests.asSharedFlow()
     private val _audioPermissionRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
     val audioPermissionRequests: SharedFlow<Unit> = _audioPermissionRequests.asSharedFlow()
+    private val _storageAccessRequests = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val storageAccessRequests: SharedFlow<String> = _storageAccessRequests.asSharedFlow()
     private var pendingFlow8Action: PendingFlow8Action? = null
     private var pendingAudioAction: PendingAudioAction? = null
     private val lastSessionStatusByMixer = mutableMapOf<String, String?>()
@@ -510,6 +525,10 @@ class MainViewModel(
     fun onAppResumed() {
         refreshUsbAndOutputs(recordingSafe = true)
         refreshPrerequisites()
+        refreshBatteryOptimizationState()
+        viewModelScope.launch(Dispatchers.IO) {
+            org.openmultitrack.app.data.RecordingSpillSync.syncAll(storageResolver, settings)
+        }
     }
 
     fun refreshPrerequisites() {
@@ -910,6 +929,11 @@ class MainViewModel(
                 if (playing) "pause_playback" else "play_playback",
                 JSONObject().put("mixerId", mixerId),
             )
+            return
+        }
+        val willPlay = _uiState.value.sessionByMixer[mixerId]?.isPlaying != true
+        if (willPlay && !sessionClient.promoteForeground("Playback")) {
+            showStatus("Could not start playback — allow notifications and try again.", mixerId)
             return
         }
         sessionClient.withManager { it.getOrCreate(mixerId).toggleSoundcheckPlayback() }
@@ -1377,25 +1401,111 @@ class MainViewModel(
     }
 
     fun showSettings(show: Boolean) {
-        if (show) refreshStorageVolumeOptions()
         _uiState.update { it.copy(showSettings = show) }
+        if (show) refreshStorageVolumeOptionsAsync()
     }
 
-    private fun refreshStorageVolumeOptions() {
-        _uiState.update {
-            it.copy(
-                storageVolumeOptions = storageResolver.discoverVolumeOptions(),
-                effectiveStorageRootPath = storageResolver.defaultRecordingRoot().absolutePath,
-                storageRootPath = settings.storageRootPath,
-                additionalLibraryRoots = settings.additionalLibraryRoots,
-            )
+    private fun refreshStorageVolumeOptionsAsync() {
+        viewModelScope.launch {
+            val options = withContext(Dispatchers.IO) { storageResolver.discoverVolumeOptions() }
+            val effective = withContext(Dispatchers.IO) { storageResolver.defaultRecordingRoot().absolutePath }
+            _uiState.update {
+                it.copy(
+                    storageVolumeOptions = options,
+                    effectiveStorageRootPath = effective,
+                    storageRootPath = settings.storageRootPath,
+                    additionalLibraryRoots = settings.additionalLibraryRoots,
+                    redundantRecordingRoots = settings.redundantRecordingRoots,
+                    alwaysIncludeOpenMultiTrackFolders = settings.alwaysIncludeOpenMultiTrackFolders,
+                    localSpillBufferEnabled = settings.localSpillBufferEnabled,
+                    localSpillBufferMinutes = settings.localSpillBufferMinutes,
+                    minFreeStorageBytes = settings.minFreeStorageBytes,
+                )
+            }
+            withContext(Dispatchers.IO) {
+                org.openmultitrack.app.data.RecordingSpillSync.syncAll(storageResolver, settings)
+            }
         }
     }
 
     private fun refreshLibrariesAfterStorageChange() {
-        refreshStorageVolumeOptions()
+        refreshStorageVolumeOptionsAsync()
         _uiState.value.activeMixerId?.let { refreshSoundcheckLibrary(it) }
             ?: _uiState.value.mixers.forEach { refreshSoundcheckLibrary(it.id) }
+    }
+
+    fun refreshBatteryOptimizationState() {
+        _uiState.update {
+            it.copy(
+                batteryOptimizationIgnored = org.openmultitrack.app.data.StorageAccessHelper
+                    .isIgnoringBatteryOptimizations(appContext),
+            )
+        }
+    }
+
+    fun requestStorageAccessForPath(path: String) {
+        _storageAccessRequests.tryEmit(path)
+    }
+
+    fun addRedundantRecordingRoot(path: String) {
+        val trimmed = path.trim()
+        if (trimmed.isEmpty()) return
+        val updated = (settings.redundantRecordingRoots + trimmed).distinct()
+        settings.redundantRecordingRoots = updated
+        _uiState.update { it.copy(redundantRecordingRoots = updated) }
+        maybeRequestStorageAccess(trimmed)
+        withContextEnsureRecordingTree(trimmed)
+        refreshLibrariesAfterStorageChange()
+    }
+
+    fun removeRedundantRecordingRoot(path: String) {
+        val updated = settings.redundantRecordingRoots.filter { it != path }
+        settings.redundantRecordingRoots = updated
+        _uiState.update { it.copy(redundantRecordingRoots = updated) }
+        refreshLibrariesAfterStorageChange()
+    }
+
+    fun setAlwaysIncludeOpenMultiTrackFolders(enabled: Boolean) {
+        settings.alwaysIncludeOpenMultiTrackFolders = enabled
+        _uiState.update { it.copy(alwaysIncludeOpenMultiTrackFolders = enabled) }
+        refreshLibrariesAfterStorageChange()
+    }
+
+    fun setLocalSpillBufferEnabled(enabled: Boolean) {
+        settings.localSpillBufferEnabled = enabled
+        _uiState.update { it.copy(localSpillBufferEnabled = enabled) }
+    }
+
+    fun setLocalSpillBufferMinutes(minutes: Int) {
+        val clamped = minutes.coerceIn(1, 60)
+        settings.localSpillBufferMinutes = clamped
+        _uiState.update { it.copy(localSpillBufferMinutes = clamped) }
+    }
+
+    fun setMinFreeStorageBytes(bytes: Long) {
+        val clamped = bytes.coerceAtLeast(0L)
+        settings.minFreeStorageBytes = clamped
+        _uiState.update { it.copy(minFreeStorageBytes = clamped) }
+    }
+
+    private fun withContextEnsureRecordingTree(path: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val root = java.io.File(path)
+            if (!root.isDirectory) root.mkdirs()
+        }
+    }
+
+    private fun overlaysBlockHeavySessionUpdates(): Boolean {
+        val ui = _uiState.value
+        return ui.showSettings || ui.showLogViewer || ui.mixerSettingsMixerId != null
+    }
+
+    private fun sessionForUiWhileOverlay(session: MixerSessionUiState): MixerSessionUiState {
+        if (!overlaysBlockHeavySessionUpdates()) return session
+        return session.copy(
+            waveformPeaks = emptyMap(),
+            captureMeterLevels = emptyMap(),
+        )
     }
 
     fun setRecordWaveformNormalized(enabled: Boolean) {
@@ -1416,7 +1526,18 @@ class MainViewModel(
                 effectiveStorageRootPath = storageResolver.defaultRecordingRoot().absolutePath,
             )
         }
+        path?.let { maybeRequestStorageAccess(it) }
         refreshLibrariesAfterStorageChange()
+    }
+
+    private fun maybeRequestStorageAccess(path: String) {
+        val helper = org.openmultitrack.app.data.StorageAccessHelper
+        if (!helper.canWriteTo(path) ||
+            helper.needsManageAllFilesAccess(appContext, path) ||
+            helper.needsLegacyStoragePermission(appContext, path)
+        ) {
+            requestStorageAccessForPath(path)
+        }
     }
 
     fun addAdditionalLibraryRoot(path: String) {
@@ -1425,7 +1546,13 @@ class MainViewModel(
         val updated = (settings.additionalLibraryRoots + trimmed).distinct()
         settings.additionalLibraryRoots = updated
         _uiState.update { it.copy(additionalLibraryRoots = updated) }
+        maybeRequestStorageAccess(trimmed)
         refreshLibrariesAfterStorageChange()
+    }
+
+    fun openBatterySettings() {
+        org.openmultitrack.app.data.StorageAccessHelper.openAppBatterySettings(appContext)
+        refreshBatteryOptimizationState()
     }
 
     fun removeAdditionalLibraryRoot(path: String) {
@@ -1729,8 +1856,9 @@ class MainViewModel(
             manager.getOrCreate(mixerId).state.collect { session ->
                 if (isRemoteClient()) return@collect
                 wasRecordingByMixer[mixerId] = session.isRecording
+                val uiSession = sessionForUiWhileOverlay(session)
                 _uiState.update { ui ->
-                    ui.copy(sessionByMixer = ui.sessionByMixer + (mixerId to session))
+                    ui.copy(sessionByMixer = ui.sessionByMixer + (mixerId to uiSession))
                 }
                 maybeShowSoundcheckLoadPrompt(mixerId, session)?.let { prompt ->
                     _uiState.update { it.copy(soundcheckLoadPrompt = prompt) }

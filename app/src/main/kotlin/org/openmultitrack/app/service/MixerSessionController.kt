@@ -20,6 +20,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.openmultitrack.app.audio.CaptureSessionEngine
+import org.openmultitrack.app.audio.VirtualDevicePlayback
 import org.openmultitrack.app.audio.LiveWaveformSnapshot
 import org.openmultitrack.app.audio.MonitorMixConfig
 import org.openmultitrack.app.audio.PlaybackMixContext
@@ -775,8 +776,9 @@ class MixerSessionController(
 
     fun setRecordView(viewStartSec: Float, viewWindowSec: Float) {
         val bufferMax = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
-        val window = viewWindowSec.coerceIn(5f, bufferMax)
         val elapsed = _state.value.recordElapsedSec
+        val maxWindow = max(bufferMax, elapsed).coerceAtLeast(1f)
+        val window = viewWindowSec.coerceIn(1f, maxWindow)
         val maxStart = max(0f, elapsed - window)
         _state.update {
             it.copy(
@@ -787,38 +789,46 @@ class MixerSessionController(
         }
     }
 
-    fun panRecordView(deltaSec: Float) {
-        val s = _state.value
-        setRecordView(s.recordViewStartSec + deltaSec, effectiveRecordViewWindow(s))
-    }
-
     fun zoomRecordView(scale: Float, focalSec: Float) {
         val s = _state.value
         val bufferMax = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
+        val elapsed = s.recordElapsedSec
+        val maxWindow = max(bufferMax, elapsed).coerceAtLeast(1f)
         val currentWindow = effectiveRecordViewWindow(s)
-        val newWindow = (currentWindow / scale).coerceIn(5f, bufferMax)
-        val rel = if (currentWindow > 0f) {
-            (focalSec - s.recordViewStartSec) / currentWindow
-        } else {
-            0.5f
-        }
-        val newStart = focalSec - rel * newWindow
+        val newWindow = (currentWindow / scale).coerceIn(1f, maxWindow)
+        val newStart = if (elapsed <= newWindow) 0f else elapsed - newWindow
         setRecordView(newStart, newWindow)
+    }
+
+    fun panRecordView(deltaSec: Float) {
+        // Horizontal pan is disabled during recording — viewport stays left-anchored or follows the live edge.
     }
 
     private fun effectiveRecordViewWindow(s: MixerSessionUiState): Float {
         val buffer = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
-        return s.recordViewWindowSec.takeIf { it > 0f }?.coerceIn(5f, buffer) ?: buffer
+        val maxWindow = max(buffer, s.recordElapsedSec).coerceAtLeast(1f)
+        return s.recordViewWindowSec.takeIf { it > 0f }?.coerceIn(1f, maxWindow) ?: buffer
     }
 
     private fun withRecordViewFollowPlayhead(s: MixerSessionUiState, elapsedSec: Float): MixerSessionUiState {
         if (!s.recordViewFollowPlayhead) return s
         val window = effectiveRecordViewWindow(s)
-        val start = if (elapsedSec > window) elapsedSec - window else 0f
+        val start = if (elapsedSec <= window) 0f else elapsedSec - window
         return s.copy(
             recordViewStartSec = start,
             recordViewWindowSec = window,
         )
+    }
+
+    private fun resetRecordViewAfterStop() {
+        val bufferWindow = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
+        _state.update {
+            it.copy(
+                recordViewStartSec = 0f,
+                recordViewWindowSec = bufferWindow,
+                recordViewFollowPlayhead = true,
+            )
+        }
     }
 
     fun startMonitoring() {
@@ -893,12 +903,18 @@ class MixerSessionController(
                         } else {
                             syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
                         }
+                        val writePlan = org.openmultitrack.app.data.RecordingWritePlan.create(
+                            storageResolver,
+                            settings,
+                            prof.storageFolderName(),
+                        )
                         captureEngine.startRecording(
                             CaptureSessionEngine.RecordingConfig(
                                 mixerId = prof.id,
                                 mixerFolderName = prof.storageFolderName(),
                                 storageRoot = storageRoot,
                                 channelStrips = _state.value.channelStrips,
+                                writePlan = writePlan,
                             ),
                         ).getOrThrow()
                     }
@@ -1011,6 +1027,7 @@ class MixerSessionController(
                     statusMessage = session?.let { s -> "Saved → ${s.filePath}" } ?: "Stopped",
                 )
             }
+            resetRecordViewAfterStop()
             syncVuMeterCapture()
             if (_state.value.appMode.isPlaybackMode) {
                 refreshSoundcheckLibrary()
@@ -1040,14 +1057,15 @@ class MixerSessionController(
                     if (needsCapture) {
                         val result = ensureCapture(descriptor, probe)
                         if (result.isFailure) {
-                            OmtLog.w(
-                                "VuMeter",
-                                "VU capture failed for $mixerId: ${result.exceptionOrNull()?.message}",
-                            )
+                            val message = result.exceptionOrNull()?.message.orEmpty()
+                            val busyElsewhere = message.contains("capture in use", ignoreCase = true)
+                            if (!busyElsewhere) {
+                                OmtLog.w("VuMeter", "VU capture failed for $mixerId: $message")
+                            }
                             _state.update {
                                 it.copy(
                                     isVuMetering = false,
-                                    warningMessage = result.exceptionOrNull()?.message,
+                                    warningMessage = if (busyElsewhere) it.warningMessage else message,
                                 )
                             }
                             return@withContext
@@ -1674,6 +1692,13 @@ class MixerSessionController(
         probe: FullUsbProbeResult,
         channelCount: Int,
     ): Result<org.openmultitrack.usb.PlaybackRoute> {
+        val prof = profile
+        if (prof != null && VirtualMixer.isDemoMixer(prof)) {
+            val rate = probe.input?.sampleRate?.takeIf { it > 0 } ?: 48_000
+            val route = VirtualDevicePlayback.resolveRoute(appContext, channelCount, rate)
+                ?: return Result.failure(IllegalStateException("No audio output device"))
+            return Result.success(route)
+        }
         val device = enumerator.getUsbDevice(descriptor.deviceName)
             ?: return Result.failure(IllegalStateException("USB device not found"))
         if (usbStream == null) {

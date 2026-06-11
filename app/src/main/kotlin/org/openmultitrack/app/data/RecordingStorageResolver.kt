@@ -54,8 +54,46 @@ class RecordingStorageResolver(
         }
         addRoot(defaultRecordingRoot())
         additionalLibraryRoots().forEach(::addRoot)
+        redundantRecordingRoots().forEach(::addRoot)
+        if (settings.alwaysIncludeOpenMultiTrackFolders) {
+            discoverOpenMultiTrackFolders().forEach(::addRoot)
+        }
         discoverRemovableRecordingRoots().forEach(::addRoot)
         return roots.map { File(it) }
+    }
+
+    fun localSpillRoot(): File =
+        File(context.filesDir, "recording_spill").apply { mkdirs() }
+
+    fun redundantRecordingRoots(): List<File> =
+        settings.redundantRecordingRoots
+            .map { File(it) }
+            .filter { it.isDirectory || it.mkdirs() }
+
+    /** Ensures {root}/{mixerFolder} exists for new sessions. */
+    fun ensureRecordingTree(root: File, mixerFolderName: String): File {
+        if (!root.isDirectory) root.mkdirs()
+        val mixerDir = File(root, mixerFolderName)
+        if (!mixerDir.isDirectory) mixerDir.mkdirs()
+        return mixerDir
+    }
+
+    fun discoverOpenMultiTrackFolders(): List<File> {
+        val found = linkedSetOf<String>()
+        fun consider(volume: File) {
+            if (!volume.isDirectory || !volume.canRead()) return
+            val name = volume.name
+            if (name == "emulated" || name == "self") return
+            val recordings = File(volume, "OpenMultiTrack/Recordings")
+            val openMt = File(volume, "OpenMultiTrack")
+            when {
+                recordings.isDirectory -> found.add(recordings.absolutePath)
+                openMt.isDirectory -> found.add(openMt.absolutePath)
+            }
+        }
+        File("/storage").listFiles()?.forEach(::consider)
+        File("/mnt/media_rw").listFiles()?.forEach(::consider)
+        return found.map { File(it) }
     }
 
     fun discoverVolumeOptions(): List<StorageVolumeOption> {

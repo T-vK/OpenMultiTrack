@@ -65,6 +65,39 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_AUTO_SCAN_REMOVABLE_MEDIA, true)
         set(value) = prefs.edit().putBoolean(KEY_AUTO_SCAN_REMOVABLE_MEDIA, value).apply()
 
+    var alwaysIncludeOpenMultiTrackFolders: Boolean
+        get() = prefs.getBoolean(KEY_ALWAYS_INCLUDE_OMT_FOLDERS, true)
+        set(value) = prefs.edit().putBoolean(KEY_ALWAYS_INCLUDE_OMT_FOLDERS, value).apply()
+
+    var redundantRecordingRoots: List<String>
+        get() {
+            val raw = prefs.getString(KEY_REDUNDANT_RECORDING_ROOTS, null) ?: return emptyList()
+            return runCatching {
+                val arr = JSONArray(raw)
+                (0 until arr.length()).mapNotNull { i ->
+                    arr.optString(i).takeIf { it.isNotBlank() }
+                }
+            }.getOrDefault(emptyList())
+        }
+        set(value) {
+            val arr = JSONArray()
+            value.map { it.trim() }.filter { it.isNotEmpty() }.distinct().forEach { arr.put(it) }
+            prefs.edit().putString(KEY_REDUNDANT_RECORDING_ROOTS, arr.toString()).apply()
+        }
+
+    var localSpillBufferEnabled: Boolean
+        get() = prefs.getBoolean(KEY_LOCAL_SPILL_ENABLED, true)
+        set(value) = prefs.edit().putBoolean(KEY_LOCAL_SPILL_ENABLED, value).apply()
+
+    var localSpillBufferMinutes: Int
+        get() = prefs.getInt(KEY_LOCAL_SPILL_MINUTES, 5).coerceIn(1, 60)
+        set(value) = prefs.edit().putInt(KEY_LOCAL_SPILL_MINUTES, value.coerceIn(1, 60)).apply()
+
+    /** Stop writing to a volume when free space drops below this (0 = disabled). */
+    var minFreeStorageBytes: Long
+        get() = prefs.getLong(KEY_MIN_FREE_STORAGE_BYTES, 0L).coerceAtLeast(0L)
+        set(value) = prefs.edit().putLong(KEY_MIN_FREE_STORAGE_BYTES, value.coerceAtLeast(0L)).apply()
+
     var debugLogging: Boolean
         get() = prefs.getBoolean(KEY_DEBUG_LOG, true)
         set(value) = prefs.edit().putBoolean(KEY_DEBUG_LOG, value).apply()
@@ -288,6 +321,11 @@ class AppSettingsStore(context: Context) {
         private const val KEY_PLAYBACK_WAVEFORM_NORMALIZED = "playback_waveform_normalized"
         private const val KEY_ADDITIONAL_LIBRARY_ROOTS = "additional_library_roots"
         private const val KEY_AUTO_SCAN_REMOVABLE_MEDIA = "auto_scan_removable_media"
+        private const val KEY_ALWAYS_INCLUDE_OMT_FOLDERS = "always_include_omt_folders"
+        private const val KEY_REDUNDANT_RECORDING_ROOTS = "redundant_recording_roots"
+        private const val KEY_LOCAL_SPILL_ENABLED = "local_spill_enabled"
+        private const val KEY_LOCAL_SPILL_MINUTES = "local_spill_minutes"
+        private const val KEY_MIN_FREE_STORAGE_BYTES = "min_free_storage_bytes"
         private const val KEY_DEBUG_LOG = "debug_log"
         private const val KEY_HIDE_ARM = "hide_arm_button"
         private const val KEY_HIDE_MONITOR = "hide_monitor_button"

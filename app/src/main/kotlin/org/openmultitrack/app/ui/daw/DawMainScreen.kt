@@ -213,6 +213,13 @@ fun DawMainScreen(
     onAddAdditionalLibraryRoot: (String) -> Unit = {},
     onRemoveAdditionalLibraryRoot: (String) -> Unit = {},
     onAutoScanRemovableMediaChange: (Boolean) -> Unit = {},
+    onAddRedundantRecordingRoot: (String) -> Unit = {},
+    onRemoveRedundantRecordingRoot: (String) -> Unit = {},
+    onAlwaysIncludeOpenMultiTrackFoldersChange: (Boolean) -> Unit = {},
+    onLocalSpillBufferEnabledChange: (Boolean) -> Unit = {},
+    onLocalSpillBufferMinutesChange: (Int) -> Unit = {},
+    onMinFreeStorageBytesChange: (Long) -> Unit = {},
+    onOpenBatterySettings: () -> Unit = {},
     onRenameSoundcheckSession: (String, String, String) -> Unit = { _, _, _ -> },
     onDeleteSoundcheckSession: (String, String) -> Unit = { _, _ -> },
     lastSelectedSoundcheckSession: (String) -> String? = { null },
@@ -277,6 +284,12 @@ fun DawMainScreen(
                 additionalLibraryRoots = state.additionalLibraryRoots,
                 autoScanRemovableMedia = state.autoScanRemovableMedia,
                 storageVolumeOptions = state.storageVolumeOptions,
+                redundantRecordingRoots = state.redundantRecordingRoots,
+                alwaysIncludeOpenMultiTrackFolders = state.alwaysIncludeOpenMultiTrackFolders,
+                localSpillBufferEnabled = state.localSpillBufferEnabled,
+                localSpillBufferMinutes = state.localSpillBufferMinutes,
+                minFreeStorageBytes = state.minFreeStorageBytes,
+                batteryOptimizationIgnored = state.batteryOptimizationIgnored,
                 chapterSupportEnabled = state.chapterSupportEnabled,
             ),
             monitorGain = monitorGain,
@@ -301,6 +314,13 @@ fun DawMainScreen(
             onAddAdditionalLibraryRoot = onAddAdditionalLibraryRoot,
             onRemoveAdditionalLibraryRoot = onRemoveAdditionalLibraryRoot,
             onAutoScanRemovableMediaChange = onAutoScanRemovableMediaChange,
+            onAddRedundantRecordingRoot = onAddRedundantRecordingRoot,
+            onRemoveRedundantRecordingRoot = onRemoveRedundantRecordingRoot,
+            onAlwaysIncludeOpenMultiTrackFoldersChange = onAlwaysIncludeOpenMultiTrackFoldersChange,
+            onLocalSpillBufferEnabledChange = onLocalSpillBufferEnabledChange,
+            onLocalSpillBufferMinutesChange = onLocalSpillBufferMinutesChange,
+            onMinFreeStorageBytesChange = onMinFreeStorageBytesChange,
+            onOpenBatterySettings = onOpenBatterySettings,
             onChapterSupportEnabledChange = onChapterSupportEnabledChange,
         )
         return
@@ -867,22 +887,15 @@ private fun ChannelStripList(
         }
         val elapsedState by rememberUpdatedState(recordElapsedSec)
         val bufferWindowState by rememberUpdatedState(recordWaveformWindowSec)
-        val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+        val transformState = rememberTransformableState { zoomChange, _, _ ->
             if (waveformWidthPx <= 0f) return@rememberTransformableState
+            if (zoomChange == 1f) return@rememberTransformableState
             gestureActive = true
-            if (zoomChange != 1f) {
-                val focalSec = gestureViewStart + gestureViewWindow / 2f
-                val bufferMax = bufferWindowState.coerceIn(5f, 120f)
-                val newWindow = (gestureViewWindow / zoomChange).coerceIn(5f, bufferMax)
-                gestureViewWindow = newWindow
-                val maxStart = max(0f, elapsedState - newWindow)
-                gestureViewStart = (focalSec - newWindow / 2f).coerceIn(0f, maxStart)
-            }
-            if (panChange.x != 0f) {
-                val deltaSec = -(panChange.x / waveformWidthPx) * gestureViewWindow
-                val maxStart = max(0f, elapsedState - gestureViewWindow)
-                gestureViewStart = (gestureViewStart + deltaSec).coerceIn(0f, maxStart)
-            }
+            val bufferMax = bufferWindowState.coerceIn(5f, 120f)
+            val maxWindow = max(bufferMax, elapsedState).coerceAtLeast(1f)
+            val newWindow = (gestureViewWindow / zoomChange).coerceIn(1f, maxWindow)
+            gestureViewWindow = newWindow
+            gestureViewStart = if (elapsedState <= newWindow) 0f else elapsedState - newWindow
         }
         LaunchedEffect(transformState.isTransformInProgress) {
             if (!transformState.isTransformInProgress && gestureActive) {

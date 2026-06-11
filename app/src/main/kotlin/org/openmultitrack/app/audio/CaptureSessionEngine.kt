@@ -16,6 +16,7 @@ import org.openmultitrack.domain.channel.ChannelStripState
 import org.openmultitrack.domain.session.RecordingSession
 import org.openmultitrack.sessionio.session.SessionDirectory
 import org.openmultitrack.sessionio.session.SessionMetadata
+import org.openmultitrack.app.data.RecordingWritePlan
 import org.openmultitrack.sessionio.wav.PerChannelWavWriter
 import org.openmultitrack.sessionio.wav.SessionWaveformExtractor
 import org.openmultitrack.sessionio.wav.WavWriter
@@ -47,6 +48,7 @@ class CaptureSessionEngine(
         val mixerFolderName: String,
         val storageRoot: File,
         val channelStrips: List<ChannelStripState>,
+        val writePlan: RecordingWritePlan? = null,
         val customTitle: String? = null,
     )
 
@@ -55,6 +57,8 @@ class CaptureSessionEngine(
     private var activeRoute: CaptureRoute? = null
     private var activeBackend: AudioBackend? = null
     private var syntheticGenerator: SyntheticCaptureGenerator? = null
+    @Volatile
+    private var sessionWriter: ResilientSessionWriter? = null
     @Volatile
     private var perChannelWriter: PerChannelWavWriter? = null
     private var legacyWavWriter: WavWriter? = null
@@ -101,7 +105,7 @@ class CaptureSessionEngine(
         get() = channelCount
 
     val isRecording: Boolean
-        get() = perChannelWriter != null || legacyWavWriter != null
+        get() = sessionWriter != null || perChannelWriter != null || legacyWavWriter != null
 
     val isUsbDegraded: Boolean
         get() = usbDegraded
@@ -109,7 +113,7 @@ class CaptureSessionEngine(
     fun isNativeCaptureOwner(): Boolean {
         if (syntheticGenerator != null) return true
         val backend = activeBackend ?: return false
-        return NativeAudioCaptureRegistry.holder(backend) == ownerId
+        return NativeAudioCaptureRegistry.isOwner(ownerId, backend)
     }
 
     fun isSyntheticCapture(): Boolean = syntheticGenerator != null
@@ -220,15 +224,30 @@ class CaptureSessionEngine(
             return Result.success(currentRecordingSession())
         }
 
-        val dir = SessionDirectory.createSessionDir(config.storageRoot, config.mixerFolderName)
+        val plan = config.writePlan
+        val dir = plan?.primarySessionDir
+            ?: SessionDirectory.createSessionDir(config.storageRoot, config.mixerFolderName)
         sessionDir = dir
         recordingConfig = config
         framesWritten = 0
         recordingStartedAtEpochMs = System.currentTimeMillis()
         lastMetadataPersistFrames = 0
 
-        val writer = PerChannelWavWriter(dir, config.channelStrips, sampleRate)
-        perChannelWriter = writer
+        if (plan != null) {
+            sessionWriter = ResilientSessionWriter(
+                primarySessionDir = plan.primarySessionDir,
+                mirrorSessionDirs = plan.mirrorSessionDirs,
+                spillSessionDir = plan.spillSessionDir,
+                channelStrips = config.channelStrips,
+                sampleRate = sampleRate,
+                minFreeBytes = plan.minFreeBytes,
+                primaryRoot = plan.primaryRoot,
+            )
+            perChannelWriter = null
+        } else {
+            perChannelWriter = PerChannelWavWriter(dir, config.channelStrips, sampleRate)
+            sessionWriter = null
+        }
 
         buildSessionMetadata(config, sampleRate, framesWritten).writeTo(dir)
 
@@ -293,6 +312,9 @@ class CaptureSessionEngine(
     suspend fun stopRecording(): RecordingSession? = lifecycleMutex.withLock {
         val dir = sessionDir
         val config = recordingConfig
+        val resilient = sessionWriter
+        sessionWriter = null
+        resilient?.close()
         val writer = perChannelWriter
         perChannelWriter = null
         writer?.close()
@@ -323,6 +345,9 @@ class CaptureSessionEngine(
     }
 
     suspend fun stopCapture() = lifecycleMutex.withLock {
+        val resilient = sessionWriter
+        sessionWriter = null
+        resilient?.close()
         val writer = perChannelWriter
         perChannelWriter = null
         writer?.close()
@@ -555,7 +580,6 @@ class CaptureSessionEngine(
     }
 
     private fun writeRecordingFrames(scratch: FloatArray, frames: Int, channels: Int) {
-        val writer = perChannelWriter ?: return
         if (!isRecording) return
         val toWrite = if (usbDegraded) {
             val maxFrames = (sessionTargetFrames() - framesWritten).coerceAtLeast(0)
@@ -564,11 +588,20 @@ class CaptureSessionEngine(
             frames
         }
         if (toWrite <= 0) return
+        val writer = sessionWriter
+        if (writer != null) {
+            try {
+                writer.writeInterleavedMultiChannel(scratch, toWrite, channels)
+                framesWritten += toWrite
+            } catch (_: IllegalStateException) {
+            }
+            return
+        }
+        val legacyWriter = perChannelWriter ?: return
         try {
-            writer.writeInterleavedMultiChannel(scratch, toWrite, channels)
+            legacyWriter.writeInterleavedMultiChannel(scratch, toWrite, channels)
             framesWritten += toWrite
         } catch (_: IllegalStateException) {
-            // stopRecording closed the writer while this chunk was in flight
         }
     }
 
@@ -581,14 +614,20 @@ class CaptureSessionEngine(
     /** Inserts silence so [framesWritten] matches wall clock when USB input is degraded. */
     private fun catchUpTimelineToTarget(maxFramesPerPass: Int): Int {
         if (!usbDegraded) return 0
-        val writer = perChannelWriter ?: return 0
+        val resilient = sessionWriter
+        val legacyWriter = perChannelWriter
+        if (resilient == null && legacyWriter == null) return 0
         if (!isRecording) return 0
         var written = 0
         try {
             var gap = sessionTargetFrames() - framesWritten
             while (gap > 0 && written < maxFramesPerPass) {
                 val chunk = minOf(gap, (maxFramesPerPass - written).toLong(), 8_192L).toInt()
-                writer.writeSilence(chunk)
+                if (resilient != null) {
+                    resilient.writeSilence(chunk)
+                } else {
+                    legacyWriter?.writeSilence(chunk)
+                }
                 framesWritten += chunk
                 written += chunk
                 gap -= chunk

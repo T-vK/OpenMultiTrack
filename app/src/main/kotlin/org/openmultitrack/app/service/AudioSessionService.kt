@@ -12,7 +12,15 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import org.openmultitrack.app.MainActivity
 import org.openmultitrack.app.R
 import org.openmultitrack.audio.OmtLog
@@ -26,6 +34,8 @@ class AudioSessionService : Service() {
     private val binder = LocalBinder()
     private lateinit var mixerManager: MultiMixerSessionManager
     private lateinit var remoteControl: RemoteControlManager
+    private val notificationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var notificationRefreshJob: Job? = null
 
     inner class LocalBinder : Binder() {
         fun getService(): AudioSessionService = this@AudioSessionService
@@ -51,11 +61,17 @@ class AudioSessionService : Service() {
             promoteForeground = { status -> promoteToForeground(status) },
         )
         remoteControl.applyRole(settings.remoteRole)
+        AudioSessionBridge.mixerManager = mixerManager
+        AudioSessionBridge.activeMixerId = { mixerManager.activeMixerId.value }
+        AudioSessionBridge.refreshNotification = { refreshForegroundNotification() }
         createNotificationChannel()
         OmtLog.i("Service", "AudioSessionService created")
     }
 
     override fun onDestroy() {
+        notificationRefreshJob?.cancel()
+        notificationScope.cancel()
+        AudioSessionBridge.mixerManager = null
         remoteControl.shutdown()
         super.onDestroy()
     }
@@ -80,7 +96,7 @@ class AudioSessionService : Service() {
     }
 
     fun promoteToForeground(status: String? = null): Boolean {
-        val notification = buildNotification(status ?: "Audio session active")
+        val notification = buildNotification(status ?: "Audio session active").build()
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -94,6 +110,7 @@ class AudioSessionService : Service() {
                 @Suppress("DEPRECATION")
                 startForeground(NOTIFICATION_ID, notification)
             }
+            startNotificationRefresh()
             true
         } catch (e: Exception) {
             OmtLog.e("Service", "startForeground failed", e)
@@ -102,11 +119,26 @@ class AudioSessionService : Service() {
     }
 
     fun updateNotification(status: String) {
+        refreshForegroundNotification(status)
+    }
+
+    fun refreshForegroundNotification(status: String? = null) {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, buildNotification(status))
+        manager.notify(NOTIFICATION_ID, buildNotification(status ?: "Audio session active").build())
+    }
+
+    private fun startNotificationRefresh() {
+        if (notificationRefreshJob?.isActive == true) return
+        notificationRefreshJob = notificationScope.launch {
+            while (isActive) {
+                refreshForegroundNotification()
+                delay(500)
+            }
+        }
     }
 
     fun stopForegroundAndSelf() {
+        notificationRefreshJob?.cancel()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
@@ -116,27 +148,12 @@ class AudioSessionService : Service() {
         stopSelf()
     }
 
-    private fun buildNotification(status: String): Notification {
-        val openIntent = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val stopIntent = PendingIntent.getService(
-            this,
-            1,
-            Intent(this, AudioSessionService::class.java).setAction(ACTION_STOP_ALL),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(getString(R.string.notification_title))
+    private fun buildNotification(status: String): NotificationCompat.Builder {
+        val activeId = mixerManager.activeMixerId.value
+        val session = activeId?.let { mixerManager.getOrCreate(it).state.value }
+        val mixerName = session?.mixerProfile?.displayName
+        return SessionNotificationBuilder.build(this, session, mixerName)
             .setContentText(status)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentIntent(openIntent)
-            .addAction(R.drawable.ic_notification, getString(R.string.notification_stop), stopIntent)
-            .setOngoing(true)
-            .build()
     }
 
     private fun createNotificationChannel() {

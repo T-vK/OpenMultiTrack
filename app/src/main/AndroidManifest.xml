@@ -16,6 +16,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <uses-feature
         android:name="android.hardware.usb.host"
@@ -51,5 +52,18 @@
             android:name=".service.AudioSessionService"
             android:exported="false"
             android:foregroundServiceType="microphone|mediaPlayback" />
+
+        <receiver
+            android:name=".service.SessionTransportReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="org.openmultitrack.NOTIFICATION_TOGGLE_RECORD" />
+                <action android:name="org.openmultitrack.NOTIFICATION_TOGGLE_PLAYBACK" />
+                <action android:name="org.openmultitrack.NOTIFICATION_STOP_PLAYBACK" />
+                <action android:name="org.openmultitrack.NOTIFICATION_PREVIOUS" />
+                <action android:name="org.openmultitrack.NOTIFICATION_NEXT" />
+                <action android:name="org.openmultitrack.STOP_AUDIO_SESSION" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

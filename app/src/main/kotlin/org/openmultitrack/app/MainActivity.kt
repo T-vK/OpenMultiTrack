@@ -232,6 +232,13 @@ class MainActivity : ComponentActivity() {
                         onAddAdditionalLibraryRoot = viewModel::addAdditionalLibraryRoot,
                         onRemoveAdditionalLibraryRoot = viewModel::removeAdditionalLibraryRoot,
                         onAutoScanRemovableMediaChange = viewModel::setAutoScanRemovableMedia,
+                        onAddRedundantRecordingRoot = viewModel::addRedundantRecordingRoot,
+                        onRemoveRedundantRecordingRoot = viewModel::removeRedundantRecordingRoot,
+                        onAlwaysIncludeOpenMultiTrackFoldersChange = viewModel::setAlwaysIncludeOpenMultiTrackFolders,
+                        onLocalSpillBufferEnabledChange = viewModel::setLocalSpillBufferEnabled,
+                        onLocalSpillBufferMinutesChange = viewModel::setLocalSpillBufferMinutes,
+                        onMinFreeStorageBytesChange = viewModel::setMinFreeStorageBytes,
+                        onOpenBatterySettings = viewModel::openBatterySettings,
                         onRenameSoundcheckSession = viewModel::renameSoundcheckSession,
                         onDeleteSoundcheckSession = viewModel::deleteSoundcheckSession,
                         lastSelectedSoundcheckSession = viewModel::lastSelectedSoundcheckSession,
@@ -274,6 +281,13 @@ class MainActivity : ComponentActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.audioPermissionRequests.collect {
                     requestAudioPermissionIfNeeded()
+                }
+            }
+        }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.storageAccessRequests.collect { path ->
+                    requestStorageAccessForPath(path)
                 }
             }
         }
@@ -431,6 +445,19 @@ class MainActivity : ComponentActivity() {
         usbManager.deviceList.values
             .filter { viewModel.isSavedMixerUsbDevice(it) }
             .forEach { requestUsbPermission(it) }
+    }
+
+    private fun requestStorageAccessForPath(path: String) {
+        val helper = org.openmultitrack.app.data.StorageAccessHelper
+        when {
+            helper.needsManageAllFilesAccess(this, path) -> helper.openManageAllFilesSettings(this)
+            helper.needsLegacyStoragePermission(this, path) -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    helper.openManageAllFilesSettings(this)
+                }
+            }
+            !helper.canWriteTo(path) -> helper.openManageAllFilesSettings(this)
+        }
     }
 
     private fun requestUsbPermission(device: UsbDevice) {

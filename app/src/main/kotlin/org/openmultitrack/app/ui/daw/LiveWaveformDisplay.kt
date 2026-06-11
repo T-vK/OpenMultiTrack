@@ -77,14 +77,6 @@ internal fun RecordingTimelineRuler(
                 viewWindowSec = timeline.viewWindowSec,
                 contentDurationSec = timeline.contentDurationSec,
             )
-            drawPlayheadAndLoop(
-                viewStartSec = timeline.viewStartSec,
-                viewWindowSec = timeline.viewWindowSec,
-                playheadSec = timeline.playheadSec,
-                loopStartSec = null,
-                loopEndSec = null,
-                loopEnabled = false,
-            )
         }
     }
 }
