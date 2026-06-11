@@ -1,10 +1,12 @@
 package org.openmultitrack.app.e2e
 
 import android.hardware.usb.UsbManager
+import androidx.lifecycle.ViewModelProvider
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
+import org.openmultitrack.app.MainViewModel
 import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.data.MixerDeviceStore
 import org.openmultitrack.app.service.AudioSessionClient
@@ -61,7 +63,21 @@ class E2eMixerHarness(
 
         val ctrl = manager.getOrCreate(mixerId)
         E2eWait.untilMixerState(ctrl, 60_000) { it.probe != null && !it.probing }
+        syncUiWithHarnessMixer(mixerId)
         return ctrl
+    }
+
+    /** Ensures MainActivity observes the harness-registered mixer (channels + waveforms on screen). */
+    private fun syncUiWithHarnessMixer(mixerId: String) {
+        appHost.runOnActivity { activity ->
+            val vm = ViewModelProvider(
+                activity,
+                MainViewModel.factory(activity.applicationContext),
+            )[MainViewModel::class.java]
+            vm.reloadMixersFromStore()
+            vm.setActiveMixer(mixerId)
+        }
+        Thread.sleep(500)
     }
 
     private suspend fun releaseGlobalUsbCapture(

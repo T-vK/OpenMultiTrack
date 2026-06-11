@@ -10,13 +10,15 @@ import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.test.RequiresUsbDevice
 import org.openmultitrack.app.test.UsbDeviceRule
+import org.openmultitrack.domain.remote.RemoteProtocol
 import org.openmultitrack.domain.session.AppMode
 
 /**
- * USB host e2e: record from XR18 and verify live waveform data (and pixels when signal is present)
- * do not shift horizontally as recording grows.
+ * USB host e2e: record from XR18 and verify live waveform pixels on screen do not shift
+ * horizontally as recording grows (with normalization enabled for quiet noise).
  */
 @RunWith(AndroidJUnit4::class)
 @RequiresUsbDevice(vendorId = E2eConfig.XR18_VENDOR_ID, productId = E2eConfig.XR18_PRODUCT_ID)
@@ -28,6 +30,8 @@ class HostLiveWaveformStabilityE2eTest {
     val appRule = E2eAppRule(enableWaveformsAndVu = true)
 
     private var harness: E2eMixerHarness? = null
+    private val capacitySlots =
+        (15f * RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC).toInt()
 
     @After
     fun tearDown() {
@@ -38,6 +42,10 @@ class HostLiveWaveformStabilityE2eTest {
     @Test
     fun liveRecording_existingWaveformBarsStayHorizontallyStable() {
         runBlocking {
+            check(AppSettingsStore(appRule.appContext).recordWaveformNormalized) {
+                "recordWaveformNormalized must be enabled for this test"
+            }
+
             val h = E2eMixerHarness(appRule).also { harness = it }
             val ctrl = h.bindAndRegisterXr18()
             try {
@@ -45,63 +53,52 @@ class HostLiveWaveformStabilityE2eTest {
                 ctrl.startRecording()
                 E2eWait.untilRecording(ctrl, timeoutMs = 60_000)
 
-                val probeIndex = 15
-                var referencePeak: Float? = null
-                var previousCentroid: Float? = null
-                var previousRight = -1
+                val probeSlot = 15
+                var previousStrip = awaitWaveformStripWithBars()
+                var previousCentroid = checkNotNull(
+                    waveformStripSlotCentroid(previousStrip, probeSlot, capacitySlots),
+                ) {
+                    "slot $probeSlot bar not visible in baseline screenshot"
+                }
+                var previousRight = waveformStripRightEdge(previousStrip)
+                check(previousRight >= 0) { "baseline waveform has no visible bars" }
 
-                for (targetPeaks in listOf(30, 60, 90, 120)) {
+                val snap = ctrl.state.value.waveformPeaks.values.firstOrNull()
+                val maxPeak = snap?.peaks?.maxOrNull() ?: 0f
+                Log.i(
+                    E2eConfig.TAG,
+                    "waveform baseline centroid=$previousCentroid right=$previousRight maxPeak=$maxPeak",
+                )
+
+                for (targetPeaks in listOf(60, 90, 120)) {
                     awaitLiveWaveformPeakCount(ctrl, minPeaks = targetPeaks)
-                    delay(300)
+                    delay(350)
+                    appRule.runOnActivity { }
 
-                    val snap = ctrl.state.value.waveformPeaks.values.firstOrNull()
-                    checkNotNull(snap) { "no waveform snapshot in state at peaks>=$targetPeaks" }
-                    check(snap.peaks.size >= targetPeaks) {
-                        "expected >=$targetPeaks peaks, got ${snap.peaks.size}"
+                    val strip = awaitWaveformStripWithBars()
+                    val centroid = checkNotNull(
+                        waveformStripSlotCentroid(strip, probeSlot, capacitySlots),
+                    ) {
+                        "slot $probeSlot bar not visible at peaks>=$targetPeaks"
                     }
-                    check(probeIndex < snap.peaks.size) {
-                        "probe index $probeIndex out of range (${snap.peaks.size})"
+                    val shiftPx = abs(centroid - previousCentroid)
+                    check(shiftPx < 4.5f) {
+                        "slot $probeSlot centroid shifted ${shiftPx}px (was $previousCentroid, now $centroid)"
                     }
+                    val right = waveformStripRightEdge(strip)
+                    assertThat(right).isAtLeast(previousRight)
 
-                    val peakAtProbe = snap.peaks[probeIndex]
-                    if (referencePeak == null) {
-                        referencePeak = peakAtProbe
-                    } else {
-                        assertThat(peakAtProbe).isWithin(0.001f).of(referencePeak!!)
-                    }
+                    val peakAtProbe = ctrl.state.value.waveformPeaks.values.firstOrNull()
+                        ?.peaks?.getOrNull(probeSlot)
                     Log.i(
                         E2eConfig.TAG,
-                        "peak buffer stable at index $probeIndex peaks>=$targetPeaks value=$peakAtProbe",
+                        "pixel stable peaks>=$targetPeaks centroid=$centroid right=$right " +
+                            "shift=${shiftPx}px peak@$probeSlot=$peakAtProbe",
                     )
 
-                    val hasVisibleSignal = snap.peaks.any { it > 0.01f } ||
-                        ctrl.state.value.captureMeterLevels.values.any { it > 0.01f }
-                    if (hasVisibleSignal) {
-                        val strip = cropFirstWaveformStrip(captureDeviceScreen())
-                        val centroid = waveformStripSlotCentroid(
-                            strip,
-                            slot = probeIndex,
-                            capacitySlots = (15f * 30f).toInt(),
-                        )
-                        if (centroid != null) {
-                            if (previousCentroid != null) {
-                                val shiftPx = abs(centroid - previousCentroid!!)
-                                check(shiftPx < 4.5f) {
-                                    "slot $probeIndex centroid shifted ${shiftPx}px"
-                                }
-                            }
-                            previousCentroid = centroid
-                            val right = waveformStripRightEdge(strip)
-                            if (previousRight >= 0) {
-                                assertThat(right).isAtLeast(previousRight)
-                            }
-                            previousRight = right
-                            Log.i(
-                                E2eConfig.TAG,
-                                "pixel stable peaks>=$targetPeaks centroid=$centroid right=$right",
-                            )
-                        }
-                    }
+                    previousCentroid = centroid
+                    previousRight = right
+                    previousStrip = strip
                 }
             } finally {
                 runCatching {
@@ -109,7 +106,7 @@ class HostLiveWaveformStabilityE2eTest {
                     E2eWait.untilNotRecording(ctrl, timeoutMs = 30_000)
                 }
             }
-            Log.i(E2eConfig.TAG, "live waveform host e2e passed")
+            Log.i(E2eConfig.TAG, "live waveform screenshot stability e2e passed")
         }
     }
 
@@ -122,7 +119,6 @@ class HostLiveWaveformStabilityE2eTest {
                 state.recordElapsedSec >= (minPeaks - 2) / 30f &&
                 state.waveformPeaks.values.any { it.peaks.size >= minPeaks }
         }
-        appRule.runOnActivity { }
         delay(150)
     }
 }

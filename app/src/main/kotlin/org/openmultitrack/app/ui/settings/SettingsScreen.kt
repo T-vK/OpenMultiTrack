@@ -53,7 +53,7 @@ data class SettingsUiState(
     val showRecordingStorageInfoButton: Boolean = true,
     val autoShowRecordingStorageTooltip: Boolean = true,
     val chapterSupportEnabled: Boolean = false,
-    val recordWaveformNormalized: Boolean = false,
+    val recordWaveformNormalized: Boolean = true,
     val playbackWaveformNormalized: Boolean = false,
     val storageRootPath: String? = null,
     val effectiveStorageRootPath: String = "",

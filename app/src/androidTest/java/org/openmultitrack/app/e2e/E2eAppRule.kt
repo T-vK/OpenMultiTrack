@@ -35,6 +35,7 @@ class E2eAppRule(
         settings.remoteRole = RemoteRole.OFF
         settings.showVuMeters = enableWaveformsAndVu
         settings.showWaveforms = enableWaveformsAndVu
+        settings.recordWaveformNormalized = enableWaveformsAndVu
         MixerDeviceStore(context).listMixers()
             .filter { it.vendorId != E2eConfig.XR18_VENDOR_ID || it.productId != E2eConfig.XR18_PRODUCT_ID }
             .forEach { MixerDeviceStore(context).removeMixer(it.id) }

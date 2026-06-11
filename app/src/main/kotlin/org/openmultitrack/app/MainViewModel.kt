@@ -130,7 +130,7 @@ data class DawUiState(
     val showRecordingStorageInfoButton: Boolean = true,
     val autoShowRecordingStorageTooltip: Boolean = true,
     val chapterSupportEnabled: Boolean = false,
-    val recordWaveformNormalized: Boolean = false,
+    val recordWaveformNormalized: Boolean = true,
     val playbackWaveformNormalized: Boolean = false,
     val storageRootPath: String? = null,
     val effectiveStorageRootPath: String = "",
@@ -666,8 +666,12 @@ class MainViewModel(
         }
         val profile = mixerStore.addMixer(descriptor)
         loadMixers()
-        sessionClient.withManager { mgr ->
+        sessionClient.whenReady { mgr ->
             mgr.registerMixer(profile)
+            val ctrl = mgr.getOrCreate(profile.id)
+            ctrl.setRouting(routingStore.get(profile.id))
+            ctrl.setAppMode(settings.appModeForMixer(profile.id))
+            observeMixerSession(profile.id, mgr)
             autoProbeMixer(profile, mgr)
         }
         _uiState.update { it.copy(showAddMixerDialog = false) }
@@ -1616,6 +1620,9 @@ class MainViewModel(
         super.onCleared()
     }
 
+    /** Reloads mixer list from disk and subscribes to any new session state (e2e harness). */
+    fun reloadMixersFromStore() = loadMixers()
+
     private fun loadMixers() {
         val mixers = mixerStore.listMixers()
         val lastActive = settings.lastActiveMixerId
@@ -1627,6 +1634,11 @@ class MainViewModel(
                 activeMixerId = activeId,
                 mixerRoutingById = routingStore.loadAll(),
             )
+        }
+        sessionClient.withManager { manager ->
+            mixers.forEach { profile ->
+                observeMixerSession(profile.id, manager)
+            }
         }
         refreshPrerequisites()
     }

@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -103,6 +104,28 @@ class LiveWaveformPixelInstrumentedTest {
             previous = frame
         }
         assertThat(rightEdges.distinct().size).isGreaterThan(1)
+    }
+
+    @Test
+    fun emptyStrip_showsVisibleContainerBeforeRecording() {
+        composeRule.setContent {
+            LiveWaveformStrip(
+                peaks = floatArrayOf(),
+                windowSec = windowSec,
+                elapsedSec = 0f,
+                peaksPerSec = peaksPerSec,
+                color = Color.Red,
+                normalized = true,
+                modifier = Modifier
+                    .width(450.dp)
+                    .height(56.dp),
+            )
+        }
+        composeRule.waitForIdle()
+        val image = composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage()
+        val bitmap = image.asAndroidBitmap()
+        assertThat(hasWaveformStripContainer(bitmap)).isTrue()
+        assertThat(waveformRightEdgeX(image)).isLessThan(0)
     }
 
     @Test

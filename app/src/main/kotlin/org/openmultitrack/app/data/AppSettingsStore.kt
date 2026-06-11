@@ -34,7 +34,7 @@ class AppSettingsStore(context: Context) {
     var recordWaveformNormalized: Boolean
         get() = prefs.getBoolean(
             KEY_RECORD_WAVEFORM_NORMALIZED,
-            prefs.getBoolean(KEY_WAVEFORM_NORMALIZED, false),
+            prefs.getBoolean(KEY_WAVEFORM_NORMALIZED, true),
         )
         set(value) = prefs.edit().putBoolean(KEY_RECORD_WAVEFORM_NORMALIZED, value).apply()
 

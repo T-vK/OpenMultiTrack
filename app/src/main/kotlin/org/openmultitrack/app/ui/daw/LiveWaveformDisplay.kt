@@ -135,20 +135,10 @@ internal fun LiveWaveformStrip(
     modifier: Modifier = Modifier,
     testTag: String = LIVE_WAVEFORM_TEST_TAG,
 ) {
-    if (peaks.isEmpty() || windowSec <= 0f || elapsedSec <= 0f) {
-        Box(
-            modifier = modifier
-                .testTag(testTag)
-                .border(
-                    width = 0.5.dp,
-                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f),
-                    shape = RoundedCornerShape(3.dp),
-                ),
-        )
-        return
-    }
-
+    val hasDrawableData = peaks.isNotEmpty() && windowSec > 0f && elapsedSec > 0f
     var lockedWidthPx by remember { mutableFloatStateOf(0f) }
+    val outline = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
+    val shape = RoundedCornerShape(3.dp)
     Box(
         modifier = modifier
             .testTag(testTag)
@@ -157,8 +147,10 @@ internal fun LiveWaveformStrip(
                     lockedWidthPx = size.width.toFloat()
                 }
             }
-            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(3.dp)),
+            .background(MaterialTheme.colorScheme.surface, shape)
+            .border(width = 0.5.dp, color = outline, shape = shape),
     ) {
+        if (!hasDrawableData) return@Box
         Canvas(Modifier.fillMaxSize()) {
             val h = size.height
             if (h <= 0f) return@Canvas
