@@ -927,6 +927,7 @@ class MixerSessionController(
         captureEngine.updateMonitor(MonitorMixConfig(enabled = false))
         _state.update { it.copy(isMonitoring = false, statusMessage = "Monitor off") }
         syncVuMeterCapture()
+        AudioSessionBridge.rebuildNotification()
     }
 
     fun canStartRecording(): Boolean {

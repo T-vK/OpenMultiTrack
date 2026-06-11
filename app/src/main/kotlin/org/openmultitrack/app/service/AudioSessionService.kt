@@ -23,7 +23,6 @@ import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.data.MixerDeviceStore
 import org.openmultitrack.app.data.MixerRoutingStore
 import org.openmultitrack.app.remote.RemoteControlManager
-import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.usb.UsbAudioEnumerator
 
 class AudioSessionService : Service() {
@@ -33,17 +32,12 @@ class AudioSessionService : Service() {
     private lateinit var playbackMedia: PlaybackMediaNotification
     private val notificationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var lastPlaybackSignature: Int? = null
-    private var activeNotificationMode: NotificationMode? = null
+    private var activeNotificationMode: SessionNotificationMode? = null
     private var mediaProgressJobActive = false
 
     @Volatile
     var isInForeground: Boolean = false
         private set
-
-    private enum class NotificationMode {
-        RECORDING,
-        PLAYBACK,
-    }
 
     inner class LocalBinder : Binder() {
         fun getService(): AudioSessionService = this@AudioSessionService
@@ -73,7 +67,7 @@ class AudioSessionService : Service() {
         AudioSessionBridge.activeMixerId = { mixerManager.activeMixerId.value }
         AudioSessionBridge.rebuildNotification = { refreshForegroundNotification(forceRebuild = true) }
         AudioSessionBridge.tickMediaProgress = { session ->
-            if (isInForeground && notificationMode(session) == NotificationMode.PLAYBACK) {
+            if (isInForeground && notificationMode(session) == SessionNotificationMode.PLAYBACK) {
                 playbackMedia.updateProgress(session)
             }
         }
@@ -114,37 +108,11 @@ class AudioSessionService : Service() {
 
     fun promoteToForeground(status: String? = null): Boolean {
         return try {
-            val notification = buildAndPostNotification()
-            val mode = notificationMode(activeSession())
-            val notificationId = notificationId(mode)
-            if (!isInForeground) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-                    } else {
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-                    }
-                    startForeground(notificationId, notification, type)
-                } else {
-                    @Suppress("DEPRECATION")
-                    startForeground(notificationId, notification)
-                }
-                isInForeground = true
-            } else {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-                    } else {
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-                    }
-                    startForeground(notificationId, notification, type)
-                } else {
-                    @Suppress("DEPRECATION")
-                    startForeground(notificationId, notification)
-                }
-            }
+            val session = activeSession()
+            val mode = notificationMode(session, status)
+            if (mode == SessionNotificationMode.NONE) return false
+            val notification = buildAndPostNotification(mode)
+            attachForeground(notificationId(mode), notification)
             activeNotificationMode = mode
             true
         } catch (e: Exception) {
@@ -158,38 +126,77 @@ class AudioSessionService : Service() {
     }
 
     fun refreshForegroundNotification(forceRebuild: Boolean = false) {
-        if (!isInForeground) return
         val session = activeSession()
         val mode = notificationMode(session)
+        if (mode == SessionNotificationMode.NONE) {
+            if (isInForeground || activeNotificationMode != null) {
+                dismissForegroundNotification()
+            }
+            return
+        }
+        if (!isInForeground) return
         if (mode != activeNotificationMode) {
-            buildAndPostNotification()
+            val notification = buildAndPostNotification(mode)
+            attachForeground(notificationId(mode), notification)
             activeNotificationMode = mode
             return
         }
         when (mode) {
-            NotificationMode.RECORDING -> buildAndPostNotification()
-            NotificationMode.PLAYBACK -> {
+            SessionNotificationMode.RECORDING -> buildAndPostNotification(mode)
+            SessionNotificationMode.PLAYBACK -> {
                 val mixerName = session?.mixerProfile?.displayName
                 val signature = playbackMedia.layoutSignature(session, mixerName)
                 if (forceRebuild || signature != lastPlaybackSignature) {
-                    buildAndPostNotification()
+                    buildAndPostNotification(mode)
                 } else {
                     playbackMedia.updateProgress(session)
                 }
             }
+            SessionNotificationMode.NONE -> dismissForegroundNotification()
         }
     }
 
-    private fun notificationMode(session: MixerSessionUiState?): NotificationMode =
-        if (session?.appMode == AppMode.MULTITRACK_RECORD) {
-            NotificationMode.RECORDING
+    private fun notificationMode(session: MixerSessionUiState?, statusHint: String? = null): SessionNotificationMode =
+        SessionNotificationPolicy.mode(session, statusHint)
+
+    private fun notificationId(mode: SessionNotificationMode): Int = when (mode) {
+        SessionNotificationMode.RECORDING -> NOTIFICATION_ID_RECORDING
+        SessionNotificationMode.PLAYBACK -> NOTIFICATION_ID_PLAYBACK
+        SessionNotificationMode.NONE -> NOTIFICATION_ID_PLAYBACK
+    }
+
+    private fun foregroundServiceType(): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
         } else {
-            NotificationMode.PLAYBACK
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         }
 
-    private fun notificationId(mode: NotificationMode): Int = when (mode) {
-        NotificationMode.RECORDING -> NOTIFICATION_ID_RECORDING
-        NotificationMode.PLAYBACK -> NOTIFICATION_ID_PLAYBACK
+    private fun attachForeground(notificationId: Int, notification: Notification) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(notificationId, notification, foregroundServiceType())
+        } else {
+            @Suppress("DEPRECATION")
+            startForeground(notificationId, notification)
+        }
+        isInForeground = true
+    }
+
+    private fun dismissForegroundNotification() {
+        playbackMedia.setActive(false)
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.cancel(NOTIFICATION_ID_RECORDING)
+        manager.cancel(NOTIFICATION_ID_PLAYBACK)
+        lastPlaybackSignature = null
+        activeNotificationMode = null
+        if (!isInForeground) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+        isInForeground = false
     }
 
     private fun activeSession(): MixerSessionUiState? {
@@ -205,20 +212,19 @@ class AudioSessionService : Service() {
                 delay(1_000)
                 if (!isInForeground) continue
                 val session = activeSession() ?: continue
-                if (notificationMode(session) == NotificationMode.PLAYBACK && session.isPlaying) {
+                if (notificationMode(session) == SessionNotificationMode.PLAYBACK && session.isPlaying) {
                     playbackMedia.updateProgress(session)
                 }
             }
         }
     }
 
-    private fun buildAndPostNotification(): Notification {
+    private fun buildAndPostNotification(mode: SessionNotificationMode): Notification {
         val session = activeSession()
         val mixerName = session?.mixerProfile?.displayName
-        val mode = notificationMode(session)
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         return when (mode) {
-            NotificationMode.RECORDING -> {
+            SessionNotificationMode.RECORDING -> {
                 playbackMedia.setActive(false)
                 manager.cancel(NOTIFICATION_ID_PLAYBACK)
                 val notification = RecordingNotificationBuilder
@@ -227,7 +233,7 @@ class AudioSessionService : Service() {
                 manager.notify(NOTIFICATION_ID_RECORDING, notification)
                 notification
             }
-            NotificationMode.PLAYBACK -> {
+            SessionNotificationMode.PLAYBACK -> {
                 playbackMedia.setActive(true)
                 manager.cancel(NOTIFICATION_ID_RECORDING)
                 playbackMedia.applySession(session, mixerName)
@@ -238,22 +244,12 @@ class AudioSessionService : Service() {
                 manager.notify(NOTIFICATION_ID_PLAYBACK, notification)
                 notification
             }
+            SessionNotificationMode.NONE -> error("buildAndPostNotification does not support NONE")
         }
     }
 
     fun stopForegroundAndSelf() {
-        lastPlaybackSignature = null
-        activeNotificationMode = null
-        isInForeground = false
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.cancel(NOTIFICATION_ID_RECORDING)
-        manager.cancel(NOTIFICATION_ID_PLAYBACK)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-        }
+        dismissForegroundNotification()
         stopSelf()
     }
 
