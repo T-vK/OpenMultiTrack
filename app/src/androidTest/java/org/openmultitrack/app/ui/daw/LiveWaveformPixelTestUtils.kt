@@ -9,7 +9,6 @@ import kotlin.math.abs
 fun expectedSlotCenterX(slot: Int, capacitySlots: Int, imageWidth: Int): Float =
     (slot + 0.5f) / capacitySlots * imageWidth
 
-/** Slot index at the horizontal center of timeline second [second] (1-based). */
 fun slotAtSecondCenter(second: Int, peaksPerSec: Int): Int =
     (second * peaksPerSec - peaksPerSec / 2).coerceAtLeast(0)
 
@@ -20,13 +19,151 @@ fun timelineSecondCenterX(second: Int, capacitySlots: Int, peaksPerSec: Int, ima
         .coerceIn(0, imageWidth - 1)
 }
 
-/** Samples one pixel at vertical center and the horizontal center of [second] on the timeline. */
+fun recordedRegionEndX(imageWidth: Int, elapsedSec: Float, windowSec: Float): Int =
+    (imageWidth * (elapsedSec / windowSec).coerceIn(0f, 1f)).toInt().coerceIn(0, imageWidth)
+
+/**
+ * Per-column occupancy: true when the vertical mid-band at [x] contains waveform bar pixels.
+ */
+fun waveformInteriorXMargin(bitmap: Bitmap): Int =
+    (bitmap.width * 0.02f).toInt().coerceIn(2, 12)
+
+fun waveformColumnOccupancy(
+    bitmap: Bitmap,
+    xStart: Int = 0,
+    xEndExclusive: Int = bitmap.width,
+    backgroundArgb: Int? = null,
+): BooleanArray {
+    val bg = backgroundArgb ?: estimateWaveformStripBackground(bitmap)
+    val occupancy = BooleanArray(bitmap.width)
+    val yMid = bitmap.height / 2
+    val ySpan = (bitmap.height * 0.35f).toInt().coerceIn(3, bitmap.height / 2 - 1)
+    val margin = waveformInteriorXMargin(bitmap)
+    val xEnd = xEndExclusive.coerceIn(0, bitmap.width)
+    val xBegin = xStart.coerceAtLeast(margin)
+    for (x in xBegin until xEnd) {
+        for (y in (yMid - ySpan)..(yMid + ySpan)) {
+            if (y !in 0 until bitmap.height) continue
+            if (isWaveformBarPixel(bitmap.getPixel(x, y), bg)) {
+                occupancy[x] = true
+                break
+            }
+        }
+    }
+    return occupancy
+}
+
+fun maxBackgroundRunInRange(occupancy: BooleanArray, xStart: Int, xEndExclusive: Int): Int {
+    var maxRun = 0
+    var run = 0
+    val xEnd = xEndExclusive.coerceAtMost(occupancy.size)
+    for (x in xStart.coerceAtLeast(0) until xEnd) {
+        if (!occupancy[x]) {
+            run++
+        } else {
+            maxRun = maxOf(maxRun, run)
+            run = 0
+        }
+    }
+    return maxOf(maxRun, run)
+}
+
+fun occupiedColumnCount(occupancy: BooleanArray, xStart: Int, xEndExclusive: Int): Int {
+    val xEnd = xEndExclusive.coerceAtMost(occupancy.size)
+    var count = 0
+    for (x in xStart.coerceAtLeast(0) until xEnd) {
+        if (occupancy[x]) count++
+    }
+    return count
+}
+
+fun occupiedColumnFraction(occupancy: BooleanArray, xStart: Int, xEndExclusive: Int): Float {
+    val width = (xEndExclusive - xStart).coerceAtLeast(1)
+    return occupiedColumnCount(occupancy, xStart, xEndExclusive).toFloat() / width
+}
+
+/**
+ * Recorded region must be densely filled with bar columns (no large background gaps).
+ */
+fun assertRecordedRegionDense(
+    bitmap: Bitmap,
+    recordedEndX: Int,
+    minOccupiedFraction: Float = 0.92f,
+    maxGapPx: Int = 4,
+) {
+    val margin = waveformInteriorXMargin(bitmap)
+    val end = recordedEndX.coerceIn(margin + 1, bitmap.width)
+    val bg = estimateWaveformStripBackground(bitmap)
+    val occupancy = waveformColumnOccupancy(bitmap, margin, end, bg)
+    val fraction = occupiedColumnFraction(occupancy, margin, end)
+    check(fraction >= minOccupiedFraction) {
+        "recorded region only ${(fraction * 100).toInt()}% column-occupied " +
+            "(need ≥${(minOccupiedFraction * 100).toInt()}%) up to x=$end"
+    }
+    val maxGap = maxBackgroundRunInRange(occupancy, margin, end)
+    check(maxGap <= maxGapPx) {
+        "background gap of $maxGap px in recorded region (max allowed $maxGapPx)"
+    }
+}
+
+/**
+ * Interior columns (excluding [frontierMarginPx] at the growth edge) must keep the same
+ * bar/background occupancy — catches horizontal jiggle and gap flicker.
+ */
+fun assertRecordedInteriorOccupancyStable(
+    before: ImageBitmap,
+    after: ImageBitmap,
+    interiorEndX: Int,
+    frontierMarginPx: Int = 10,
+) {
+    val beforeBitmap = before.asAndroidBitmap()
+    val afterBitmap = after.asAndroidBitmap()
+    check(beforeBitmap.width == afterBitmap.width) {
+        "width mismatch ${beforeBitmap.width} vs ${afterBitmap.width}"
+    }
+    val margin = waveformInteriorXMargin(beforeBitmap)
+    val end = (interiorEndX - frontierMarginPx).coerceIn(margin + 1, beforeBitmap.width)
+    val bgBefore = estimateWaveformStripBackground(beforeBitmap)
+    val bgAfter = estimateWaveformStripBackground(afterBitmap)
+    val occBefore = waveformColumnOccupancy(beforeBitmap, margin, end, bgBefore)
+    val occAfter = waveformColumnOccupancy(afterBitmap, margin, end, bgAfter)
+    val flips = mutableListOf<Int>()
+    for (x in margin until end) {
+        if (occBefore[x] != occAfter[x]) flips.add(x)
+    }
+    check(flips.isEmpty()) {
+        "interior column occupancy flickered at ${flips.size} x-positions " +
+            "(first: ${flips.take(8)}, interior end=$end): " +
+            "background bleeding through recorded audio is a stability bug"
+    }
+}
+
+/** Every interior column must stay occupied across frames (continuous tone). */
+fun assertRecordedInteriorStaysFilled(
+    before: ImageBitmap,
+    after: ImageBitmap,
+    interiorEndX: Int,
+    frontierMarginPx: Int = 10,
+) {
+    val beforeBitmap = before.asAndroidBitmap()
+    val afterBitmap = after.asAndroidBitmap()
+    val margin = waveformInteriorXMargin(beforeBitmap)
+    val end = (interiorEndX - frontierMarginPx).coerceIn(margin + 1, beforeBitmap.width)
+    val bgBefore = estimateWaveformStripBackground(beforeBitmap)
+    val bgAfter = estimateWaveformStripBackground(afterBitmap)
+    val occBefore = waveformColumnOccupancy(beforeBitmap, margin, end, bgBefore)
+    val occAfter = waveformColumnOccupancy(afterBitmap, margin, end, bgAfter)
+    for (x in margin until end) {
+        check(occBefore[x]) { "column $x was background before growth (x<$end)" }
+        check(occAfter[x]) { "column $x became background after growth (x<$end)" }
+    }
+}
+
 fun sampleMiddleWaveformPixel(bitmap: Bitmap, second: Int, capacitySlots: Int, peaksPerSec: Int): Int {
     val x = timelineSecondCenterX(second, capacitySlots, peaksPerSec, bitmap.width)
     return bitmap.getPixel(x, bitmap.height / 2)
 }
 
-/** True when any pixel in a vertical band at the timeline marker differs from background. */
 fun hasBarAtTimelineSecond(
     bitmap: Bitmap,
     second: Int,
@@ -50,10 +187,6 @@ data class WaveformTimelineProbe(
     val isBar: Boolean,
 )
 
-/**
- * Background color from the unfilled tail of the strip (right of the growth frontier).
- * More reliable than edge sampling while only the left portion contains bars.
- */
 fun estimateTrailingWaveformBackground(
     bitmap: Bitmap,
     elapsedSec: Float,
@@ -85,22 +218,14 @@ fun isWaveformBackgroundPixel(pixel: Int, backgroundArgb: Int, tolerance: Int = 
 fun pixelsMatch(pixelA: Int, pixelB: Int, tolerance: Int = 2): Boolean =
     pixelA == pixelB || colorDistance(pixelA, pixelB) <= tolerance
 
-/**
- * Verifies left-to-right waveform growth using vertical-center pixel probes.
- *
- * - At 0 s: seconds 1–3 are container background (no bars yet).
- * - Each 1 s step: the matching second marker gains a bar; earlier seconds stay pixel-stable.
- * - Seconds beyond the current elapsed time remain background.
- */
 fun assertLeftToRightWaveformGrowth(
     framesByElapsedSec: Map<Int, ImageBitmap>,
     capacitySlots: Int,
     peaksPerSec: Int,
     windowSec: Float = 15f,
     maxSecond: Int = 9,
-    /** False for live audio with per-buffer normalization (bar height may rescale). */
-    requireLockedPixelValues: Boolean = true,
-    /** When set (host e2e), frontier checks use peak buffer size instead of wall-clock labels. */
+    /** Synthetic uniform-tone frames: interior must stay dense and filled. */
+    requireDenseInterior: Boolean = true,
     peakCountByFrame: Map<Int, Int>? = null,
 ) {
     fun frontierSecond(frameKey: Int): Float {
@@ -113,6 +238,7 @@ fun assertLeftToRightWaveformGrowth(
 
     fun isAtFrontier(second: Int, frameKey: Int): Boolean =
         kotlin.math.abs(second - frontierSecond(frameKey)) <= 0.34f
+
     check(framesByElapsedSec.containsKey(0)) { "missing frame at 0 s (before recording)" }
     for (second in 1..3) {
         val probe = probeSecondMarker(
@@ -129,12 +255,40 @@ fun assertLeftToRightWaveformGrowth(
     }
 
     var previous = framesByElapsedSec.getValue(0)
+    var previousElapsed = 0
     for (elapsed in 1..maxSecond) {
         val current = framesByElapsedSec[elapsed]
             ?: error("missing frame at $elapsed s")
+        val currentBitmap = current.asAndroidBitmap()
+        val prevBitmap = previous.asAndroidBitmap()
+        val interiorEndX = recordedRegionEndX(
+            prevBitmap.width,
+            (elapsed - 1).toFloat(),
+            windowSec,
+        )
+        if (interiorEndX > 12) {
+            assertRecordedInteriorOccupancyStable(
+                before = previous,
+                after = current,
+                interiorEndX = interiorEndX,
+            )
+            if (requireDenseInterior) {
+                assertRecordedInteriorStaysFilled(
+                    before = previous,
+                    after = current,
+                    interiorEndX = interiorEndX,
+                )
+            }
+        }
+        if (requireDenseInterior && elapsed >= 2) {
+            val denseEnd = recordedRegionEndX(currentBitmap.width, elapsed.toFloat(), windowSec)
+            if (denseEnd > 20) {
+                assertRecordedRegionDense(currentBitmap, denseEnd)
+            }
+        }
         for (second in 1..maxSecond) {
             val prevProbe = probeSecondMarker(
-                previous.asAndroidBitmap(),
+                prevBitmap,
                 second,
                 capacitySlots,
                 peaksPerSec,
@@ -142,7 +296,7 @@ fun assertLeftToRightWaveformGrowth(
                 windowSec = windowSec,
             )
             val curProbe = probeSecondMarker(
-                current.asAndroidBitmap(),
+                currentBitmap,
                 second,
                 capacitySlots,
                 peaksPerSec,
@@ -160,63 +314,40 @@ fun assertLeftToRightWaveformGrowth(
                     check(!prevProbe.isBar) {
                         "second $second should still be background before frontier ${frontierSecond(elapsed)}s"
                     }
-                    val appeared = curProbe.isBar || !pixelsMatch(prevProbe.pixel, curProbe.pixel, tolerance = 4)
-                    check(appeared) {
+                    check(curProbe.isBar || !pixelsMatch(prevProbe.pixel, curProbe.pixel, tolerance = 4)) {
                         "second $second should gain waveform pixels at frontier ${frontierSecond(elapsed)}s"
                     }
                 }
                 second < elapsed -> {
-                    val slot = slotAtSecondCenter(second, peaksPerSec)
-                    if (requireLockedPixelValues) {
-                        check(prevProbe.isBar) {
-                            "second $second should already be drawn at ${elapsed - 1}s"
-                        }
-                        check(curProbe.isBar) {
-                            "second $second lost its bar at ${elapsed}s"
-                        }
-                        check(pixelsMatch(prevProbe.pixel, curProbe.pixel)) {
-                            "second $second pixel changed between ${elapsed - 1}s and ${elapsed}s " +
-                                "(was 0x${prevProbe.pixel.toString(16)}, " +
-                                "now 0x${curProbe.pixel.toString(16)})"
-                        }
-                    } else {
-                        val prevX = measureSlotBarCentroidX(previous, slot, capacitySlots)
-                        val curX = measureSlotBarCentroidX(current, slot, capacitySlots)
-                        check(prevX != null) {
-                            "second $second bar not visible at ${elapsed - 1}s"
-                        }
-                        check(curX != null) {
-                            "second $second bar not visible at ${elapsed}s"
-                        }
-                        check(kotlin.math.abs(curX!! - prevX!!) < 4.5f) {
-                            "second $second bar shifted horizontally from $prevX to $curX px " +
-                                "between ${elapsed - 1}s and ${elapsed}s"
-                        }
+                    check(prevProbe.isBar) {
+                        "second $second should already be drawn at ${elapsed - 1}s"
+                    }
+                    check(curProbe.isBar) {
+                        "second $second lost its bar at ${elapsed}s — background bleeding through"
                     }
                 }
             }
         }
         previous = current
+        previousElapsed = elapsed
     }
 
     val finalFrame = framesByElapsedSec.getValue(maxSecond)
+    val finalBitmap = finalFrame.asAndroidBitmap()
+    if (requireDenseInterior) {
+        val finalEnd = recordedRegionEndX(finalBitmap.width, maxSecond.toFloat(), windowSec)
+        assertRecordedRegionDense(finalBitmap, finalEnd)
+    }
     for (second in 1..maxSecond) {
-        if (requireLockedPixelValues) {
-            val probe = probeSecondMarker(
-                finalFrame.asAndroidBitmap(),
-                second,
-                capacitySlots,
-                peaksPerSec,
-                elapsedSec = maxSecond.toFloat(),
-                windowSec = windowSec,
-            )
-            check(probe.isBar) { "second $second should be drawn at ${maxSecond}s" }
-        } else {
-            val slot = slotAtSecondCenter(second, peaksPerSec)
-            check(measureSlotBarCentroidX(finalFrame, slot, capacitySlots) != null) {
-                "second $second should be drawn at ${maxSecond}s"
-            }
-        }
+        val probe = probeSecondMarker(
+            finalBitmap,
+            second,
+            capacitySlots,
+            peaksPerSec,
+            elapsedSec = maxSecond.toFloat(),
+            windowSec = windowSec,
+        )
+        check(probe.isBar) { "second $second should be drawn at ${maxSecond}s" }
     }
 }
 
@@ -232,7 +363,6 @@ fun measureSlotBarCentroidX(
     return measureBarCentroidX(bitmap, expected, tolerance, bg)
 }
 
-/** Estimates the waveform strip background from margins (areas without bars). */
 fun estimateWaveformStripBackground(strip: Bitmap): Int {
     val points = listOf(
         strip.getPixel(1.coerceAtMost(strip.width - 1), strip.height / 2),
@@ -264,9 +394,6 @@ fun isWaveformBarPixel(argb: Int, backgroundArgb: Int? = null): Boolean {
     return maxChannel > 45 && (maxChannel - minChannel) > 12
 }
 
-/**
- * Finds the horizontal centroid of bar pixels near [nearX]. Returns null when no bar is visible.
- */
 fun measureBarCentroidX(
     image: ImageBitmap,
     nearX: Float,
@@ -299,7 +426,6 @@ fun measureBarCentroidX(
     return if (count > 0) (sumX / count).toFloat() else null
 }
 
-/** Rightmost x coordinate that contains waveform bar pixels. */
 fun waveformRightEdgeX(image: ImageBitmap, backgroundArgb: Int? = null): Int =
     waveformRightEdgeX(image.asAndroidBitmap(), backgroundArgb)
 
@@ -320,7 +446,6 @@ fun waveformRightEdgeX(bitmap: Bitmap, backgroundArgb: Int? = null): Int {
     return -1
 }
 
-/** Bar pixels in the strip interior (excludes border chrome). */
 fun interiorWaveformBarPixelCount(bitmap: Bitmap, backgroundArgb: Int? = null): Int {
     val bg = backgroundArgb ?: estimateWaveformStripBackground(bitmap)
     val xMargin = (bitmap.width * 0.04f).toInt().coerceIn(3, 12)
@@ -359,7 +484,6 @@ fun assertSlotCentroidStable(
 
 fun Bitmap.asComposeImage(): ImageBitmap = asImageBitmap()
 
-/** True when the strip shows its surface background (empty or with bars). */
 fun hasWaveformStripContainer(bitmap: Bitmap): Boolean {
     if (bitmap.width < 4 || bitmap.height < 4) return false
     val center = bitmap.getPixel(bitmap.width / 2, bitmap.height / 2)

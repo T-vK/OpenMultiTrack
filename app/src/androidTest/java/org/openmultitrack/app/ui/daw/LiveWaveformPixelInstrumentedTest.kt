@@ -20,8 +20,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Captures Compose waveform pixels while simulating growth and asserts that existing bars
- * stay at fixed horizontal positions (no shaking).
+ * Pixel-color tests: scan every column in the recorded region for background bleed,
+ * gap size, and occupancy flicker while the recording frontier advances.
  */
 @RunWith(AndroidJUnit4::class)
 class LiveWaveformPixelInstrumentedTest {
@@ -31,6 +31,180 @@ class LiveWaveformPixelInstrumentedTest {
     private val windowSec = 15f
     private val peaksPerSec = 30
     private val capacitySlots = (windowSec * peaksPerSec).toInt()
+    private val stripWidthDp = 900.dp
+    private val stripHeightDp = 64.dp
+
+    private fun captureStrip(): ImageBitmap =
+        composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage()
+
+    private class LiveStripHandle(
+        private val composeRule: androidx.compose.ui.test.junit4.ComposeContentTestRule,
+        private val peaksState: androidx.compose.runtime.MutableState<FloatArray>,
+        private val elapsedState: androidx.compose.runtime.MutableState<Float>,
+        private val normalizedState: androidx.compose.runtime.MutableState<Boolean>,
+    ) {
+        fun update(peaks: FloatArray, elapsed: Float, normalized: Boolean = normalizedState.value) {
+            peaksState.value = peaks
+            elapsedState.value = elapsed
+            normalizedState.value = normalized
+            composeRule.waitForIdle()
+        }
+    }
+
+    private fun mountLiveStrip(
+        peaks: FloatArray,
+        elapsed: Float,
+        normalized: Boolean = false,
+        color: Color = Color(0xFF22CC44),
+    ): LiveStripHandle {
+        val peaksState = mutableStateOf(peaks)
+        val elapsedState = mutableStateOf(elapsed)
+        val normalizedState = mutableStateOf(normalized)
+        composeRule.setContent {
+            val livePeaks by peaksState
+            val liveElapsed by elapsedState
+            val liveNormalized by normalizedState
+            LiveWaveformStrip(
+                peaks = livePeaks,
+                windowSec = windowSec,
+                elapsedSec = liveElapsed,
+                peaksPerSec = peaksPerSec,
+                color = color,
+                normalized = liveNormalized,
+                modifier = Modifier
+                    .width(stripWidthDp)
+                    .height(stripHeightDp),
+            )
+        }
+        composeRule.waitForIdle()
+        return LiveStripHandle(composeRule, peaksState, elapsedState, normalizedState)
+    }
+
+    @Test
+    fun recordedRegion_continuousTone_hasNoBackgroundGaps() {
+        mountLiveStrip(
+            peaks = FloatArray(5 * peaksPerSec) { 0.85f },
+            elapsed = 5f,
+        )
+        val bitmap = captureStrip().asAndroidBitmap()
+        val endX = recordedRegionEndX(bitmap.width, 5f, windowSec)
+        assertRecordedRegionDense(bitmap, endX, minOccupiedFraction = 0.92f, maxGapPx = 4)
+    }
+
+    @Test
+    fun recordedRegion_interiorColumnsDoNotFlicker_asFrontierAdvances() {
+        val strip = mountLiveStrip(
+            peaks = FloatArray(2 * peaksPerSec) { 0.85f },
+            elapsed = 2f,
+        )
+        var previous = captureStrip()
+        for (second in listOf(3, 4, 5, 6, 7, 8)) {
+            val interiorEndX = recordedRegionEndX(
+                previous.asAndroidBitmap().width,
+                (second - 1).toFloat(),
+                windowSec,
+            )
+            strip.update(
+                peaks = FloatArray(second * peaksPerSec) { 0.85f },
+                elapsed = second.toFloat(),
+            )
+            val current = captureStrip()
+            if (interiorEndX > 12) {
+                assertRecordedInteriorOccupancyStable(previous, current, interiorEndX)
+                assertRecordedInteriorStaysFilled(previous, current, interiorEndX)
+            }
+            previous = current
+        }
+    }
+
+    @Test
+    fun recordedRegion_captureTicks_interiorNeverFlickers() {
+        val strip = mountLiveStrip(
+            peaks = FloatArray(peaksPerSec) { 0.85f },
+            elapsed = 1f,
+        )
+        var previous = captureStrip()
+        repeat(45) { tick ->
+            val peakCount = peaksPerSec + tick + 1
+            strip.update(
+                peaks = FloatArray(peakCount) { 0.85f },
+                elapsed = peakCount / peaksPerSec.toFloat(),
+            )
+            val current = captureStrip()
+            val interiorEndX = recordedRegionEndX(
+                previous.asAndroidBitmap().width,
+                (peakCount - 1) / peaksPerSec.toFloat(),
+                windowSec,
+            )
+            if (interiorEndX > 12) {
+                assertRecordedInteriorOccupancyStable(previous, current, interiorEndX)
+                assertRecordedInteriorStaysFilled(previous, current, interiorEndX)
+            }
+            previous = current
+        }
+    }
+
+    @Test
+    fun recordedRegion_normalizationVaryingMax_interiorColumnsStable() {
+        val strip = mountLiveStrip(
+            peaks = FloatArray(60) { if (it % 2 == 0) 0.8f else 0.04f },
+            elapsed = 2f,
+            normalized = true,
+        )
+        var previous = captureStrip()
+        repeat(25) { step ->
+            val n = 60 + step * 3
+            val elapsed = n / peaksPerSec.toFloat()
+            strip.update(
+                peaks = FloatArray(n) { i ->
+                    when {
+                        i % 7 == 0 -> 0.95f
+                        i % 2 == 0 -> 0.75f
+                        else -> 0.03f
+                    }
+                },
+                elapsed = elapsed,
+                normalized = true,
+            )
+            val current = captureStrip()
+            val interiorEndX = recordedRegionEndX(
+                previous.asAndroidBitmap().width,
+                elapsed - 3f / peaksPerSec,
+                windowSec,
+            )
+            if (interiorEndX > 20) {
+                assertRecordedInteriorOccupancyStable(previous, current, interiorEndX)
+            }
+            previous = current
+        }
+    }
+
+    @Test
+    fun recordedRegion_peakBufferLag_noPhantomInteriorChange() {
+        val strip = mountLiveStrip(
+            peaks = FloatArray(40) { 0.8f },
+            elapsed = 3f,
+        )
+        var previous = captureStrip()
+        repeat(15) { step ->
+            val elapsed = 3f + step * 0.1f
+            strip.update(
+                peaks = FloatArray(40 + step * 2) { 0.8f },
+                elapsed = elapsed,
+            )
+            val current = captureStrip()
+            val interiorEndX = recordedRegionEndX(
+                previous.asAndroidBitmap().width,
+                elapsed - 0.15f,
+                windowSec,
+            )
+            if (interiorEndX > 15) {
+                assertRecordedInteriorOccupancyStable(previous, current, interiorEndX)
+                assertRecordedInteriorStaysFilled(previous, current, interiorEndX)
+            }
+            previous = current
+        }
+    }
 
     @Test
     fun growth_leftToRight_secondMarkersAppearThenLock() {
@@ -46,8 +220,8 @@ class LiveWaveformPixelInstrumentedTest {
                 color = Color(0xFF3366CC),
                 normalized = true,
                 modifier = Modifier
-                    .width(900.dp)
-                    .height(64.dp),
+                    .width(stripWidthDp)
+                    .height(stripHeightDp),
             )
         }
 
@@ -61,7 +235,7 @@ class LiveWaveformPixelInstrumentedTest {
                 elapsed = second.toFloat()
             }
             composeRule.waitForIdle()
-            frames[second] = composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage()
+            frames[second] = captureStrip()
         }
 
         assertLeftToRightWaveformGrowth(
@@ -70,140 +244,15 @@ class LiveWaveformPixelInstrumentedTest {
             peaksPerSec = peaksPerSec,
             windowSec = windowSec,
             maxSecond = 9,
+            requireDenseInterior = true,
         )
-    }
-
-    @Test
-    fun growth_slotCentroidStaysFixedAsRecordingGrows() {
-        val probeSlot = 10
-        var peaks by mutableStateOf(FloatArray(30) { 0.75f })
-        var elapsed by mutableStateOf(30f / peaksPerSec)
-
-        composeRule.setContent {
-            LiveWaveformStrip(
-                peaks = peaks,
-                windowSec = windowSec,
-                elapsedSec = elapsed,
-                peaksPerSec = peaksPerSec,
-                color = Color.Red,
-                normalized = false,
-                modifier = Modifier
-                    .width(450.dp)
-                    .height(56.dp),
-            )
-        }
-        composeRule.waitForIdle()
-        val baseline = composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage()
-
-        peaks = FloatArray(90) { 0.75f }
-        elapsed = 90f / peaksPerSec
-        composeRule.waitForIdle()
-        val grown = composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage()
-
-        assertSlotCentroidStable(baseline, grown, probeSlot, capacitySlots)
-    }
-
-    @Test
-    fun growth_frontierMovesRightWithoutShiftingInterior() {
-        var peaks by mutableStateOf(FloatArray(5) { 0.75f })
-        var elapsed by mutableStateOf(5f / peaksPerSec)
-
-        composeRule.setContent {
-            LiveWaveformStrip(
-                peaks = peaks,
-                windowSec = windowSec,
-                elapsedSec = elapsed,
-                peaksPerSec = peaksPerSec,
-                color = Color(0xFF00AA00),
-                normalized = false,
-                modifier = Modifier
-                    .width(450.dp)
-                    .height(56.dp),
-            )
-        }
-        composeRule.waitForIdle()
-
-        val probeSlot = 2
-        var previous = composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage()
-        checkNotNull(measureSlotBarCentroidX(previous, probeSlot, capacitySlots))
-
-        var frontierCentroids = mutableListOf(
-            checkNotNull(measureSlotBarCentroidX(previous, peaks.size - 1, capacitySlots)),
-        )
-        for (target in listOf(12, 20, 35, 60)) {
-            peaks = FloatArray(target) { 0.75f }
-            elapsed = target / peaksPerSec.toFloat()
-            composeRule.waitForIdle()
-            val frame = composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage()
-            assertSlotCentroidStable(previous, frame, probeSlot, capacitySlots)
-            val frontier = checkNotNull(
-                measureSlotBarCentroidX(frame, target - 1, capacitySlots),
-            ) { "rightmost slot ${target - 1} bar not visible at peaks=$target" }
-            assertThat(frontier).isGreaterThan(frontierCentroids.last())
-            frontierCentroids.add(frontier)
-            previous = frame
-        }
-        assertThat(frontierCentroids.distinct().size).isGreaterThan(1)
     }
 
     @Test
     fun emptyStrip_showsVisibleContainerBeforeRecording() {
-        composeRule.setContent {
-            LiveWaveformStrip(
-                peaks = floatArrayOf(),
-                windowSec = windowSec,
-                elapsedSec = 0f,
-                peaksPerSec = peaksPerSec,
-                color = Color.Red,
-                normalized = true,
-                modifier = Modifier
-                    .width(450.dp)
-                    .height(56.dp),
-            )
-        }
-        composeRule.waitForIdle()
-        val image = composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage()
-        val bitmap = image.asAndroidBitmap()
+        mountLiveStrip(peaks = floatArrayOf(), elapsed = 0f)
+        val bitmap = captureStrip().asAndroidBitmap()
         assertThat(hasWaveformStripContainer(bitmap)).isTrue()
         assertThat(interiorWaveformBarPixelCount(bitmap)).isEqualTo(0)
-    }
-
-    @Test
-    fun growth_rightEdgeExpandsWhileLeftEdgeStaysNearZero() {
-        var peaks by mutableStateOf(FloatArray(8) { 0.8f })
-        var elapsed by mutableStateOf(8f / peaksPerSec)
-
-        composeRule.setContent {
-            LiveWaveformStrip(
-                peaks = peaks,
-                windowSec = windowSec,
-                elapsedSec = elapsed,
-                peaksPerSec = peaksPerSec,
-                color = Color.Blue,
-                normalized = false,
-                modifier = Modifier
-                    .width(360.dp)
-                    .height(48.dp),
-            )
-        }
-        composeRule.waitForIdle()
-
-        val baseline = composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage()
-        val firstFrontier = checkNotNull(
-            measureSlotBarCentroidX(baseline, peaks.size - 1, capacitySlots),
-        )
-        val leftAnchor = checkNotNull(measureSlotBarCentroidX(baseline, 0, capacitySlots))
-
-        peaks = FloatArray(45) { 0.8f }
-        elapsed = 45f / peaksPerSec
-        composeRule.waitForIdle()
-
-        val grown = composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage()
-        val secondFrontier = checkNotNull(
-            measureSlotBarCentroidX(grown, peaks.size - 1, capacitySlots),
-        )
-        assertThat(secondFrontier).isGreaterThan(firstFrontier)
-        val leftAfterGrowth = checkNotNull(measureSlotBarCentroidX(grown, 0, capacitySlots))
-        assertThat(kotlin.math.abs(leftAfterGrowth - leftAnchor)).isLessThan(4f)
     }
 }

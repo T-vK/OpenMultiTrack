@@ -77,7 +77,7 @@ class HostLiveWaveformLeftToRightE2eTest {
                     peaksPerSec = peaksPerSec,
                     windowSec = 15f,
                     maxSecond = 9,
-                    requireLockedPixelValues = false,
+                    requireDenseInterior = false,
                     peakCountByFrame = peakCounts,
                 )
             } finally {

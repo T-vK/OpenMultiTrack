@@ -137,31 +137,45 @@ internal fun findGrowthColumnStabilityViolation(
     return -1
 }
 
-internal fun DrawScope.drawLiveWaveformTimeline(
+/**
+ * Draws one vertical bar per timeline slot at a fixed horizontal anchor.
+ * Stroke spans the full slot width so adjacent samples form a solid trace.
+ */
+internal fun DrawScope.drawLiveWaveformSlots(
     slotPeaks: FloatArray,
     capacity: Int,
-    filledCount: Int,
+    peakCount: Int,
     elapsedSec: Float,
     windowSec: Float,
+    peaksPerSec: Int,
     color: Color,
     drawWidthPx: Float,
 ) {
-    if (filledCount <= 0 || capacity <= 0 || drawWidthPx <= 0f) return
+    if (slotPeaks.isEmpty() || capacity <= 0 || drawWidthPx <= 0f || peakCount <= 0) return
     val h = size.height
     if (h <= 0f) return
-    val mid = h / 2f
+    val rolling = elapsedSec > windowSec
+    val filledCount = liveWaveformFilledSlotCount(
+        slotPeaks = slotPeaks,
+        peakCount = peakCount,
+        elapsedSec = elapsedSec,
+        peaksPerSec = peaksPerSec,
+        rolling = rolling,
+    )
+    if (filledCount <= 0) return
     val contentW = drawWidthPx * (elapsedSec / windowSec).coerceIn(0f, 1f)
     if (contentW <= 0f) return
+    val mid = h / 2f
     val slotWidth = drawWidthPx / capacity
-    val stroke = (slotWidth * 0.75f).coerceIn(1f, 4f)
+    val stroke = slotWidth.coerceAtLeast(1f)
     val minBar = h * 0.06f
     val barColor = color.copy(alpha = 0.9f)
     for (slot in 0 until filledCount) {
         val x = (slot + 0.5f) * slotWidth
         if (x > contentW) break
         val amp = slotPeaks[slot].coerceIn(0f, 1f)
-        val barH = maxOf(amp * h * 0.9f, if (amp > 0.02f) minBar else 0f)
-        if (barH <= 0f) continue
+        if (amp <= 0f) continue
+        val barH = maxOf(amp * h * 0.9f, minBar)
         drawLine(
             color = barColor,
             start = Offset(x, mid - barH / 2f),
@@ -211,21 +225,13 @@ internal fun LiveWaveformStrip(
                 peaksPerSec = peaksPerSec,
             )
             if (slotPeaks.isEmpty()) return@Canvas
-            val capacity = slotPeaks.size
-            val rolling = elapsedSec > windowSec
-            val filledCount = liveWaveformFilledSlotCount(
+            drawLiveWaveformSlots(
                 slotPeaks = slotPeaks,
+                capacity = slotPeaks.size,
                 peakCount = scaledPeaks.size,
                 elapsedSec = elapsedSec,
-                peaksPerSec = peaksPerSec,
-                rolling = rolling,
-            )
-            drawLiveWaveformTimeline(
-                slotPeaks = slotPeaks,
-                capacity = capacity,
-                filledCount = filledCount,
-                elapsedSec = elapsedSec,
                 windowSec = windowSec,
+                peaksPerSec = peaksPerSec,
                 color = color,
                 drawWidthPx = drawWidth,
             )
