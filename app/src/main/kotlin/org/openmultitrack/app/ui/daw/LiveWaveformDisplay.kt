@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.unit.Dp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -428,6 +427,7 @@ private fun liveWaveformStripImpl(
             pixelCount,
             normalized,
             livePeakCeiling,
+            peaks,
         ) {
             val scaledCount = scalePeaksForLiveDisplayInto(
                 dest = scaledBuffer,
@@ -448,18 +448,12 @@ private fun liveWaveformStripImpl(
                 viewWindowSec = viewWindowSec,
             )
         }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .drawWithCache {
-                    onDrawBehind {
-                        drawLiveWaveformColumns(
-                            columns = columnBuffer,
-                            columnCount = columnCount,
-                            color = color,
-                        )
-                    }
-                },
-        )
+        Canvas(Modifier.fillMaxSize()) {
+            drawLiveWaveformColumns(
+                columns = columnBuffer,
+                columnCount = columnCount,
+                color = color,
+            )
+        }
     }
 }

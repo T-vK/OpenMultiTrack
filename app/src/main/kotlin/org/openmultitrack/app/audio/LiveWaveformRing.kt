@@ -9,18 +9,13 @@ import kotlin.math.max
 
 @Immutable
 data class LiveWaveformSnapshot(
-    /** Oldest→newest peaks; only [0, peakCount) are valid when [shared] is true. */
+    /** Oldest→newest peaks for display (owned copy; length equals [peakCount]). */
     val peaks: FloatArray,
     val peakCount: Int,
     /** Total time slots in the rolling window (e.g. 120 s × 30 Hz). */
     val capacity: Int,
     val generation: Long = 0L,
-    private val shared: Boolean = false,
 ) {
-    /** Peaks safe to pass into layout math (copies only when the snapshot buffer is shared). */
-    fun peaksForDisplay(): FloatArray =
-        if (!shared || peakCount == peaks.size) peaks else peaks.copyOf(peakCount)
-
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is LiveWaveformSnapshot) return false
@@ -90,40 +85,37 @@ class LiveWaveformRing(
         }
     }
 
-    /** Returns a view of the last published UI buffer (no per-frame heap copy). */
+    /** Returns an owned copy of the last published UI buffer for Compose. */
     fun uiSnapshot(normalize: Boolean = false): LiveWaveformSnapshot = lock.read {
-        if (!normalize || uiFilled == 0) {
-            return@read LiveWaveformSnapshot(
-                peaks = uiPeaks,
-                peakCount = uiFilled,
-                capacity = capacityPeaks,
-                generation = generation,
-                shared = true,
-            )
-        }
-        val out = FloatArray(uiFilled)
-        for (i in 0 until uiFilled) out[i] = uiPeaks[i]
-        val peak = out.max()
-        if (peak > 1e-6f) {
-            for (i in out.indices) out[i] /= peak
-        }
-        LiveWaveformSnapshot(out, uiFilled, capacityPeaks, generation, shared = false)
+        copyUiPeaksLocked(normalize)
     }
 
-    /** Returns peaks oldest→newest for UI (allocates — prefer [uiSnapshot]). */
+    /** Returns peaks oldest→newest for UI. */
     fun snapshot(normalize: Boolean = false): LiveWaveformSnapshot = lock.read {
         val out = FloatArray(filled)
         val start = if (filled < capacityPeaks) 0 else writeIndex
         for (i in 0 until filled) {
             out[i] = peaks[(start + i) % capacityPeaks]
         }
-        if (normalize && out.isNotEmpty()) {
-            val peak = out.max()
-            if (peak > 1e-6f) {
-                for (i in out.indices) out[i] /= peak
-            }
+        normalizePeaksInPlace(out, normalize)
+        LiveWaveformSnapshot(out, filled, capacityPeaks, generation)
+    }
+
+    private fun copyUiPeaksLocked(normalize: Boolean): LiveWaveformSnapshot {
+        val out = FloatArray(uiFilled)
+        for (i in 0 until uiFilled) {
+            out[i] = uiPeaks[i]
         }
-        LiveWaveformSnapshot(out, filled, capacityPeaks, generation, shared = false)
+        normalizePeaksInPlace(out, normalize)
+        return LiveWaveformSnapshot(out, uiFilled, capacityPeaks, generation)
+    }
+
+    private fun normalizePeaksInPlace(out: FloatArray, normalize: Boolean) {
+        if (!normalize || out.isEmpty()) return
+        val peak = out.max()
+        if (peak > 1e-6f) {
+            for (i in out.indices) out[i] /= peak
+        }
     }
 
     private fun publishUiSnapshotLocked() {

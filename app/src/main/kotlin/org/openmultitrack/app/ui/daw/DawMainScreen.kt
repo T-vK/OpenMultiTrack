@@ -1106,29 +1106,37 @@ private fun ChannelStripRow(
             height = colorBarHeight,
         )
         if (showWaveform) {
+            val waveformModifier = Modifier
+                .weight(1f)
+                .height(colorBarHeight)
+                .clip(RoundedCornerShape(3.dp))
+            val historySec = recordWaveformHistorySec.coerceIn(
+                RecordViewLayout.MIN_HISTORY_SEC,
+                RecordViewLayout.MAX_HISTORY_SEC,
+            )
             if (waveform != null) {
                 LiveWaveformStrip(
                     snapshot = waveform,
-                    bufferWindowSec = recordWaveformHistorySec.coerceIn(
-                        RecordViewLayout.MIN_HISTORY_SEC,
-                        RecordViewLayout.MAX_HISTORY_SEC,
-                    ),
+                    bufferWindowSec = historySec,
                     elapsedSec = recordElapsedSec,
                     peaksPerSec = RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC,
                     color = Color(strip.colorArgb),
                     normalized = normalized,
                     viewStartSec = recordViewStartSec,
                     viewWindowSec = recordViewWindowSec,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(colorBarHeight)
-                        .clip(RoundedCornerShape(3.dp)),
+                    modifier = waveformModifier,
                 )
             } else {
-                Spacer(
-                    Modifier
-                        .weight(1f)
-                        .height(colorBarHeight),
+                LiveWaveformStrip(
+                    peaks = floatArrayOf(),
+                    bufferWindowSec = historySec,
+                    elapsedSec = recordElapsedSec,
+                    peaksPerSec = RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC,
+                    color = Color(strip.colorArgb),
+                    normalized = normalized,
+                    viewStartSec = recordViewStartSec,
+                    viewWindowSec = recordViewWindowSec,
+                    modifier = waveformModifier,
                 )
             }
         } else {
