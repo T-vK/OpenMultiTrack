@@ -811,11 +811,14 @@ private fun ChannelStripList(
     ) {
         val count = visibleStrips.size.coerceAtLeast(1)
         val gap = 2.dp
+        val showTimeline = showWaveforms && isRecording
+        val rulerAndGap = if (showTimeline) WaveformTimeRulerHeight + gap else 0.dp
         val totalGaps = gap * (count - 1).coerceAtLeast(0)
-        val naturalHeight = (maxHeight - totalGaps) / count
+        val naturalHeight = (maxHeight - rulerAndGap - totalGaps) / count
         val useScroll = naturalHeight < MinStripHeight
         val stripHeight = if (useScroll) ScrollStripHeight else naturalHeight
         val innerPad = (stripHeight * 0.12f).coerceIn(3.dp, 10.dp)
+        val labelGap = innerPad / 2
         val labelFontSize = (stripHeight.value * 0.30f).coerceIn(10f, 16f)
         val labelColumnWidth = stripLabelColumnWidth(
             visibleStrips,
@@ -855,10 +858,31 @@ private fun ChannelStripList(
         } else {
             Modifier.fillMaxSize()
         }
-        Column(
-            modifier = listModifier,
-            verticalArrangement = Arrangement.spacedBy(gap),
-        ) {
+        Column(modifier = listModifier) {
+            if (showTimeline) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(WaveformTimeRulerHeight)
+                        .padding(horizontal = innerPad),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(labelGap),
+                ) {
+                    Spacer(Modifier.width(labelColumnWidth))
+                    Spacer(Modifier.width(StripVuMeterWidth))
+                    RecordingTimelineRuler(
+                        elapsedSec = recordElapsedSec,
+                        windowSec = recordWaveformWindowSec,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(WaveformTimeRulerHeight),
+                    )
+                }
+                Spacer(Modifier.height(gap))
+            }
+            Column(
+                verticalArrangement = Arrangement.spacedBy(gap),
+            ) {
             visibleStrips.forEach { strip ->
                 ChannelStripRow(
                     strip = strip,
@@ -886,6 +910,7 @@ private fun ChannelStripList(
                     hideRoutingBadges = hideRoutingBadges,
                     onOpenControls = { overlayIndex = strip.index },
                 )
+            }
             }
         }
     }

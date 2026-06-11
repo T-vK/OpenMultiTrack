@@ -62,7 +62,7 @@ private val LoopFillColor = Color(0xFF1E88E5)
 private val LoopHandleColor = Color(0xFF64B5F6)
 private val MinStripHeight = 44.dp
 private val ScrollStripHeight = 72.dp
-private val TimeRulerHeight = 22.dp
+internal val WaveformTimeRulerHeight = 22.dp
 
 @Composable
 fun SoundcheckPanel(
@@ -254,7 +254,7 @@ private fun SoundcheckWaveformStripList(
         val count = strips.size.coerceAtLeast(1)
         val gap = 2.dp
         val totalGaps = gap * (count - 1).coerceAtLeast(0)
-        val rulerAndGap = TimeRulerHeight + gap
+        val rulerAndGap = WaveformTimeRulerHeight + gap
         val naturalHeight = (maxHeight - rulerAndGap - totalGaps) / count
         val useScroll = naturalHeight < MinStripHeight
         val stripHeight = if (useScroll) ScrollStripHeight else naturalHeight
@@ -350,7 +350,7 @@ private fun SoundcheckWaveformStripList(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(TimeRulerHeight)
+                    .height(WaveformTimeRulerHeight)
                     .padding(horizontal = innerPad),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(labelGap),
@@ -359,7 +359,7 @@ private fun SoundcheckWaveformStripList(
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(TimeRulerHeight)
+                        .height(WaveformTimeRulerHeight)
                         .clip(RoundedCornerShape(3.dp))
                         .onSizeChanged { waveformWidthPx = it.width.toFloat() }
                         .then(timelineGestureModifier(allowTransform = !loopSelecting)),
@@ -637,7 +637,7 @@ private fun rememberViewportPeaks(
 
 private val TrackmarkRulerColor = Color(0xFFFFB300)
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTimeRuler(
+internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTimeRuler(
     viewStartSec: Float,
     viewWindowSec: Float,
     contentDurationSec: Float,
@@ -716,7 +716,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSoundcheckWavef
     }
 }
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPlayheadAndLoop(
+internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPlayheadAndLoop(
     viewStartSec: Float,
     viewWindowSec: Float,
     playheadSec: Float,
@@ -800,7 +800,7 @@ internal fun downsamplePeaksMax(source: FloatArray, targetCount: Int): FloatArra
     return out
 }
 
-private fun chooseTickStepSec(viewWindowSec: Float): Float = when {
+internal fun chooseTickStepSec(viewWindowSec: Float): Float = when {
     viewWindowSec <= 60f -> 5f
     viewWindowSec <= 180f -> 15f
     viewWindowSec <= 600f -> 60f
