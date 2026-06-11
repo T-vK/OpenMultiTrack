@@ -83,27 +83,25 @@ class LiveWaveformPixelInstrumentedTest {
 
         val probeSlot = 2
         var previous = composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage()
-        var previousRight = waveformRightEdgeX(previous)
-        val centroidAtProbe = measureBarCentroidX(
-            previous,
-            expectedSlotCenterX(probeSlot, capacitySlots, previous.width),
-            tolerancePx = 8,
-        )
-        checkNotNull(centroidAtProbe)
+        checkNotNull(measureSlotBarCentroidX(previous, probeSlot, capacitySlots))
 
-        var rightEdges = mutableListOf(previousRight)
+        var frontierCentroids = mutableListOf(
+            checkNotNull(measureSlotBarCentroidX(previous, peaks.size - 1, capacitySlots)),
+        )
         for (target in listOf(12, 20, 35, 60)) {
             peaks = FloatArray(target) { 0.75f }
             elapsed = target / peaksPerSec.toFloat()
             composeRule.waitForIdle()
             val frame = composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage()
             assertSlotCentroidStable(previous, frame, probeSlot, capacitySlots)
-            val right = waveformRightEdgeX(frame)
-            assertThat(right).isAtLeast(rightEdges.last())
-            rightEdges.add(right)
+            val frontier = checkNotNull(
+                measureSlotBarCentroidX(frame, target - 1, capacitySlots),
+            ) { "rightmost slot ${target - 1} bar not visible at peaks=$target" }
+            assertThat(frontier).isGreaterThan(frontierCentroids.last())
+            frontierCentroids.add(frontier)
             previous = frame
         }
-        assertThat(rightEdges.distinct().size).isGreaterThan(1)
+        assertThat(frontierCentroids.distinct().size).isGreaterThan(1)
     }
 
     @Test
@@ -148,18 +146,22 @@ class LiveWaveformPixelInstrumentedTest {
         }
         composeRule.waitForIdle()
 
-        val firstRight = waveformRightEdgeX(
-            composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage(),
+        val baseline = composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage()
+        val firstFrontier = checkNotNull(
+            measureSlotBarCentroidX(baseline, peaks.size - 1, capacitySlots),
         )
-        assertThat(firstRight).isAtLeast(0)
+        val leftAnchor = checkNotNull(measureSlotBarCentroidX(baseline, 0, capacitySlots))
 
         peaks = FloatArray(45) { 0.8f }
         elapsed = 45f / peaksPerSec
         composeRule.waitForIdle()
 
-        val secondRight = waveformRightEdgeX(
-            composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage(),
+        val grown = composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage()
+        val secondFrontier = checkNotNull(
+            measureSlotBarCentroidX(grown, peaks.size - 1, capacitySlots),
         )
-        assertThat(secondRight).isGreaterThan(firstRight)
+        assertThat(secondFrontier).isGreaterThan(firstFrontier)
+        val leftAfterGrowth = checkNotNull(measureSlotBarCentroidX(grown, 0, capacitySlots))
+        assertThat(kotlin.math.abs(leftAfterGrowth - leftAnchor)).isLessThan(4f)
     }
 }

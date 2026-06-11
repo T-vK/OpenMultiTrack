@@ -9,6 +9,18 @@ import kotlin.math.abs
 fun expectedSlotCenterX(slot: Int, capacitySlots: Int, imageWidth: Int): Float =
     (slot + 0.5f) / capacitySlots * imageWidth
 
+fun measureSlotBarCentroidX(
+    image: ImageBitmap,
+    slot: Int,
+    capacitySlots: Int,
+): Float? {
+    val bitmap = image.asAndroidBitmap()
+    val tolerance = (bitmap.width.toFloat() / capacitySlots * 1.5f).toInt().coerceAtLeast(4)
+    val expected = expectedSlotCenterX(slot, capacitySlots, bitmap.width)
+    val bg = estimateWaveformStripBackground(bitmap)
+    return measureBarCentroidX(bitmap, expected, tolerance, bg)
+}
+
 /** Estimates the waveform strip background from margins (areas without bars). */
 fun estimateWaveformStripBackground(strip: Bitmap): Int {
     val points = listOf(
