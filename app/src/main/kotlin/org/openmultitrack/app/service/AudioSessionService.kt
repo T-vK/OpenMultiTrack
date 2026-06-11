@@ -3,7 +3,6 @@ package org.openmultitrack.app.service
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -18,27 +17,33 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import org.openmultitrack.app.MainActivity
 import org.openmultitrack.app.R
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.data.MixerDeviceStore
 import org.openmultitrack.app.data.MixerRoutingStore
 import org.openmultitrack.app.remote.RemoteControlManager
+import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.usb.UsbAudioEnumerator
 
 class AudioSessionService : Service() {
     private val binder = LocalBinder()
     private lateinit var mixerManager: MultiMixerSessionManager
     private lateinit var remoteControl: RemoteControlManager
-    private lateinit var mediaNotification: SessionMediaNotification
+    private lateinit var playbackMedia: PlaybackMediaNotification
     private val notificationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var lastNotificationSignature: Int? = null
+    private var lastPlaybackSignature: Int? = null
+    private var activeNotificationMode: NotificationMode? = null
     private var mediaProgressJobActive = false
 
     @Volatile
     var isInForeground: Boolean = false
         private set
+
+    private enum class NotificationMode {
+        RECORDING,
+        PLAYBACK,
+    }
 
     inner class LocalBinder : Binder() {
         fun getService(): AudioSessionService = this@AudioSessionService
@@ -68,18 +73,20 @@ class AudioSessionService : Service() {
         AudioSessionBridge.activeMixerId = { mixerManager.activeMixerId.value }
         AudioSessionBridge.rebuildNotification = { refreshForegroundNotification(forceRebuild = true) }
         AudioSessionBridge.tickMediaProgress = { session ->
-            if (isInForeground) mediaNotification.updateProgress(session)
+            if (isInForeground && notificationMode(session) == NotificationMode.PLAYBACK) {
+                playbackMedia.updateProgress(session)
+            }
         }
-        mediaNotification = SessionMediaNotification(this)
-        startMediaProgressTicker()
-        createNotificationChannel()
+        playbackMedia = PlaybackMediaNotification(this)
+        startPlaybackProgressTicker()
+        createNotificationChannels()
         OmtLog.i("Service", "AudioSessionService created")
     }
 
     override fun onDestroy() {
         notificationScope.cancel()
-        if (::mediaNotification.isInitialized) {
-            mediaNotification.release()
+        if (::playbackMedia.isInitialized) {
+            playbackMedia.release()
         }
         isInForeground = false
         AudioSessionBridge.mixerManager = null
@@ -98,7 +105,6 @@ class AudioSessionService : Service() {
             else -> {
                 intent?.getStringExtra(EXTRA_STATUS)?.let { promoteToForeground(it) }
                     ?: run {
-                        // START_STICKY restart — stay bound without promoting from background.
                         OmtLog.d("Service", "onStartCommand without status — skip foreground promote")
                     }
             }
@@ -108,8 +114,10 @@ class AudioSessionService : Service() {
 
     fun promoteToForeground(status: String? = null): Boolean {
         return try {
+            val notification = buildAndPostNotification()
+            val mode = notificationMode(activeSession())
+            val notificationId = notificationId(mode)
             if (!isInForeground) {
-                val notification = buildAndPostNotification()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                         ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
@@ -117,15 +125,27 @@ class AudioSessionService : Service() {
                     } else {
                         ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
                     }
-                    startForeground(NOTIFICATION_ID, notification, type)
+                    startForeground(notificationId, notification, type)
                 } else {
                     @Suppress("DEPRECATION")
-                    startForeground(NOTIFICATION_ID, notification)
+                    startForeground(notificationId, notification)
                 }
                 isInForeground = true
             } else {
-                refreshForegroundNotification(forceRebuild = true)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                    } else {
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                    }
+                    startForeground(notificationId, notification, type)
+                } else {
+                    @Suppress("DEPRECATION")
+                    startForeground(notificationId, notification)
+                }
             }
+            activeNotificationMode = mode
             true
         } catch (e: Exception) {
             OmtLog.e("Service", "startForeground failed", e)
@@ -140,13 +160,36 @@ class AudioSessionService : Service() {
     fun refreshForegroundNotification(forceRebuild: Boolean = false) {
         if (!isInForeground) return
         val session = activeSession()
-        val mixerName = session?.mixerProfile?.displayName
-        val signature = mediaNotification.layoutSignature(session, mixerName)
-        if (forceRebuild || signature != lastNotificationSignature) {
+        val mode = notificationMode(session)
+        if (mode != activeNotificationMode) {
             buildAndPostNotification()
-        } else {
-            mediaNotification.updateProgress(session)
+            activeNotificationMode = mode
+            return
         }
+        when (mode) {
+            NotificationMode.RECORDING -> buildAndPostNotification()
+            NotificationMode.PLAYBACK -> {
+                val mixerName = session?.mixerProfile?.displayName
+                val signature = playbackMedia.layoutSignature(session, mixerName)
+                if (forceRebuild || signature != lastPlaybackSignature) {
+                    buildAndPostNotification()
+                } else {
+                    playbackMedia.updateProgress(session)
+                }
+            }
+        }
+    }
+
+    private fun notificationMode(session: MixerSessionUiState?): NotificationMode =
+        if (session?.appMode == AppMode.MULTITRACK_RECORD) {
+            NotificationMode.RECORDING
+        } else {
+            NotificationMode.PLAYBACK
+        }
+
+    private fun notificationId(mode: NotificationMode): Int = when (mode) {
+        NotificationMode.RECORDING -> NOTIFICATION_ID_RECORDING
+        NotificationMode.PLAYBACK -> NOTIFICATION_ID_PLAYBACK
     }
 
     private fun activeSession(): MixerSessionUiState? {
@@ -154,8 +197,7 @@ class AudioSessionService : Service() {
         return mixerManager.getOrCreate(activeId).state.value
     }
 
-    /** Keeps MediaSession position/subtitle fresh without reposting the notification. */
-    private fun startMediaProgressTicker() {
+    private fun startPlaybackProgressTicker() {
         if (mediaProgressJobActive) return
         mediaProgressJobActive = true
         notificationScope.launch {
@@ -163,8 +205,8 @@ class AudioSessionService : Service() {
                 delay(1_000)
                 if (!isInForeground) continue
                 val session = activeSession() ?: continue
-                if (session.isRecording || session.isPlaying) {
-                    mediaNotification.updateProgress(session)
+                if (notificationMode(session) == NotificationMode.PLAYBACK && session.isPlaying) {
+                    playbackMedia.updateProgress(session)
                 }
             }
         }
@@ -173,19 +215,39 @@ class AudioSessionService : Service() {
     private fun buildAndPostNotification(): Notification {
         val session = activeSession()
         val mixerName = session?.mixerProfile?.displayName
-        mediaNotification.applySession(session, mixerName)
-        lastNotificationSignature = mediaNotification.layoutSignature(session, mixerName)
-        val notification = SessionNotificationBuilder
-            .build(this, session, mixerName, mediaNotification)
-            .build()
+        val mode = notificationMode(session)
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, notification)
-        return notification
+        return when (mode) {
+            NotificationMode.RECORDING -> {
+                playbackMedia.setActive(false)
+                manager.cancel(NOTIFICATION_ID_PLAYBACK)
+                val notification = RecordingNotificationBuilder
+                    .build(this, session, mixerName)
+                    .build()
+                manager.notify(NOTIFICATION_ID_RECORDING, notification)
+                notification
+            }
+            NotificationMode.PLAYBACK -> {
+                playbackMedia.setActive(true)
+                manager.cancel(NOTIFICATION_ID_RECORDING)
+                playbackMedia.applySession(session, mixerName)
+                lastPlaybackSignature = playbackMedia.layoutSignature(session, mixerName)
+                val notification = PlaybackNotificationBuilder
+                    .build(this, session, mixerName, playbackMedia)
+                    .build()
+                manager.notify(NOTIFICATION_ID_PLAYBACK, notification)
+                notification
+            }
+        }
     }
 
     fun stopForegroundAndSelf() {
-        lastNotificationSignature = null
+        lastPlaybackSignature = null
+        activeNotificationMode = null
         isInForeground = false
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.cancel(NOTIFICATION_ID_RECORDING)
+        manager.cancel(NOTIFICATION_ID_PLAYBACK)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
@@ -195,23 +257,31 @@ class AudioSessionService : Service() {
         stopSelf()
     }
 
-    private fun createNotificationChannel() {
+    private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                getString(R.string.notification_channel_name),
-                NotificationManager.IMPORTANCE_DEFAULT,
-            ).apply {
-                setShowBadge(false)
-            }
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannel(channel)
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_RECORDING,
+                    getString(R.string.notification_channel_recording),
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply { setShowBadge(false) },
+            )
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_PLAYBACK,
+                    getString(R.string.notification_channel_playback),
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply { setShowBadge(false) },
+            )
         }
     }
 
     companion object {
-        const val CHANNEL_ID = "audio_session_transport"
-        const val NOTIFICATION_ID = 1001
+        const val CHANNEL_RECORDING = "recording_transport"
+        const val CHANNEL_PLAYBACK = "playback_transport"
+        const val NOTIFICATION_ID_RECORDING = 1001
+        const val NOTIFICATION_ID_PLAYBACK = 1002
         const val ACTION_STOP_ALL = "org.openmultitrack.STOP_AUDIO_SESSION"
         const val EXTRA_STATUS = "status"
 

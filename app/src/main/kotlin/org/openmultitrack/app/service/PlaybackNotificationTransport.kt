@@ -1,21 +1,15 @@
 package org.openmultitrack.app.service
 
-import kotlin.math.max
 import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.isPlaybackMode
 
 /**
- * Maps app session state to [android.support.v4.media.session.PlaybackStateCompat] fields.
+ * Maps playback session state to [android.support.v4.media.session.PlaybackStateCompat] fields.
  *
- * System media controls (Android 13+) read position and [MediaMetadataCompat.METADATA_KEY_DURATION]
- * for elapsed/total clocks and the progress bar. [androidx.core.app.NotificationCompat] subtitles
- * are not shown there.
- *
- * Recording keeps the playhead at the end of a growing duration bar (live / squiggly progress).
  * Standard [android.support.v4.media.session.PlaybackStateCompat.ACTION_STOP] is not shown on
- * Android 13+ — use [CUSTOM_ACTION_STOP] instead. Prev/next use the standard skip actions.
+ * Android 13+ — use [CUSTOM_ACTION_STOP] instead.
  */
-object SessionNotificationTransport {
+object PlaybackNotificationTransport {
     const val CUSTOM_ACTION_STOP = "org.openmultitrack.action.STOP"
 
     data class Snapshot(
@@ -28,17 +22,6 @@ object SessionNotificationTransport {
 
     fun snapshot(session: MixerSessionUiState?): Snapshot {
         when {
-            session?.isRecording == true -> {
-                val elapsedMs = (session.recordElapsedSec * 1000f).toLong().coerceAtLeast(0L)
-                val durationMs = max(elapsedMs, 1_000L)
-                return Snapshot(
-                    positionMs = durationMs,
-                    durationMs = durationMs,
-                    state = android.support.v4.media.session.PlaybackStateCompat.STATE_PLAYING,
-                    standardActions = recordingActions(),
-                    customActionIds = listOf(CUSTOM_ACTION_STOP),
-                )
-            }
             session?.isPlaying == true -> {
                 val positionMs = (session.playbackPositionSec * 1000f).toLong().coerceAtLeast(0L)
                 val durationMs = (session.playbackDurationSec * 1000f).toLong().coerceAtLeast(0L)
@@ -48,15 +31,6 @@ object SessionNotificationTransport {
                     state = android.support.v4.media.session.PlaybackStateCompat.STATE_PLAYING,
                     standardActions = playbackStandardActions(session, playing = true),
                     customActionIds = listOf(CUSTOM_ACTION_STOP),
-                )
-            }
-            session?.appMode == AppMode.MULTITRACK_RECORD -> {
-                return Snapshot(
-                    positionMs = 0L,
-                    durationMs = 0L,
-                    state = android.support.v4.media.session.PlaybackStateCompat.STATE_PAUSED,
-                    standardActions = android.support.v4.media.session.PlaybackStateCompat.ACTION_PLAY,
-                    customActionIds = emptyList(),
                 )
             }
             session?.appMode?.isPlaybackMode == true -> {
@@ -95,16 +69,15 @@ object SessionNotificationTransport {
         return "%d:%02d".format(m, s)
     }
 
-    private fun recordingActions(): Long =
-        android.support.v4.media.session.PlaybackStateCompat.ACTION_PAUSE or
-            android.support.v4.media.session.PlaybackStateCompat.ACTION_PLAY_PAUSE
-
     private fun playbackStandardActions(session: MixerSessionUiState, playing: Boolean): Long {
         var actions = android.support.v4.media.session.PlaybackStateCompat.ACTION_SEEK_TO
         actions = if (playing) {
-            actions or recordingActions()
+            actions or
+                android.support.v4.media.session.PlaybackStateCompat.ACTION_PAUSE or
+                android.support.v4.media.session.PlaybackStateCompat.ACTION_PLAY_PAUSE
         } else {
-            actions or android.support.v4.media.session.PlaybackStateCompat.ACTION_PLAY or
+            actions or
+                android.support.v4.media.session.PlaybackStateCompat.ACTION_PLAY or
                 android.support.v4.media.session.PlaybackStateCompat.ACTION_PLAY_PAUSE
         }
         if (session.appMode != AppMode.SIMPLE_PLAY && session.trackmarks.isNotEmpty()) {

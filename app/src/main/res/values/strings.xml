@@ -20,7 +20,13 @@
     <string name="enable_virtual_mic">Enable virtual mic</string>
     <string name="disable_virtual_mic">Disable virtual mic</string>
     <string name="notification_channel_name">Audio session</string>
+    <string name="notification_channel_recording">Recording</string>
+    <string name="notification_channel_playback">Playback</string>
     <string name="notification_title">OpenMultiTrack</string>
+    <string name="notification_recording_active">Recording</string>
+    <string name="notification_recording_ready">Ready to record</string>
+    <string name="notification_monitoring_active">Monitoring</string>
+    <string name="notification_action_record">Record</string>
     <string name="notification_stop">Stop all</string>
     <string name="notification_action_play">Play</string>
     <string name="notification_action_pause">Pause</string>

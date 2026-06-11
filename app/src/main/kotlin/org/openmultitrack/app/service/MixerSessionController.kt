@@ -231,7 +231,12 @@ class MixerSessionController(
             _state.update { it.copy(isVuMetering = false) }
             refreshSoundcheckLibrary()
             _state.update {
-                it.copy(soundcheckViewWindowSec = settings.playbackWaveformWindowSec.coerceIn(30f, 600f))
+                it.copy(
+                    soundcheckViewWindowSec = org.openmultitrack.app.ui.daw.SoundcheckViewLayout.clampWindow(
+                        settings.playbackWaveformWindowSec,
+                        it.playbackDurationSec,
+                    ),
+                )
             }
         } else {
             syncVuMeterCapture()
@@ -334,7 +339,7 @@ class MixerSessionController(
 
     fun setSoundcheckView(viewStartSec: Float, viewWindowSec: Float) {
         val duration = _state.value.playbackDurationSec
-        val window = viewWindowSec.coerceIn(30f, 600f)
+        val window = org.openmultitrack.app.ui.daw.SoundcheckViewLayout.clampWindow(viewWindowSec, duration)
         val maxStart = max(0f, duration - window)
         _state.update {
             it.copy(
@@ -351,7 +356,10 @@ class MixerSessionController(
 
     fun zoomSoundcheckView(scale: Float, focalSec: Float) {
         val s = _state.value
-        val newWindow = (s.soundcheckViewWindowSec / scale).coerceIn(30f, 600f)
+        val newWindow = org.openmultitrack.app.ui.daw.SoundcheckViewLayout.clampWindow(
+            s.soundcheckViewWindowSec / scale,
+            s.playbackDurationSec,
+        )
         val rel = if (s.soundcheckViewWindowSec > 0f) {
             (focalSec - s.soundcheckViewStartSec) / s.soundcheckViewWindowSec
         } else {
@@ -1365,7 +1373,7 @@ class MixerSessionController(
                         isPlaying = true,
                         transportState = TransportState.PLAYING,
                         playbackPositionSec = posSec,
-                        playbackDurationSec = durSec.coerceAtLeast(s.playbackDurationSec),
+                        playbackDurationSec = durSec.takeIf { it > 0f } ?: s.playbackDurationSec,
                     )
                 }
                 val mediaSec = posSec.toInt()
@@ -1496,6 +1504,11 @@ class MixerSessionController(
 
     private fun applySoundcheckWaveformOverview(overview: SessionWaveformOverview, loading: Boolean) {
         _state.update {
+            val durationSec = if (!it.isPlaying && overview.durationSec > 0f) {
+                overview.durationSec
+            } else {
+                it.playbackDurationSec
+            }
             it.copy(
                 soundcheckWaveforms = overview,
                 soundcheckWaveformsLoading = loading,
@@ -1507,7 +1520,11 @@ class MixerSessionController(
                 },
                 soundcheckWaveformChannelsTotal = overview.peaksByChannel.size
                     .coerceAtLeast(it.soundcheckWaveformChannelsTotal),
-                playbackDurationSec = overview.durationSec.coerceAtLeast(it.playbackDurationSec),
+                playbackDurationSec = durationSec,
+                soundcheckViewWindowSec = org.openmultitrack.app.ui.daw.SoundcheckViewLayout.clampWindow(
+                    it.soundcheckViewWindowSec,
+                    durationSec,
+                ),
             )
         }
     }
@@ -1536,8 +1553,14 @@ class MixerSessionController(
     }
 
     fun updateSoundcheckViewConfig() {
-        val window = settings.playbackWaveformWindowSec.coerceIn(30f, 600f)
-        _state.update { it.copy(soundcheckViewWindowSec = window) }
+        _state.update { s ->
+            s.copy(
+                soundcheckViewWindowSec = org.openmultitrack.app.ui.daw.SoundcheckViewLayout.clampWindow(
+                    settings.playbackWaveformWindowSec,
+                    s.playbackDurationSec,
+                ),
+            )
+        }
     }
 
     private fun stopPlaybackStatusUpdates() {

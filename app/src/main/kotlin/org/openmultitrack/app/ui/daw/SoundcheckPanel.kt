@@ -294,7 +294,10 @@ private fun SoundcheckWaveformStripList(
             gestureActive = true
             if (zoomChange != 1f) {
                 val focalSec = gestureViewStart + gestureViewWindow / 2f
-                val newWindow = (gestureViewWindow / zoomChange).coerceIn(30f, 600f)
+                val newWindow = SoundcheckViewLayout.clampWindow(
+                    gestureViewWindow / zoomChange,
+                    durationState,
+                )
                 gestureViewWindow = newWindow
                 val maxStart = max(0f, durationState - newWindow)
                 gestureViewStart = (focalSec - newWindow / 2f).coerceIn(0f, maxStart)

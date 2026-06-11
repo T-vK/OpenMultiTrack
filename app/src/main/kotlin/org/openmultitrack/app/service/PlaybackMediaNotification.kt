@@ -9,19 +9,14 @@ import android.support.v4.media.session.PlaybackStateCompat
 import org.openmultitrack.app.R
 import org.openmultitrack.domain.session.isPlaybackMode
 
-/**
- * [MediaSessionCompat] backing the system media notification.
- *
- * Elapsed time, total duration, and the progress bar are driven from playback state + metadata.
- * Do not rely on [NotificationCompat.setContentText] for clocks on Android 13+.
- */
-class SessionMediaNotification(
+/** [MediaSessionCompat] for the playback / soundcheck player notification only. */
+class PlaybackMediaNotification(
     private val context: Context,
 ) {
-    private val mediaSession = MediaSessionCompat(context, "OpenMultiTrack")
+    private val mediaSession = MediaSessionCompat(context, "OpenMultiTrackPlayback")
     private var lastPublishedPositionMs: Long = -1L
     private var lastPublishedDurationMs: Long = -1L
-    private var lastSnapshot: SessionNotificationTransport.Snapshot? = null
+    private var lastSnapshot: PlaybackNotificationTransport.Snapshot? = null
 
     init {
         mediaSession.setCallback(
@@ -30,10 +25,7 @@ class SessionMediaNotification(
 
                 override fun onPause() {
                     val session = activeSession() ?: return
-                    when {
-                        session.isRecording -> dispatchPauseRecording()
-                        session.appMode.isPlaybackMode -> dispatchPlaybackToggle()
-                    }
+                    if (session.appMode.isPlaybackMode) dispatchPlaybackToggle()
                 }
 
                 override fun onStop() {
@@ -46,23 +38,26 @@ class SessionMediaNotification(
 
                 override fun onSeekTo(pos: Long) {
                     val session = activeSession() ?: return
-                    if (session.isRecording || !session.appMode.isPlaybackMode) return
-                    if (session.playbackDurationSec <= 0f) return
+                    if (!session.appMode.isPlaybackMode || session.playbackDurationSec <= 0f) return
                     controller()?.seekSoundcheck(pos / 1000f)
                     AudioSessionBridge.rebuildNotification()
                 }
 
                 override fun onCustomAction(action: String?, extras: Bundle?) {
-                    if (action == SessionNotificationTransport.CUSTOM_ACTION_STOP) {
+                    if (action == PlaybackNotificationTransport.CUSTOM_ACTION_STOP) {
                         dispatchCustomStop()
                     }
                 }
             },
         )
-        mediaSession.isActive = true
+        mediaSession.isActive = false
     }
 
     fun sessionToken() = mediaSession.sessionToken
+
+    fun setActive(active: Boolean) {
+        mediaSession.isActive = active
+    }
 
     fun release() {
         mediaSession.isActive = false
@@ -70,7 +65,7 @@ class SessionMediaNotification(
     }
 
     fun layoutSignature(session: MixerSessionUiState?, mixerName: String?): Int {
-        val snap = SessionNotificationTransport.snapshot(session)
+        val snap = PlaybackNotificationTransport.snapshot(session)
         val title = mixerName ?: context.getString(R.string.notification_title)
         val chapters = session?.trackmarks?.isNotEmpty() == true
         return listOf(
@@ -79,7 +74,6 @@ class SessionMediaNotification(
             snap.standardActions,
             snap.customActionIds,
             chapters,
-            session?.isRecording,
             session?.isPlaying,
             session?.selectedSoundcheckDir,
         ).hashCode()
@@ -93,12 +87,12 @@ class SessionMediaNotification(
     }
 
     fun updateProgress(session: MixerSessionUiState?) {
-        if (session == null) return
+        if (session == null || !mediaSession.isActive) return
         publish(session, session.mixerProfile?.displayName, force = false)
     }
 
     private fun publish(session: MixerSessionUiState?, mixerName: String?, force: Boolean) {
-        val snap = SessionNotificationTransport.snapshot(session)
+        val snap = PlaybackNotificationTransport.snapshot(session)
         val structureChanged = force ||
             lastSnapshot?.state != snap.state ||
             lastSnapshot?.standardActions != snap.standardActions ||
@@ -136,20 +130,20 @@ class SessionMediaNotification(
         val metadata = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, title)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, SessionNotificationBuilder.statusLine(session))
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, PlaybackNotificationBuilder.statusLine(session))
         if (durationMs > 0L) {
             metadata.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, durationMs)
         }
         mediaSession.setMetadata(metadata.build())
     }
 
-    private fun publishPlaybackState(snap: SessionNotificationTransport.Snapshot) {
+    private fun publishPlaybackState(snap: PlaybackNotificationTransport.Snapshot) {
         val speed = if (snap.state == PlaybackStateCompat.STATE_PLAYING) 1f else 0f
         val builder = PlaybackStateCompat.Builder()
             .setActions(snap.standardActions)
             .setState(snap.state, snap.positionMs, speed, SystemClock.elapsedRealtime())
         snap.customActionIds.forEach { actionId ->
-            if (actionId == SessionNotificationTransport.CUSTOM_ACTION_STOP) {
+            if (actionId == PlaybackNotificationTransport.CUSTOM_ACTION_STOP) {
                 builder.addCustomAction(
                     PlaybackStateCompat.CustomAction.Builder(
                         actionId,
@@ -164,10 +158,10 @@ class SessionMediaNotification(
 
     private fun dispatchCustomStop() {
         val session = activeSession() ?: return
-        when {
-            session.isRecording -> dispatchStopRecording()
-            session.appMode.isPlaybackMode -> dispatchStopPlayback()
-            else -> dispatchStopAll()
+        if (session.appMode.isPlaybackMode) {
+            dispatchStopPlayback()
+        } else {
+            dispatchStopAll()
         }
     }
 
@@ -185,16 +179,6 @@ class SessionMediaNotification(
 
     private fun dispatchPlaybackToggle() {
         controller()?.toggleSoundcheckPlayback()
-        AudioSessionBridge.rebuildNotification()
-    }
-
-    private fun dispatchPauseRecording() {
-        controller()?.pauseRecording()
-        AudioSessionBridge.rebuildNotification()
-    }
-
-    private fun dispatchStopRecording() {
-        controller()?.stopRecording()
         AudioSessionBridge.rebuildNotification()
     }
 
