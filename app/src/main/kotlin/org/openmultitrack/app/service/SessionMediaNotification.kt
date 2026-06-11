@@ -7,19 +7,20 @@ import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import org.openmultitrack.app.R
-import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.isPlaybackMode
 
 /**
- * [MediaSessionCompat] backing the system media notification on Android 13+.
+ * [MediaSessionCompat] backing the system media notification.
+ *
+ * Elapsed time, total duration, and the progress bar are driven from playback state + metadata.
+ * Do not rely on [NotificationCompat.setContentText] for clocks on Android 13+.
  */
 class SessionMediaNotification(
     private val context: Context,
 ) {
     private val mediaSession = MediaSessionCompat(context, "OpenMultiTrack")
     private var lastPublishedPositionMs: Long = -1L
-    private var lastPublishedDurationMs: Long? = null
-    private var lastPublishedTimeSubtitle: String? = null
+    private var lastPublishedDurationMs: Long = -1L
     private var lastSnapshot: SessionNotificationTransport.Snapshot? = null
 
     init {
@@ -52,10 +53,8 @@ class SessionMediaNotification(
                 }
 
                 override fun onCustomAction(action: String?, extras: Bundle?) {
-                    when (action) {
-                        SessionNotificationTransport.CUSTOM_ACTION_STOP -> dispatchCustomStop()
-                        SessionNotificationTransport.CUSTOM_ACTION_PREVIOUS -> dispatchPrevious()
-                        SessionNotificationTransport.CUSTOM_ACTION_NEXT -> dispatchNext()
+                    if (action == SessionNotificationTransport.CUSTOM_ACTION_STOP) {
+                        dispatchCustomStop()
                     }
                 }
             },
@@ -73,12 +72,13 @@ class SessionMediaNotification(
     fun layoutSignature(session: MixerSessionUiState?, mixerName: String?): Int {
         val snap = SessionNotificationTransport.snapshot(session)
         val title = mixerName ?: context.getString(R.string.notification_title)
+        val chapters = session?.trackmarks?.isNotEmpty() == true
         return listOf(
             title,
             snap.state,
             snap.standardActions,
             snap.customActionIds,
-            snap.showTime,
+            chapters,
             session?.isRecording,
             session?.isPlaying,
             session?.selectedSoundcheckDir,
@@ -87,8 +87,7 @@ class SessionMediaNotification(
 
     fun applySession(session: MixerSessionUiState?, mixerName: String?) {
         lastPublishedPositionMs = -1L
-        lastPublishedDurationMs = null
-        lastPublishedTimeSubtitle = null
+        lastPublishedDurationMs = -1L
         lastSnapshot = null
         publish(session, mixerName, force = true)
     }
@@ -105,26 +104,22 @@ class SessionMediaNotification(
             lastSnapshot?.standardActions != snap.standardActions ||
             lastSnapshot?.customActionIds != snap.customActionIds
         val positionChanged = snap.positionMs != lastPublishedPositionMs
-        val durationChanged = snap.durationMs != lastPublishedDurationMs
-        val timeSubtitle = timeSubtitle(session, snap)
-        val timeChanged = timeSubtitle != lastPublishedTimeSubtitle
+        val durationChanged = snap.durationMs != lastPublishedDurationMs && snap.durationMs > 0L
 
         if (structureChanged) {
-            publishMetadata(session, mixerName, snap, timeSubtitle)
+            publishMetadata(session, mixerName, snap.durationMs)
             publishPlaybackState(snap)
             lastSnapshot = snap
             lastPublishedPositionMs = snap.positionMs
             lastPublishedDurationMs = snap.durationMs
-            lastPublishedTimeSubtitle = timeSubtitle
             return
         }
 
-        if (!positionChanged && !durationChanged && !timeChanged) return
+        if (!positionChanged && !durationChanged) return
 
-        if (durationChanged || timeChanged) {
-            publishMetadata(session, mixerName, snap, timeSubtitle)
+        if (durationChanged) {
+            publishMetadata(session, mixerName, snap.durationMs)
             lastPublishedDurationMs = snap.durationMs
-            lastPublishedTimeSubtitle = timeSubtitle
         }
         if (positionChanged) {
             publishPlaybackState(snap)
@@ -132,40 +127,19 @@ class SessionMediaNotification(
         }
     }
 
-    private fun timeSubtitle(
-        session: MixerSessionUiState?,
-        snap: SessionNotificationTransport.Snapshot,
-    ): String? {
-        if (!snap.showTime || session == null) return null
-        return when {
-            session.isRecording ->
-                SessionNotificationTransport.formatTimestamp(session.recordElapsedSec, null, unknownTotal = true)
-            session.appMode.isPlaybackMode ->
-                SessionNotificationTransport.formatTimestamp(
-                    session.playbackPositionSec,
-                    session.playbackDurationSec.takeIf { it > 0f },
-                    unknownTotal = session.playbackDurationSec <= 0f,
-                )
-            else -> null
-        }
-    }
-
     private fun publishMetadata(
         session: MixerSessionUiState?,
         mixerName: String?,
-        snap: SessionNotificationTransport.Snapshot,
-        timeSubtitle: String?,
+        durationMs: Long,
     ) {
         val title = mixerName ?: context.getString(R.string.notification_title)
-        val modeLine = SessionNotificationBuilder.statusLine(session)
         val metadata = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, title)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, modeLine)
-        if (timeSubtitle != null) {
-            metadata.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, timeSubtitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, SessionNotificationBuilder.statusLine(session))
+        if (durationMs > 0L) {
+            metadata.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, durationMs)
         }
-        snap.durationMs?.let { metadata.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, it) }
         mediaSession.setMetadata(metadata.build())
     }
 
@@ -175,34 +149,14 @@ class SessionMediaNotification(
             .setActions(snap.standardActions)
             .setState(snap.state, snap.positionMs, speed, SystemClock.elapsedRealtime())
         snap.customActionIds.forEach { actionId ->
-            when (actionId) {
-                SessionNotificationTransport.CUSTOM_ACTION_STOP -> {
-                    builder.addCustomAction(
-                        PlaybackStateCompat.CustomAction.Builder(
-                            actionId,
-                            context.getString(R.string.notification_action_stop),
-                            R.drawable.ic_media_stop,
-                        ).build(),
-                    )
-                }
-                SessionNotificationTransport.CUSTOM_ACTION_PREVIOUS -> {
-                    builder.addCustomAction(
-                        PlaybackStateCompat.CustomAction.Builder(
-                            actionId,
-                            context.getString(R.string.notification_action_previous),
-                            android.R.drawable.ic_media_previous,
-                        ).build(),
-                    )
-                }
-                SessionNotificationTransport.CUSTOM_ACTION_NEXT -> {
-                    builder.addCustomAction(
-                        PlaybackStateCompat.CustomAction.Builder(
-                            actionId,
-                            context.getString(R.string.notification_action_next),
-                            android.R.drawable.ic_media_next,
-                        ).build(),
-                    )
-                }
+            if (actionId == SessionNotificationTransport.CUSTOM_ACTION_STOP) {
+                builder.addCustomAction(
+                    PlaybackStateCompat.CustomAction.Builder(
+                        actionId,
+                        context.getString(R.string.notification_action_stop),
+                        R.drawable.ic_media_stop,
+                    ).build(),
+                )
             }
         }
         mediaSession.setPlaybackState(builder.build())

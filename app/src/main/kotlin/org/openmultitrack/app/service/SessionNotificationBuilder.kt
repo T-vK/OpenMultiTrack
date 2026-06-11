@@ -3,7 +3,6 @@ package org.openmultitrack.app.service
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import org.openmultitrack.app.MainActivity
@@ -39,19 +38,12 @@ object SessionNotificationBuilder {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            val compactActions = addLegacyTransportActions(context, builder, session)
-            builder.setStyle(
-                MediaStyle()
-                    .setMediaSession(media.sessionToken())
-                    .setShowActionsInCompactView(*compactActions),
-            )
-        } else {
-            builder.setStyle(
-                MediaStyle()
-                    .setMediaSession(media.sessionToken()),
-            )
-        }
+        val compactActions = addTransportActions(context, builder, session)
+        builder.setStyle(
+            MediaStyle()
+                .setMediaSession(media.sessionToken())
+                .setShowActionsInCompactView(*compactActions),
+        )
         return builder
     }
 
@@ -67,22 +59,17 @@ object SessionNotificationBuilder {
 
     private fun timeSubtitle(session: MixerSessionUiState?): String? = when {
         session?.isRecording == true ->
-            SessionNotificationTransport.formatTimestamp(
-                session.recordElapsedSec,
-                null,
-                unknownTotal = true,
-            )
+            SessionNotificationTransport.formatClock(session.recordElapsedSec)
         session?.appMode?.isPlaybackMode == true && (session.isPlaying || session.playbackDurationSec > 0f) ->
             SessionNotificationTransport.formatTimestamp(
                 session.playbackPositionSec,
                 session.playbackDurationSec.takeIf { it > 0f },
-                unknownTotal = session.playbackDurationSec <= 0f,
             )
         else -> null
     }
 
-    /** Pre-Android 13 devices read actions from the notification itself. */
-    private fun addLegacyTransportActions(
+    /** Notification action row (also used as fallback on some OEM builds). */
+    private fun addTransportActions(
         context: Context,
         builder: NotificationCompat.Builder,
         session: MixerSessionUiState?,

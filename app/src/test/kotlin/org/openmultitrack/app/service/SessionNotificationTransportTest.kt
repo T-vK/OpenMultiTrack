@@ -7,7 +7,7 @@ import org.openmultitrack.sessionio.session.SessionTrackmark
 
 class SessionNotificationTransportTest {
     @Test
-    fun recordingSnapshot_hasPauseAndCustomStop_withElapsedPosition() {
+    fun recordingSnapshot_pinsPlayheadAtGrowingDuration() {
         val session = MixerSessionUiState(
             mixerId = "m1",
             appMode = AppMode.MULTITRACK_RECORD,
@@ -16,15 +16,16 @@ class SessionNotificationTransportTest {
         )
         val snap = SessionNotificationTransport.snapshot(session)
         assertThat(snap.positionMs).isEqualTo(65_000L)
-        assertThat(snap.durationMs).isNull()
+        assertThat(snap.durationMs).isEqualTo(65_000L)
         assertThat(snap.customActionIds).containsExactly(SessionNotificationTransport.CUSTOM_ACTION_STOP)
         assertThat(snap.standardActions and android.support.v4.media.session.PlaybackStateCompat.ACTION_PAUSE)
             .isNotEqualTo(0L)
-        assertThat(snap.showTime).isTrue()
+        assertThat(snap.standardActions and android.support.v4.media.session.PlaybackStateCompat.ACTION_SEEK_TO)
+            .isEqualTo(0L)
     }
 
     @Test
-    fun playingSnapshot_hasPauseStopAndDuration() {
+    fun playingSnapshot_hasSeekPauseStopAndDuration() {
         val session = MixerSessionUiState(
             mixerId = "m1",
             appMode = AppMode.SIMPLE_PLAY,
@@ -36,10 +37,12 @@ class SessionNotificationTransportTest {
         assertThat(snap.positionMs).isEqualTo(12_000L)
         assertThat(snap.durationMs).isEqualTo(180_000L)
         assertThat(snap.customActionIds).containsExactly(SessionNotificationTransport.CUSTOM_ACTION_STOP)
+        assertThat(snap.standardActions and android.support.v4.media.session.PlaybackStateCompat.ACTION_SEEK_TO)
+            .isNotEqualTo(0L)
     }
 
     @Test
-    fun soundcheckWithChapters_ordersCustomActionsForCompactStop() {
+    fun soundcheckWithChapters_usesStandardSkipActions() {
         val session = MixerSessionUiState(
             mixerId = "m1",
             appMode = AppMode.VIRTUAL_SOUNDCHECK,
@@ -49,19 +52,14 @@ class SessionNotificationTransportTest {
             trackmarks = listOf(SessionTrackmark(index = 1, startSec = 5f, title = "A")),
         )
         val snap = SessionNotificationTransport.snapshot(session)
-        assertThat(snap.customActionIds).containsExactly(
-            SessionNotificationTransport.CUSTOM_ACTION_PREVIOUS,
-            SessionNotificationTransport.CUSTOM_ACTION_STOP,
-            SessionNotificationTransport.CUSTOM_ACTION_NEXT,
-        ).inOrder()
         assertThat(snap.standardActions and android.support.v4.media.session.PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS)
-            .isEqualTo(0L)
+            .isNotEqualTo(0L)
+        assertThat(snap.standardActions and android.support.v4.media.session.PlaybackStateCompat.ACTION_SKIP_TO_NEXT)
+            .isNotEqualTo(0L)
     }
 
     @Test
-    fun formatTimestamp_unknownTotal_showsPlaceholder() {
-        assertThat(SessionNotificationTransport.formatTimestamp(45f, null, unknownTotal = true))
-            .isEqualTo("0:45 / --:--")
+    fun formatTimestamp_showsElapsedAndTotal() {
         assertThat(SessionNotificationTransport.formatTimestamp(90f, 180f))
             .isEqualTo("1:30 / 3:00")
     }
