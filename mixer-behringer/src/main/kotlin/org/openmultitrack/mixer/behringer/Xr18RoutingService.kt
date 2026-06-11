@@ -65,6 +65,32 @@ class Xr18RoutingService(
     override suspend fun writeChannelInput(channelIndex: Int, state: XAirChannelInputState): Boolean =
         writeChannelInputVerified(channelIndex, state)
 
+    override suspend fun writeChannelInputOnly(channelIndex: Int, state: XAirChannelInputState) {
+        withContext(Dispatchers.IO) {
+            val ch = channelIndex + 1
+            if (ch !in 1..XAirInputSourceCatalog.CHANNEL_COUNT) return@withContext
+            runCatching {
+                openClient().use { client ->
+                    Xr18RoutingOsc.sendChannelTarget(client, channelIndex, state)
+                }
+            }
+        }
+    }
+
+    override suspend fun confirmChannelRouting(
+        channelIndex: Int,
+        target: XAirChannelInputState,
+    ): RoutingConfirmResult = withContext(Dispatchers.IO) {
+        runCatching {
+            openClient().use { client ->
+                val paths = Xr18RoutingOsc.channelQueryPaths(channelIndex)
+                val replies = client.query(paths, timeoutMs = 2500, rounds = 4)
+                val live = Xr18RoutingOsc.readChannel(replies, channelIndex)
+                Xr18RoutingOsc.confirmAgainst(channelIndex, target, live, replies.keys)
+            }
+        }.getOrDefault(RoutingConfirmResult(channelIndex, target, live = null))
+    }
+
     override suspend fun applyRecordRouting(channelIndices: Iterable<Int>): Boolean =
         applyChannelsVerified(channelIndices) { XAirInputSourceCatalog.recordTarget(it) }
 

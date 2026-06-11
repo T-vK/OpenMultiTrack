@@ -42,6 +42,13 @@ internal object Xr18RoutingOsc {
         )
     }
 
+    fun confirmAgainst(
+        channelIndex: Int,
+        target: XAirChannelInputState,
+        live: XAirChannelInputState?,
+        replyPaths: Set<String>,
+    ): RoutingConfirmResult = RoutingConfirmResult(channelIndex, target, live, replyPaths)
+
     suspend fun sendChannelTarget(client: OscUdpClient, channelIndex: Int, target: XAirChannelInputState) {
         val ch = channelIndex + 1
         client.send(OscPath.xremote())
@@ -69,32 +76,42 @@ internal object Xr18RoutingOsc {
         Thread.sleep(SETTLE_MS)
     }
 
+    /**
+     * Write [target] routing, then **separately query** live values and compare.
+     * Retries the write+query loop when the mixer has not caught up yet.
+     */
+    suspend fun writeAndConfirm(
+        client: OscUdpClient,
+        channelIndex: Int,
+        target: XAirChannelInputState,
+        maxAttempts: Int = 5,
+    ): RoutingConfirmResult {
+        val paths = channelQueryPaths(channelIndex)
+        val initialReplies = client.query(paths, timeoutMs = 2000, rounds = 3)
+        val initial = readChannel(initialReplies, channelIndex)
+        if (initial != null && initial.matchesRouting(target)) {
+            return confirmAgainst(channelIndex, target, initial, initialReplies.keys)
+        }
+
+        var last = confirmAgainst(channelIndex, target, initial, initialReplies.keys)
+        repeat(maxAttempts) { attempt ->
+            sendChannelTarget(client, channelIndex, target)
+            Thread.sleep(SETTLE_MS * (attempt + 1))
+            val replies = client.query(paths, timeoutMs = 2500, rounds = 4)
+            val live = readChannel(replies, channelIndex)
+            last = confirmAgainst(channelIndex, target, live, replies.keys)
+            if (last.confirmed) return last
+            if (attempt == maxAttempts - 1) {
+                onVerifyFailure?.invoke(channelIndex, target, live, replies)
+            }
+        }
+        return last
+    }
+
     suspend fun writeAndVerify(
         client: OscUdpClient,
         channelIndex: Int,
         target: XAirChannelInputState,
         maxAttempts: Int = 5,
-    ): Boolean {
-        val paths = channelQueryPaths(channelIndex)
-        val initial = client.query(paths, timeoutMs = 2000, rounds = 3)
-        val already = readChannel(initial, channelIndex)
-        if (already != null && already.matchesRouting(target)) {
-            return true
-        }
-
-        repeat(maxAttempts) { attempt ->
-            sendChannelTarget(client, channelIndex, target)
-            val waitMs = SETTLE_MS * (attempt + 1)
-            Thread.sleep(waitMs)
-            val replies = client.query(paths, timeoutMs = 2500, rounds = 4)
-            val live = readChannel(replies, channelIndex)
-            if (live != null && live.matchesRouting(target)) {
-                return true
-            }
-            if (attempt == maxAttempts - 1) {
-                onVerifyFailure?.invoke(channelIndex, target, live, replies)
-            }
-        }
-        return false
-    }
+    ): Boolean = writeAndConfirm(client, channelIndex, target, maxAttempts).confirmed
 }

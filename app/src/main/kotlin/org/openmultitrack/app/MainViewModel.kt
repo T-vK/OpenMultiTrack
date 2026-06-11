@@ -70,6 +70,7 @@ import org.openmultitrack.app.routing.RoutingAutomationBridge
 import org.openmultitrack.app.routing.RoutingAutomationHooksImpl
 import org.openmultitrack.app.routing.RoutingBaselineStore
 import org.openmultitrack.app.routing.RoutingOverrideCoordinator
+import org.openmultitrack.mixer.behringer.RoutingConfirmResult
 import org.openmultitrack.mixer.behringer.Xr18RoutingService
 import org.openmultitrack.app.routing.RoutingRestorePromptState
 import org.openmultitrack.mixer.behringer.XAirChannelInputState
@@ -292,10 +293,9 @@ class MainViewModel(
 
     init {
         Xr18RoutingService.onVerifyFailure = { ch, target, live, replyPaths ->
-            val detail = "ch${ch + 1} wanted ${target.describe()} (${if (target.usesUsbReturn) "USB" else "A/D"}) " +
-                "got ${live?.describe() ?: "?"} replyPaths=$replyPaths"
-            OmtLog.w("Xr18Routing", "verify failed: $detail")
-            AppLogBuffer.append("W", "Routing", "Verify failed: $detail")
+            val detail = RoutingConfirmResult(ch, target, live, replyPaths).report()
+            OmtLog.w("Xr18Routing", "not confirmed: $detail")
+            AppLogBuffer.append("W", "Routing", "Not confirmed: $detail")
         }
         RoutingAutomationBridge.hooks = routingHooks
         sessionClient.onManagerLost {

@@ -25,6 +25,18 @@ class FakeMixerRoutingPort(
         return true
     }
 
+    override suspend fun writeChannelInputOnly(channelIndex: Int, state: XAirChannelInputState) {
+        channels[channelIndex] = state
+    }
+
+    override suspend fun confirmChannelRouting(
+        channelIndex: Int,
+        target: XAirChannelInputState,
+    ): RoutingConfirmResult {
+        val live = channels[channelIndex]
+        return RoutingConfirmResult(channelIndex, target, live)
+    }
+
     override suspend fun applyRecordRouting(channelIndices: Iterable<Int>): Boolean =
         channelIndices.all { writeChannelInput(it, XAirInputSourceCatalog.recordTarget(it)) }
 

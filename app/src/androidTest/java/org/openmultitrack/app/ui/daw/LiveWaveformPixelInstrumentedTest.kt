@@ -158,7 +158,7 @@ class LiveWaveformPixelInstrumentedTest {
         )
         assertRecordingStabilityProbe(
             frames = frames,
-            bufferWindowSec = windowSec,
+            windowSec = windowSec,
             requireDenseInterior = false,
         )
     }
@@ -173,7 +173,7 @@ class LiveWaveformPixelInstrumentedTest {
         )
         assertRecordingStabilityProbe(
             frames = frames,
-            bufferWindowSec = windowSec,
+            windowSec = windowSec,
             requireDenseInterior = false,
         )
     }
@@ -213,7 +213,7 @@ class LiveWaveformPixelInstrumentedTest {
         }
         assertRecordingStabilityProbe(
             frames = frames,
-            bufferWindowSec = windowSec,
+            windowSec = windowSec,
             requireDenseInterior = false,
         )
     }

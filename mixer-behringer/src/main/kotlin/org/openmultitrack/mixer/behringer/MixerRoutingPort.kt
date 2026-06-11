@@ -10,6 +10,15 @@ interface MixerRoutingPort {
 
     suspend fun writeChannelInput(channelIndex: Int, state: XAirChannelInputState): Boolean
 
+    /** Write routing OSC without read-back (diagnostics / e2e). */
+    suspend fun writeChannelInputOnly(channelIndex: Int, state: XAirChannelInputState)
+
+    /** Query live routing and compare to [target] (separate OSC read after any writes). */
+    suspend fun confirmChannelRouting(
+        channelIndex: Int,
+        target: XAirChannelInputState,
+    ): RoutingConfirmResult
+
     suspend fun applyRecordRouting(channelIndices: Iterable<Int>): Boolean
 
     suspend fun applySoundcheckRouting(channelIndices: Iterable<Int>): Boolean

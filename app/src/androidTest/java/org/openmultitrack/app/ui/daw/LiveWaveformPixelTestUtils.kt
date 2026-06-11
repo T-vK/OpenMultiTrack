@@ -335,7 +335,7 @@ fun assertLeftToRightWaveformGrowth(
             capacitySlots,
             peaksPerSec,
             elapsedSec = 0f,
-            bufferWindowSec = windowSec,
+            windowSec = windowSec,
         )
         check(!probe.isBar) {
             "second $second should be background before recording (pixel=0x${probe.pixel.toString(16)})"
@@ -381,7 +381,7 @@ fun assertLeftToRightWaveformGrowth(
                 capacitySlots,
                 peaksPerSec,
                 elapsedSec = (elapsed - 1).toFloat(),
-                bufferWindowSec = windowSec,
+                windowSec = windowSec,
             )
             val curProbe = probeSecondMarker(
                 currentBitmap,
@@ -389,7 +389,7 @@ fun assertLeftToRightWaveformGrowth(
                 capacitySlots,
                 peaksPerSec,
                 elapsedSec = elapsed.toFloat(),
-                bufferWindowSec = windowSec,
+                windowSec = windowSec,
             )
             when {
                 isBeyondFrontier(second, elapsed) -> {
@@ -433,7 +433,7 @@ fun assertLeftToRightWaveformGrowth(
             capacitySlots,
             peaksPerSec,
             elapsedSec = maxSecond.toFloat(),
-            bufferWindowSec = windowSec,
+            windowSec = windowSec,
         )
         check(probe.isBar) { "second $second should be drawn at ${maxSecond}s" }
     }

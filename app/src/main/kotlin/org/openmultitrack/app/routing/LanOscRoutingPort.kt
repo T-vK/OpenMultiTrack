@@ -2,6 +2,7 @@ package org.openmultitrack.app.routing
 
 import android.content.Context
 import org.openmultitrack.mixer.behringer.MixerRoutingPort
+import org.openmultitrack.mixer.behringer.RoutingConfirmResult
 import org.openmultitrack.mixer.behringer.XAirChannelInputState
 
 /** Runs [MixerRoutingPort] OSC I/O on Android LAN (multicast lock + bound socket). */
@@ -20,6 +21,16 @@ class LanOscRoutingPort(
 
     override suspend fun writeChannelInput(channelIndex: Int, state: XAirChannelInputState): Boolean =
         OscLanSession.withMulticastLock(context) { delegate.writeChannelInput(channelIndex, state) }
+
+    override suspend fun writeChannelInputOnly(channelIndex: Int, state: XAirChannelInputState) =
+        OscLanSession.withMulticastLock(context) { delegate.writeChannelInputOnly(channelIndex, state) }
+
+    override suspend fun confirmChannelRouting(
+        channelIndex: Int,
+        target: XAirChannelInputState,
+    ): RoutingConfirmResult = OscLanSession.withMulticastLock(context) {
+        delegate.confirmChannelRouting(channelIndex, target)
+    }
 
     override suspend fun applyRecordRouting(channelIndices: Iterable<Int>): Boolean =
         OscLanSession.withMulticastLock(context) { delegate.applyRecordRouting(channelIndices) }

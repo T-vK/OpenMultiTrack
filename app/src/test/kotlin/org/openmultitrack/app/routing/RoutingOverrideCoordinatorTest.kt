@@ -8,6 +8,7 @@ import org.openmultitrack.app.data.RoutingAutomationLevel
 import org.openmultitrack.app.data.RoutingAutomationMethod
 import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.mixer.behringer.MixerRoutingPort
+import org.openmultitrack.mixer.behringer.RoutingConfirmResult
 import org.openmultitrack.mixer.behringer.XAirChannelInputState
 import org.openmultitrack.mixer.behringer.XAirInputSourceCatalog
 
@@ -41,6 +42,15 @@ class RoutingOverrideCoordinatorTest {
             channels[channelIndex] = state
             return true
         }
+
+        override suspend fun writeChannelInputOnly(channelIndex: Int, state: XAirChannelInputState) {
+            channels[channelIndex] = state
+        }
+
+        override suspend fun confirmChannelRouting(
+            channelIndex: Int,
+            target: XAirChannelInputState,
+        ): RoutingConfirmResult = RoutingConfirmResult(channelIndex, target, channels[channelIndex])
 
         override suspend fun applyRecordRouting(channelIndices: Iterable<Int>): Boolean {
             if (!applyShouldSucceed) return false

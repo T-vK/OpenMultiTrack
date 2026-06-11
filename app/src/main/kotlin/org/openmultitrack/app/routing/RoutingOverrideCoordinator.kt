@@ -167,7 +167,7 @@ class RoutingOverrideCoordinator(
         if (!ok) {
             baselineStore.clear()
             return RoutingApplyOutcome.Failed(
-                "Mixer routing apply failed — XR18 did not confirm channel input change (check Wi‑Fi / OSC IP)",
+                "Mixer routing not confirmed — query after OSC write did not match target (see Log viewer)",
             )
         }
         return RoutingApplyOutcome.Applied(transactionId)
