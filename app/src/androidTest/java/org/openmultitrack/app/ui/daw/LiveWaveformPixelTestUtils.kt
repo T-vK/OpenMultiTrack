@@ -82,15 +82,33 @@ fun waveformRightEdgeX(image: ImageBitmap, backgroundArgb: Int? = null): Int =
 
 fun waveformRightEdgeX(bitmap: Bitmap, backgroundArgb: Int? = null): Int {
     val bg = backgroundArgb ?: estimateWaveformStripBackground(bitmap)
+    val xMargin = (bitmap.width * 0.02f).toInt().coerceIn(2, 8)
+    val yMargin = (bitmap.height * 0.12f).toInt().coerceIn(2, 8)
     val yStep = (bitmap.height / 8).coerceAtLeast(1)
-    for (x in bitmap.width - 1 downTo 0) {
-        var y = yStep
-        while (y < bitmap.height - yStep) {
-            if (isWaveformBarPixel(bitmap.getPixel(x, y), bg)) return x
+    for (x in (bitmap.width - 1 - xMargin) downTo xMargin) {
+        var y = yMargin
+        var hits = 0
+        while (y < bitmap.height - yMargin) {
+            if (isWaveformBarPixel(bitmap.getPixel(x, y), bg)) hits++
             y += yStep
         }
+        if (hits >= 2) return x
     }
     return -1
+}
+
+/** Bar pixels in the strip interior (excludes border chrome). */
+fun interiorWaveformBarPixelCount(bitmap: Bitmap, backgroundArgb: Int? = null): Int {
+    val bg = backgroundArgb ?: estimateWaveformStripBackground(bitmap)
+    val xMargin = (bitmap.width * 0.04f).toInt().coerceIn(3, 12)
+    val yMargin = (bitmap.height * 0.15f).toInt().coerceIn(3, 12)
+    var count = 0
+    for (x in xMargin until bitmap.width - xMargin) {
+        for (y in yMargin until bitmap.height - yMargin) {
+            if (isWaveformBarPixel(bitmap.getPixel(x, y), bg)) count++
+        }
+    }
+    return count
 }
 
 fun assertSlotCentroidStable(

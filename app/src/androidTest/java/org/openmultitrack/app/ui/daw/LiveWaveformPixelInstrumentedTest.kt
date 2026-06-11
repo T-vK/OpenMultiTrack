@@ -125,7 +125,7 @@ class LiveWaveformPixelInstrumentedTest {
         val image = composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage()
         val bitmap = image.asAndroidBitmap()
         assertThat(hasWaveformStripContainer(bitmap)).isTrue()
-        assertThat(waveformRightEdgeX(image)).isLessThan(0)
+        assertThat(interiorWaveformBarPixelCount(bitmap)).isEqualTo(0)
     }
 
     @Test
