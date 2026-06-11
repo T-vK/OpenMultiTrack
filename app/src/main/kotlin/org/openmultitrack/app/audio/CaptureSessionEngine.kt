@@ -394,10 +394,10 @@ class CaptureSessionEngine(
     }
 
     fun waveformSnapshots(normalize: Boolean): Map<Int, LiveWaveformSnapshot> {
-        val out = LinkedHashMap<Int, LiveWaveformSnapshot>()
+        val out = LinkedHashMap<Int, LiveWaveformSnapshot>(channelCount)
         for (ch in 0 until channelCount) {
             waveformRings[ch]?.let { ring ->
-                out[ch] = ring.snapshot(normalize)
+                out[ch] = ring.uiSnapshot(normalize)
             }
         }
         return out
@@ -767,6 +767,7 @@ class CaptureSessionEngine(
         for (ch in 0 until channelCount) {
             waveformRings[ch]?.pushPeak(pendingWaveformPeaks[ch])
             pendingWaveformPeaks[ch] = 0f
+            waveformRings[ch]?.publishUiSnapshot()
         }
     }
 

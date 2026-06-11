@@ -65,6 +65,7 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -982,6 +983,7 @@ private fun ChannelStripList(
                 verticalArrangement = Arrangement.spacedBy(gap),
             ) {
             visibleStrips.forEach { strip ->
+                key(strip.index) {
                 ChannelStripRow(
                     strip = strip,
                     routing = routing,
@@ -1010,6 +1012,7 @@ private fun ChannelStripList(
                     hideRoutingBadges = hideRoutingBadges,
                     onOpenControls = { overlayIndex = strip.index },
                 )
+                }
             }
             }
         }
@@ -1103,23 +1106,31 @@ private fun ChannelStripRow(
             height = colorBarHeight,
         )
         if (showWaveform) {
-            LiveWaveformStrip(
-                peaks = waveform?.peaks ?: floatArrayOf(),
-                bufferWindowSec = recordWaveformHistorySec.coerceIn(
-                    RecordViewLayout.MIN_HISTORY_SEC,
-                    RecordViewLayout.MAX_HISTORY_SEC,
-                ),
-                elapsedSec = recordElapsedSec,
-                peaksPerSec = RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC,
-                color = Color(strip.colorArgb),
-                normalized = normalized,
-                viewStartSec = recordViewStartSec,
-                viewWindowSec = recordViewWindowSec,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(colorBarHeight)
-                    .clip(RoundedCornerShape(3.dp)),
-            )
+            if (waveform != null) {
+                LiveWaveformStrip(
+                    snapshot = waveform,
+                    bufferWindowSec = recordWaveformHistorySec.coerceIn(
+                        RecordViewLayout.MIN_HISTORY_SEC,
+                        RecordViewLayout.MAX_HISTORY_SEC,
+                    ),
+                    elapsedSec = recordElapsedSec,
+                    peaksPerSec = RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC,
+                    color = Color(strip.colorArgb),
+                    normalized = normalized,
+                    viewStartSec = recordViewStartSec,
+                    viewWindowSec = recordViewWindowSec,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(colorBarHeight)
+                        .clip(RoundedCornerShape(3.dp)),
+                )
+            } else {
+                Spacer(
+                    Modifier
+                        .weight(1f)
+                        .height(colorBarHeight),
+                )
+            }
         } else {
             Spacer(Modifier.weight(1f))
         }

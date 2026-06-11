@@ -873,15 +873,42 @@ internal fun scalePeaksForLiveDisplay(
     peakCeiling: Float,
 ): FloatArray {
     if (peaks.isEmpty()) return peaks
-    val rawMax = peaks.max()
-    if (rawMax <= 1e-6f) return peaks
+    val out = FloatArray(peaks.size)
+    val count = scalePeaksForLiveDisplayInto(out, peaks, peaks.size, normalized, peakCeiling)
+    return if (count == peaks.size) out else out.copyOf(count)
+}
+
+/** Writes scaled peaks into [dest] and returns the number of samples written. */
+internal fun scalePeaksForLiveDisplayInto(
+    dest: FloatArray,
+    peaks: FloatArray,
+    peakCount: Int,
+    normalized: Boolean,
+    peakCeiling: Float,
+): Int {
+    val count = peakCount.coerceAtMost(minOf(peaks.size, dest.size))
+    if (count <= 0) return 0
+    var rawMax = 0f
+    for (i in 0 until count) {
+        rawMax = maxOf(rawMax, peaks[i])
+    }
+    if (rawMax <= 1e-6f) {
+        dest.fill(0f, 0, count)
+        return count
+    }
     val ceiling = when {
         peakCeiling > 1e-6f -> peakCeiling
         else -> rawMax
     }.coerceAtLeast(1e-6f)
     if (normalized) {
-        return FloatArray(peaks.size) { i -> (peaks[i] / ceiling).coerceIn(0f, 1f) }
+        for (i in 0 until count) {
+            dest[i] = (peaks[i] / ceiling).coerceIn(0f, 1f)
+        }
+    } else {
+        val gain = if (ceiling < 0.15f) 1f / ceiling else 1f
+        for (i in 0 until count) {
+            dest[i] = (peaks[i] * gain).coerceIn(0f, 1f)
+        }
     }
-    val gain = if (ceiling < 0.15f) 1f / ceiling else 1f
-    return FloatArray(peaks.size) { i -> (peaks[i] * gain).coerceIn(0f, 1f) }
+    return count
 }

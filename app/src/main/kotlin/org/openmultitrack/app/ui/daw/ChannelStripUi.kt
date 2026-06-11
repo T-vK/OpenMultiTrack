@@ -120,8 +120,13 @@ internal fun liveVuLevel(
     normalized: Boolean,
 ): Float {
     val peaks = waveform?.peaks ?: return 0f
-    if (peaks.isEmpty()) return 0f
-    val raw = peaks.takeLast(3).max()
+    val count = waveform.peakCount
+    if (count <= 0) return 0f
+    val from = (count - 3).coerceAtLeast(0)
+    var raw = 0f
+    for (i in from until count) {
+        raw = maxOf(raw, peaks[i])
+    }
     return scalePeaksForDisplay(floatArrayOf(raw), normalized).first()
 }
 

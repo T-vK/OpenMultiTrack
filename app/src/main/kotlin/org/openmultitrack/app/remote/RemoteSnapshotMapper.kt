@@ -152,6 +152,7 @@ object RemoteSnapshotMapper {
                 )
                 mixerPeaks[ch] = LiveWaveformSnapshot(
                     peaks = merged,
+                    peakCount = merged.size,
                     capacity = waveformCapacity,
                 )
             }

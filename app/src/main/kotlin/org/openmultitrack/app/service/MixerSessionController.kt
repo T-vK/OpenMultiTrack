@@ -1642,7 +1642,7 @@ class MixerSessionController(
                         when {
                             s.isRecording -> {
                                 val elapsed = captureEngine.recordElapsedSec()
-                                val updated = withRecordViewFollowPlayhead(s, elapsed).copy(
+                                val updated = s.copy(
                                     waveformPeaks = captureEngine.waveformSnapshots(normalize = false),
                                     recordElapsedSec = elapsed,
                                     captureMeterLevels = levels,
@@ -1663,7 +1663,7 @@ class MixerSessionController(
                         }
                     }
                 }
-                delay(40)
+                delay(33)
             }
         }
     }

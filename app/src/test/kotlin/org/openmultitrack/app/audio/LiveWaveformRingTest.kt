@@ -9,6 +9,7 @@ class LiveWaveformRingTest {
         val ring = LiveWaveformRing(capacityPeaks = 5)
         ring.seedPeaks(floatArrayOf(0.1f, 0.5f, 0.9f))
         val snap = ring.snapshot()
+        assertThat(snap.peakCount).isEqualTo(3)
         assertThat(snap.peaks).hasLength(3)
         assertThat(snap.peaks[0]).isWithin(1e-6f).of(0.1f)
         assertThat(snap.peaks[1]).isWithin(1e-6f).of(0.5f)
