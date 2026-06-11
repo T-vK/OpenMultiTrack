@@ -114,6 +114,7 @@ data class DawUiState(
     val showVuMeters: Boolean = true,
     val monitorGainLinear: Float = 2.5f,
     val recordWaveformWindowSec: Float = 15f,
+    val recordWaveformHistorySec: Float = 120f,
     val playbackWaveformWindowSec: Float = 180f,
     val stripNumberMode: StripNumberMode = StripNumberMode.HIDE_WHEN_LABELED,
     val stripIconMode: StripIconMode = StripIconMode.SHOW,
@@ -188,6 +189,7 @@ class MainViewModel(
             showVuMeters = settings.showVuMeters,
             monitorGainLinear = settings.monitorGainLinear,
             recordWaveformWindowSec = settings.recordWaveformWindowSec,
+            recordWaveformHistorySec = settings.recordWaveformHistorySec,
             playbackWaveformWindowSec = settings.playbackWaveformWindowSec,
             stripNumberMode = settings.stripNumberMode,
             stripIconMode = settings.stripIconMode,
@@ -364,6 +366,8 @@ class MainViewModel(
                         monitorGainLinear = settingsPatch?.monitorGainLinear ?: ui.monitorGainLinear,
                         recordWaveformWindowSec = settingsPatch?.recordWaveformWindowSec
                             ?: ui.recordWaveformWindowSec,
+                        recordWaveformHistorySec = settingsPatch?.recordWaveformHistorySec
+                            ?: ui.recordWaveformHistorySec,
                         playbackWaveformWindowSec = settingsPatch?.playbackWaveformWindowSec
                             ?: ui.playbackWaveformWindowSec,
                         stripNumberMode = settingsPatch?.stripNumberMode?.let {
@@ -932,7 +936,7 @@ class MainViewModel(
             return
         }
         val willPlay = _uiState.value.sessionByMixer[mixerId]?.isPlaying != true
-        if (willPlay && !sessionClient.promoteForeground("Playback")) {
+        if (willPlay && !sessionClient.isForeground() && !sessionClient.promoteForeground("Playback")) {
             showStatus("Could not start playback — allow notifications and try again.", mixerId)
             return
         }
@@ -1636,6 +1640,23 @@ class MainViewModel(
         }
         settings.recordWaveformWindowSec = rounded
         _uiState.update { it.copy(recordWaveformWindowSec = rounded) }
+        sessionClient.withManager { mgr ->
+            mgr.mixerIds().forEach { mgr.getOrCreate(it).updateWaveformConfig() }
+        }
+    }
+
+    fun setRecordWaveformHistorySec(sec: Float) {
+        val rounded = sec.coerceIn(
+            org.openmultitrack.app.ui.daw.RecordViewLayout.MIN_HISTORY_SEC,
+            org.openmultitrack.app.ui.daw.RecordViewLayout.MAX_HISTORY_SEC,
+        ).let { kotlin.math.round(it) }
+        if (isRemoteClient()) {
+            remoteCommand("set_settings", JSONObject().put("recordWaveformHistorySec", rounded.toDouble()))
+            _uiState.update { it.copy(recordWaveformHistorySec = rounded) }
+            return
+        }
+        settings.recordWaveformHistorySec = rounded
+        _uiState.update { it.copy(recordWaveformHistorySec = rounded) }
         sessionClient.withManager { mgr ->
             mgr.mixerIds().forEach { mgr.getOrCreate(it).updateWaveformConfig() }
         }

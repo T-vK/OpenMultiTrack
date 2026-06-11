@@ -23,6 +23,11 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getFloat(KEY_RECORD_WAVEFORM_SEC, 15f)
         set(value) = prefs.edit().putFloat(KEY_RECORD_WAVEFORM_SEC, value).apply()
 
+    /** Seconds of live peak history retained in memory (limits max zoom-out). */
+    var recordWaveformHistorySec: Float
+        get() = prefs.getFloat(KEY_RECORD_WAVEFORM_HISTORY_SEC, 120f)
+        set(value) = prefs.edit().putFloat(KEY_RECORD_WAVEFORM_HISTORY_SEC, value).apply()
+
     var playbackWaveformWindowSec: Float
         get() = prefs.getFloat(KEY_PLAYBACK_WAVEFORM_SEC, 180f)
         set(value) = prefs.edit().putFloat(KEY_PLAYBACK_WAVEFORM_SEC, value).apply()
@@ -314,6 +319,7 @@ class AppSettingsStore(context: Context) {
         private const val KEY_STORAGE_ROOT = "storage_root"
         private const val KEY_MONITOR_GAIN = "monitor_gain"
         private const val KEY_RECORD_WAVEFORM_SEC = "record_waveform_sec"
+        private const val KEY_RECORD_WAVEFORM_HISTORY_SEC = "record_waveform_history_sec"
         private const val KEY_PLAYBACK_WAVEFORM_SEC = "playback_waveform_sec"
         private const val KEY_USB_DEBOUNCE_MS = "usb_debounce_ms"
         private const val KEY_WAVEFORM_NORMALIZED = "waveform_normalized"

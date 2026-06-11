@@ -1,6 +1,7 @@
 package org.openmultitrack.app.ui.daw
 
 import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Live recording waveform viewport layout.
@@ -12,15 +13,22 @@ import kotlin.math.max
  * pinned to the right — the viewport shows the last [viewWindowSec] seconds.
  */
 object RecordViewLayout {
+  const val MIN_HISTORY_SEC = 15f
+  const val MAX_HISTORY_SEC = 600f
   private const val MIN_WINDOW_SEC = 1f
-  private const val MAX_ZOOM_OUT_SEC = 600f
 
-  fun maxWindowSec(bufferMaxSec: Float, elapsedSec: Float): Float =
-      max(max(bufferMaxSec.coerceIn(5f, 120f), MAX_ZOOM_OUT_SEC), elapsedSec.coerceAtLeast(0f))
-          .coerceAtLeast(MIN_WINDOW_SEC)
+  /**
+   * Widest viewport that still has peak data for every visible second.
+   * Capped by retained history and by elapsed recording length (empty space stays on the right).
+   */
+  fun maxWindowSec(historySec: Float, elapsedSec: Float): Float {
+      val history = historySec.coerceIn(MIN_HISTORY_SEC, MAX_HISTORY_SEC)
+      val elapsed = elapsedSec.coerceAtLeast(0f)
+      return min(history, max(elapsed, MIN_WINDOW_SEC)).coerceAtLeast(MIN_WINDOW_SEC)
+  }
 
-  fun clampWindow(viewWindowSec: Float, bufferMaxSec: Float, elapsedSec: Float): Float {
-      val maxWindow = maxWindowSec(bufferMaxSec, elapsedSec)
+  fun clampWindow(viewWindowSec: Float, historySec: Float, elapsedSec: Float): Float {
+      val maxWindow = maxWindowSec(historySec, elapsedSec)
       return viewWindowSec.coerceIn(MIN_WINDOW_SEC, maxWindow)
   }
 
@@ -34,9 +42,9 @@ object RecordViewLayout {
   fun layout(
       elapsedSec: Float,
       viewWindowSec: Float,
-      bufferMaxSec: Float,
+      historySec: Float,
   ): Pair<Float, Float> {
-      val window = clampWindow(viewWindowSec, bufferMaxSec, elapsedSec)
+      val window = clampWindow(viewWindowSec, historySec, elapsedSec)
       val start = anchoredStartSec(elapsedSec, window)
       return start to window
   }

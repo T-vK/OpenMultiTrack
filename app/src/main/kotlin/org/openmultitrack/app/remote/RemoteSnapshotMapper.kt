@@ -134,7 +134,7 @@ object RemoteSnapshotMapper {
         livePeaks: MutableMap<String, MutableMap<Int, LiveWaveformSnapshot>>,
     ): RemoteMirrorSnapshot {
         val settings = delta.settings ?: snapshot.settings
-        val waveformCapacity = liveWaveformCapacity(settings.recordWaveformWindowSec)
+        val waveformCapacity = liveWaveformCapacity(settings.recordWaveformHistorySec)
         val sessions = snapshot.sessions.toMutableMap()
         delta.sessions.forEach { (id, mixerDelta) ->
             val base = sessions[id] ?: return@forEach
@@ -160,7 +160,7 @@ object RemoteSnapshotMapper {
                     mixerPeaks,
                     recordElapsedSec,
                     waveformCapacity,
-                    settings.recordWaveformWindowSec,
+                    settings.recordWaveformHistorySec,
                 )
             }
         }
@@ -236,6 +236,7 @@ object RemoteSnapshotMapper {
             showWaveforms = settings.showWaveforms,
             showVuMeters = settings.showVuMeters,
             recordWaveformWindowSec = settings.recordWaveformWindowSec,
+            recordWaveformHistorySec = settings.recordWaveformHistorySec,
             playbackWaveformWindowSec = settings.playbackWaveformWindowSec,
             stripNumberMode = settings.stripNumberMode,
             stripIconMode = settings.stripIconMode,
@@ -284,6 +285,7 @@ object RemoteSnapshotMapper {
             showWaveforms = settings.showWaveforms,
             showVuMeters = settings.showVuMeters,
             recordWaveformWindowSec = settings.recordWaveformWindowSec,
+            recordWaveformHistorySec = settings.recordWaveformHistorySec,
             playbackWaveformWindowSec = settings.playbackWaveformWindowSec,
             stripNumberMode = settings.stripNumberMode.ordinal,
             stripIconMode = settings.stripIconMode.ordinal,
@@ -516,6 +518,7 @@ data class RemoteUiSettings(
     val showWaveforms: Boolean,
     val showVuMeters: Boolean,
     val recordWaveformWindowSec: Float,
+    val recordWaveformHistorySec: Float,
     val playbackWaveformWindowSec: Float,
     val stripNumberMode: Int,
     val stripIconMode: Int,

@@ -20,19 +20,20 @@ class RecordViewLayoutTest {
     }
 
     @Test
-    fun layoutKeepsFollowWhileZoomingOutInLeftAnchorZone() {
+    fun layoutClampsZoomOutToRetainedHistory() {
         val (start, window) = RecordViewLayout.layout(
             elapsedSec = 60f,
             viewWindowSec = 300f,
-            bufferMaxSec = 15f,
+            historySec = 15f,
         )
-        assertEquals(0f, start, 0.001f)
-        assertEquals(300f, window, 0.001f)
+        assertEquals(45f, start, 0.001f)
+        assertEquals(15f, window, 0.001f)
     }
 
     @Test
-    fun zoomOutCanExceedElapsedUpToMax() {
-        val max = RecordViewLayout.maxWindowSec(bufferMaxSec = 15f, elapsedSec = 60f)
-        assertEquals(600f, max, 0.001f)
+    fun zoomOutNeverExceedsHistoryOrElapsed() {
+        assertEquals(15f, RecordViewLayout.maxWindowSec(historySec = 15f, elapsedSec = 60f), 0.001f)
+        assertEquals(60f, RecordViewLayout.maxWindowSec(historySec = 120f, elapsedSec = 60f), 0.001f)
+        assertEquals(120f, RecordViewLayout.maxWindowSec(historySec = 120f, elapsedSec = 300f), 0.001f)
     }
 }

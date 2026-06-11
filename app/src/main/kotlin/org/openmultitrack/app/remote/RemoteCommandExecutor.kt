@@ -208,6 +208,10 @@ class RemoteCommandExecutor(
         if (payload.has("hideSoloButton")) settings.hideSoloButton = payload.getBoolean("hideSoloButton")
         if (payload.has("showWaveforms")) settings.showWaveforms = payload.getBoolean("showWaveforms")
         if (payload.has("showVuMeters")) settings.showVuMeters = payload.getBoolean("showVuMeters")
+        if (payload.has("recordWaveformHistorySec")) {
+            settings.recordWaveformHistorySec = payload.getDouble("recordWaveformHistorySec").toFloat()
+            manager.mixerIds().forEach { manager.getOrCreate(it).updateWaveformConfig() }
+        }
         if (payload.has("recordWaveformWindowSec")) {
             settings.recordWaveformWindowSec = payload.getDouble("recordWaveformWindowSec").toFloat()
             manager.mixerIds().forEach { manager.getOrCreate(it).updateWaveformConfig() }

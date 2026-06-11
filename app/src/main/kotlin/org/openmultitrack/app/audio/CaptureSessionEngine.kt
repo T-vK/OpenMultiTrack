@@ -17,6 +17,7 @@ import org.openmultitrack.domain.session.RecordingSession
 import org.openmultitrack.sessionio.session.SessionDirectory
 import org.openmultitrack.sessionio.session.SessionMetadata
 import org.openmultitrack.app.data.RecordingWritePlan
+import org.openmultitrack.app.ui.daw.RecordViewLayout
 import org.openmultitrack.sessionio.wav.PerChannelWavWriter
 import org.openmultitrack.sessionio.wav.SessionWaveformExtractor
 import org.openmultitrack.sessionio.wav.WavWriter
@@ -155,7 +156,10 @@ class CaptureSessionEngine(
     }
 
     fun setWaveformConfig(windowSec: Float, peaksPerSecond: Int = peaksPerSecondForWindow(windowSec)) {
-        waveformWindowSec = windowSec.coerceIn(5f, 120f)
+        waveformWindowSec = windowSec.coerceIn(
+            RecordViewLayout.MIN_HISTORY_SEC,
+            RecordViewLayout.MAX_HISTORY_SEC,
+        )
         waveformPeaksPerSecond = peaksPerSecond.coerceIn(10, 120)
         if (isCaptureActive) {
             allocateWaveformRings()

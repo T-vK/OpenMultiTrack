@@ -283,7 +283,18 @@ class MixerSessionController(
                 ?: withContext(Dispatchers.IO) { SessionPlaybackDuration.durationSec(dir, metadata) }
             prepareSoundcheckSessionUi(sessionDir, metadata, durationSec)
             loadSoundcheckWaveformsBackground(dir, metadata)
+            if (_state.value.appMode.isPlaybackMode) {
+                captureMutex.withLock { warmPlaybackRouteLocked() }
+            }
         }
+    }
+
+    private suspend fun warmPlaybackRouteLocked() {
+        val descriptor = activeDescriptor ?: return
+        val probe = activeProbe ?: return
+        val usbOutputs = maxPlaybackChannelsFromProbe(probe).coerceAtLeast(1)
+        runCatching { ensurePlaybackLocked(descriptor, probe, usbOutputs) }
+            .onFailure { e -> OmtLog.d("MixerSession", "playback route warmup: ${e.message}") }
     }
 
     fun renameSoundcheckSession(sessionDir: String, newTitle: String) {
@@ -516,31 +527,40 @@ class MixerSessionController(
     }
 
     fun toggleSoundcheckPlayback() {
-        scope.launch {
-            if (player.isPlaying || _state.value.isPlaying) {
-                stopPlaybackStatusUpdates()
-                _state.update {
-                    it.copy(
-                        isPlaying = false,
-                        transportState = TransportState.IDLE,
-                        soundcheckMeterLevels = emptyMap(),
-                    )
-                }
-                captureMutex.withLock { stopSoundcheckLocked() }
+        if (player.isPlaying || _state.value.isPlaying) {
+            val sampleRate = _state.value.soundcheckSampleRate.takeIf { it > 0 } ?: 48_000
+            val posSec = if (sampleRate > 0 && player.isPlaying) {
+                player.status.positionFrames.toFloat() / sampleRate
             } else {
-                _state.update {
-                    it.copy(
-                        isPlaying = true,
-                        transportState = TransportState.PLAYING,
-                        warningMessage = null,
-                    )
-                }
+                _state.value.playbackPositionSec
+            }
+            stopPlaybackStatusUpdates()
+            _state.update {
+                it.copy(
+                    isPlaying = false,
+                    transportState = TransportState.IDLE,
+                    soundcheckMeterLevels = emptyMap(),
+                    playbackPositionSec = posSec,
+                )
+            }
+            scope.launch(Dispatchers.IO) {
+                captureMutex.withLock { stopSoundcheckLocked(skipStateUpdate = true) }
+            }
+        } else {
+            _state.update {
+                it.copy(
+                    isPlaying = true,
+                    transportState = TransportState.PLAYING,
+                    warningMessage = null,
+                )
+            }
+            scope.launch(Dispatchers.IO) {
                 captureMutex.withLock {
                     try {
                         startSoundcheckPlaybackLockedFromCurrentPosition()
                     } catch (e: Exception) {
                         OmtLog.e("MixerSession", "toggleSoundcheckPlayback failed", e)
-                        withContext(Dispatchers.IO) { player.stopAndAwait() }
+                        player.stopAndAwait()
                         stopPlaybackStatusUpdates()
                         _state.update {
                             it.copy(
@@ -556,23 +576,45 @@ class MixerSessionController(
     }
 
     fun pauseSoundcheckPlayback() {
-        scope.launch {
+        val sampleRate = _state.value.soundcheckSampleRate.takeIf { it > 0 } ?: 48_000
+        val posSec = if (sampleRate > 0 && player.isPlaying) {
+            player.status.positionFrames.toFloat() / sampleRate
+        } else {
+            _state.value.playbackPositionSec
+        }
+        stopPlaybackStatusUpdates()
+        _state.update {
+            it.copy(
+                isPlaying = false,
+                transportState = TransportState.IDLE,
+                soundcheckMeterLevels = emptyMap(),
+                playbackPositionSec = posSec,
+            )
+        }
+        scope.launch(Dispatchers.IO) {
             captureMutex.withLock {
-                if (_state.value.isPlaying) {
-                    stopSoundcheckLocked()
+                if (player.isPlaying) {
+                    stopSoundcheckLocked(skipStateUpdate = true)
                 }
             }
         }
     }
 
     fun playSoundcheckPlayback() {
-        scope.launch {
+        _state.update {
+            it.copy(
+                isPlaying = true,
+                transportState = TransportState.PLAYING,
+                warningMessage = null,
+            )
+        }
+        scope.launch(Dispatchers.IO) {
             captureMutex.withLock {
                 try {
                     startSoundcheckPlaybackLockedFromCurrentPosition()
                 } catch (e: Exception) {
                     OmtLog.e("MixerSession", "playSoundcheckPlayback failed", e)
-                    withContext(Dispatchers.IO) { player.stopAndAwait() }
+                    player.stopAndAwait()
                     stopPlaybackStatusUpdates()
                     _state.update {
                         it.copy(
@@ -694,22 +736,26 @@ class MixerSessionController(
         startSoundcheckPlaybackLocked(frame)
     }
 
-    private suspend fun stopSoundcheckLocked() {
+    private suspend fun stopSoundcheckLocked(skipStateUpdate: Boolean = false) {
         val sampleRate = _state.value.soundcheckSampleRate.takeIf { it > 0 } ?: 48_000
         val posSec = if (sampleRate > 0 && player.isPlaying) {
             player.status.positionFrames.toFloat() / sampleRate
         } else {
             _state.value.playbackPositionSec
         }
-        stopPlaybackStatusUpdates()
+        if (!skipStateUpdate) {
+            stopPlaybackStatusUpdates()
+        }
         player.stop()
-        _state.update {
-            it.copy(
-                isPlaying = false,
-                transportState = TransportState.IDLE,
-                playbackPositionSec = posSec,
-                soundcheckMeterLevels = emptyMap(),
-            )
+        if (!skipStateUpdate) {
+            _state.update {
+                it.copy(
+                    isPlaying = false,
+                    transportState = TransportState.IDLE,
+                    playbackPositionSec = posSec,
+                    soundcheckMeterLevels = emptyMap(),
+                )
+            }
         }
     }
 
@@ -759,15 +805,29 @@ class MixerSessionController(
         applyMonitorRouting()
     }
 
+    private fun recordWaveformHistorySec(): Float =
+        settings.recordWaveformHistorySec.coerceIn(
+            org.openmultitrack.app.ui.daw.RecordViewLayout.MIN_HISTORY_SEC,
+            org.openmultitrack.app.ui.daw.RecordViewLayout.MAX_HISTORY_SEC,
+        )
+
+    private fun recordWaveformDisplayWindowSec(): Float =
+        settings.recordWaveformWindowSec.coerceIn(5f, 120f)
+
     fun updateWaveformConfig() {
-        val window = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
+        val history = recordWaveformHistorySec()
         captureEngine.setWaveformConfig(
-            windowSec = window,
-            peaksPerSecond = CaptureSessionEngine.peaksPerSecondForWindow(window),
+            windowSec = history,
+            peaksPerSecond = CaptureSessionEngine.peaksPerSecondForWindow(history),
         )
         _state.update { s ->
             if (s.recordViewFollowPlayhead) {
-                s.copy(recordViewWindowSec = window)
+                val displayWindow = recordWaveformDisplayWindowSec()
+                val maxWindow = org.openmultitrack.app.ui.daw.RecordViewLayout.maxWindowSec(
+                    history,
+                    s.recordElapsedSec,
+                )
+                s.copy(recordViewWindowSec = displayWindow.coerceIn(1f, maxWindow))
             } else {
                 s
             }
@@ -779,12 +839,12 @@ class MixerSessionController(
     }
 
     fun setRecordViewWindow(viewWindowSec: Float) {
-        val bufferMax = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
+        val history = recordWaveformHistorySec()
         val elapsed = _state.value.recordElapsedSec
         val (start, window) = org.openmultitrack.app.ui.daw.RecordViewLayout.layout(
             elapsedSec = elapsed,
             viewWindowSec = viewWindowSec,
-            bufferMaxSec = bufferMax,
+            historySec = history,
         )
         _state.update {
             it.copy(
@@ -797,9 +857,9 @@ class MixerSessionController(
 
     fun zoomRecordView(scale: Float, focalSec: Float) {
         val s = _state.value
-        val bufferMax = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
+        val history = recordWaveformHistorySec()
         val currentWindow = effectiveRecordViewWindow(s)
-        val maxWindow = org.openmultitrack.app.ui.daw.RecordViewLayout.maxWindowSec(bufferMax, s.recordElapsedSec)
+        val maxWindow = org.openmultitrack.app.ui.daw.RecordViewLayout.maxWindowSec(history, s.recordElapsedSec)
         val newWindow = (currentWindow / scale).coerceIn(1f, maxWindow)
         setRecordViewWindow(newWindow)
     }
@@ -809,14 +869,14 @@ class MixerSessionController(
     }
 
     private fun effectiveRecordViewWindow(s: MixerSessionUiState): Float {
-        val buffer = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
-        val maxWindow = org.openmultitrack.app.ui.daw.RecordViewLayout.maxWindowSec(buffer, s.recordElapsedSec)
-        return s.recordViewWindowSec.takeIf { it > 0f }?.coerceIn(1f, maxWindow) ?: buffer
+        val history = recordWaveformHistorySec()
+        val displayDefault = recordWaveformDisplayWindowSec()
+        val maxWindow = org.openmultitrack.app.ui.daw.RecordViewLayout.maxWindowSec(history, s.recordElapsedSec)
+        return s.recordViewWindowSec.takeIf { it > 0f }?.coerceIn(1f, maxWindow) ?: displayDefault.coerceIn(1f, maxWindow)
     }
 
     private fun withRecordViewFollowPlayhead(s: MixerSessionUiState, elapsedSec: Float): MixerSessionUiState {
         if (!s.recordViewFollowPlayhead) return s
-        val buffer = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
         val window = effectiveRecordViewWindow(s)
         val start = org.openmultitrack.app.ui.daw.RecordViewLayout.anchoredStartSec(elapsedSec, window)
         return s.copy(
@@ -826,7 +886,7 @@ class MixerSessionController(
     }
 
     private fun resetRecordViewAfterStop() {
-        val bufferWindow = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
+        val bufferWindow = recordWaveformDisplayWindowSec()
         _state.update {
             it.copy(
                 recordViewStartSec = 0f,
@@ -929,7 +989,7 @@ class MixerSessionController(
                     settings.setActiveRecording(prof.id, sessionDir.absolutePath)
                 }
                 acquireRecordingWakeLock()
-                val bufferWindow = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
+                val bufferWindow = recordWaveformDisplayWindowSec()
                 _state.update {
                     it.copy(
                         isRecording = true,
@@ -938,7 +998,13 @@ class MixerSessionController(
                         warningMessage = null,
                         lastRecordingPath = sessionDir?.absolutePath ?: it.lastRecordingPath,
                         recordViewStartSec = 0f,
-                        recordViewWindowSec = bufferWindow,
+                        recordViewWindowSec = bufferWindow.coerceIn(
+                            1f,
+                            org.openmultitrack.app.ui.daw.RecordViewLayout.maxWindowSec(
+                                recordWaveformHistorySec(),
+                                0f,
+                            ),
+                        ),
                         recordViewFollowPlayhead = true,
                     )
                 }

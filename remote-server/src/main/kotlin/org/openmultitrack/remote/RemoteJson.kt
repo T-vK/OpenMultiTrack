@@ -151,6 +151,7 @@ internal object RemoteJson {
             put("showWaveforms", s.showWaveforms)
             put("showVuMeters", s.showVuMeters)
             put("recordWaveformWindowSec", s.recordWaveformWindowSec.toDouble())
+            put("recordWaveformHistorySec", s.recordWaveformHistorySec.toDouble())
             put("playbackWaveformWindowSec", s.playbackWaveformWindowSec.toDouble())
             put("stripNumberMode", s.stripNumberMode)
             put("stripIconMode", s.stripIconMode)
@@ -165,6 +166,7 @@ internal object RemoteJson {
             showWaveforms = obj.optBoolean("showWaveforms", true),
             showVuMeters = obj.optBoolean("showVuMeters", true),
             recordWaveformWindowSec = obj.optDouble("recordWaveformWindowSec", 15.0).toFloat(),
+            recordWaveformHistorySec = obj.optDouble("recordWaveformHistorySec", 120.0).toFloat(),
             playbackWaveformWindowSec = obj.optDouble("playbackWaveformWindowSec", 180.0).toFloat(),
             stripNumberMode = obj.optInt("stripNumberMode"),
             stripIconMode = obj.optInt("stripIconMode"),

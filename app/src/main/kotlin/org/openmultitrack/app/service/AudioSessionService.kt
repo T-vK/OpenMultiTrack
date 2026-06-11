@@ -34,8 +34,13 @@ class AudioSessionService : Service() {
     private val binder = LocalBinder()
     private lateinit var mixerManager: MultiMixerSessionManager
     private lateinit var remoteControl: RemoteControlManager
+    private lateinit var mediaNotification: SessionMediaNotification
     private val notificationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var notificationRefreshJob: Job? = null
+
+    @Volatile
+    var isInForeground: Boolean = false
+        private set
 
     inner class LocalBinder : Binder() {
         fun getService(): AudioSessionService = this@AudioSessionService
@@ -64,6 +69,7 @@ class AudioSessionService : Service() {
         AudioSessionBridge.mixerManager = mixerManager
         AudioSessionBridge.activeMixerId = { mixerManager.activeMixerId.value }
         AudioSessionBridge.refreshNotification = { refreshForegroundNotification() }
+        mediaNotification = SessionMediaNotification(this)
         createNotificationChannel()
         OmtLog.i("Service", "AudioSessionService created")
     }
@@ -71,6 +77,10 @@ class AudioSessionService : Service() {
     override fun onDestroy() {
         notificationRefreshJob?.cancel()
         notificationScope.cancel()
+        if (::mediaNotification.isInitialized) {
+            mediaNotification.release()
+        }
+        isInForeground = false
         AudioSessionBridge.mixerManager = null
         remoteControl.shutdown()
         super.onDestroy()
@@ -98,19 +108,24 @@ class AudioSessionService : Service() {
     fun promoteToForeground(status: String? = null): Boolean {
         val notification = buildNotification(status ?: "Audio session active").build()
         return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            if (!isInForeground) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                    } else {
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                    }
+                    startForeground(NOTIFICATION_ID, notification, type)
                 } else {
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                    @Suppress("DEPRECATION")
+                    startForeground(NOTIFICATION_ID, notification)
                 }
-                startForeground(NOTIFICATION_ID, notification, type)
+                isInForeground = true
+                startNotificationRefresh()
             } else {
-                @Suppress("DEPRECATION")
-                startForeground(NOTIFICATION_ID, notification)
+                refreshForegroundNotification(status)
             }
-            startNotificationRefresh()
             true
         } catch (e: Exception) {
             OmtLog.e("Service", "startForeground failed", e)
@@ -139,6 +154,7 @@ class AudioSessionService : Service() {
 
     fun stopForegroundAndSelf() {
         notificationRefreshJob?.cancel()
+        isInForeground = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
@@ -152,7 +168,7 @@ class AudioSessionService : Service() {
         val activeId = mixerManager.activeMixerId.value
         val session = activeId?.let { mixerManager.getOrCreate(it).state.value }
         val mixerName = session?.mixerProfile?.displayName
-        return SessionNotificationBuilder.build(this, session, mixerName)
+        return SessionNotificationBuilder.build(this, session, mixerName, mediaNotification)
             .setContentText(status)
     }
 
@@ -255,13 +271,17 @@ class AudioSessionClient(private val context: Context) {
 
     fun getRemoteControl(): RemoteControlManager? = remoteControl
 
+    fun isForeground(): Boolean = service?.isInForeground == true
+
     fun promoteForeground(status: String): Boolean {
-        AudioSessionService.start(context, status)
         val service = service
+        if (service?.isInForeground == true) {
+            service.updateNotification(status)
+            return true
+        }
+        AudioSessionService.start(context, status)
         return if (service != null) {
-            val ok = service.promoteToForeground(status)
-            if (ok) service.updateNotification(status)
-            ok
+            service.promoteToForeground(status)
         } else {
             pendingForegroundStatus = status
             true

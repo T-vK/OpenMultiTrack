@@ -121,6 +121,7 @@ fun DawMainScreen(
     state: DawUiState,
     monitorGain: Float,
     recordWaveformWindowSec: Float,
+    recordWaveformHistorySec: Float,
     recordWaveformNormalized: Boolean,
     playbackWaveformNormalized: Boolean,
     onAddMixer: () -> Unit,
@@ -171,6 +172,7 @@ fun DawMainScreen(
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
     onRecordWaveformWindowChange: (Float) -> Unit,
+    onRecordWaveformHistoryChange: (Float) -> Unit,
     onPlaybackWaveformWindowChange: (Float) -> Unit,
     onDismissStatusToast: () -> Unit,
     onFinalizeIncompleteRecording: (String) -> Unit,
@@ -271,6 +273,7 @@ fun DawMainScreen(
                 showWaveforms = state.showWaveforms,
                 showVuMeters = state.showVuMeters,
                 recordWaveformWindowSec = recordWaveformWindowSec,
+                recordWaveformHistorySec = recordWaveformHistorySec,
                 playbackWaveformWindowSec = playbackWaveformWindowSec,
                 stripNumberMode = state.stripNumberMode,
                 stripIconMode = state.stripIconMode,
@@ -302,6 +305,7 @@ fun DawMainScreen(
             onShowWaveformsChange = onShowWaveformsChange,
             onShowVuMetersChange = onShowVuMetersChange,
             onRecordWaveformWindowChange = onRecordWaveformWindowChange,
+            onRecordWaveformHistoryChange = onRecordWaveformHistoryChange,
             onPlaybackWaveformWindowChange = onPlaybackWaveformWindowChange,
             onStripNumberModeChange = onStripNumberModeChange,
             onStripIconModeChange = onStripIconModeChange,
@@ -586,6 +590,7 @@ fun DawMainScreen(
                                 normalized = recordWaveformNormalized,
                                 waveformPeaks = s.waveformPeaks,
                                 recordWaveformWindowSec = recordWaveformWindowSec,
+                                recordWaveformHistorySec = recordWaveformHistorySec,
                                 recordViewStartSec = s.recordViewStartSec,
                                 recordViewWindowSec = s.recordViewWindowSec
                                     .takeIf { it > 0f } ?: recordWaveformWindowSec,
@@ -823,6 +828,7 @@ private fun ChannelStripList(
     normalized: Boolean,
     waveformPeaks: Map<Int, LiveWaveformSnapshot>,
     recordWaveformWindowSec: Float,
+    recordWaveformHistorySec: Float,
     recordViewStartSec: Float,
     recordViewWindowSec: Float,
     recordElapsedSec: Float,
@@ -881,13 +887,16 @@ private fun ChannelStripList(
         var gestureActive by remember { mutableStateOf(false) }
         var gestureViewWindow by remember { mutableFloatStateOf(recordViewWindowSec) }
         val elapsedState by rememberUpdatedState(recordElapsedSec)
-        val bufferWindowState by rememberUpdatedState(recordWaveformWindowSec)
+        val historyWindowState by rememberUpdatedState(recordWaveformHistorySec)
         val transformState = rememberTransformableState { zoomChange, _, _ ->
             if (waveformWidthPx <= 0f) return@rememberTransformableState
             if (zoomChange == 1f) return@rememberTransformableState
             gestureActive = true
-            val bufferMax = bufferWindowState.coerceIn(5f, 120f)
-            val maxWindow = RecordViewLayout.maxWindowSec(bufferMax, elapsedState)
+            val history = historyWindowState.coerceIn(
+                RecordViewLayout.MIN_HISTORY_SEC,
+                RecordViewLayout.MAX_HISTORY_SEC,
+            )
+            val maxWindow = RecordViewLayout.maxWindowSec(history, elapsedState)
             gestureViewWindow = (gestureViewWindow / zoomChange).coerceIn(1f, maxWindow)
         }
         LaunchedEffect(transformState.isTransformInProgress) {
@@ -980,7 +989,7 @@ private fun ChannelStripList(
                     labelFontSize = labelFontSize,
                     labelColumnWidth = labelColumnWidth,
                     waveform = if (showWaveforms && isRecording) waveformPeaks[strip.index] else null,
-                    recordWaveformWindowSec = recordWaveformWindowSec,
+                    recordWaveformHistorySec = recordWaveformHistorySec,
                     recordViewStartSec = displayViewStart,
                     recordViewWindowSec = displayViewWindow,
                     recordElapsedSec = recordElapsedSec,
@@ -1047,7 +1056,7 @@ private fun ChannelStripRow(
     labelFontSize: Float,
     labelColumnWidth: Dp,
     waveform: LiveWaveformSnapshot?,
-    recordWaveformWindowSec: Float,
+    recordWaveformHistorySec: Float,
     recordViewStartSec: Float,
     recordViewWindowSec: Float,
     recordElapsedSec: Float,
@@ -1094,7 +1103,10 @@ private fun ChannelStripRow(
         if (showWaveform) {
             LiveWaveformStrip(
                 peaks = waveform?.peaks ?: floatArrayOf(),
-                bufferWindowSec = recordWaveformWindowSec,
+                bufferWindowSec = recordWaveformHistorySec.coerceIn(
+                    RecordViewLayout.MIN_HISTORY_SEC,
+                    RecordViewLayout.MAX_HISTORY_SEC,
+                ),
                 elapsedSec = recordElapsedSec,
                 peaksPerSec = RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC,
                 color = Color(strip.colorArgb),
