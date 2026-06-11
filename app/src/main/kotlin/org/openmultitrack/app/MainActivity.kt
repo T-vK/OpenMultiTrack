@@ -221,7 +221,7 @@ class MainActivity : ComponentActivity() {
                         onLoadRecordingIntoSoundcheck = viewModel::loadRecordingIntoSoundcheck,
                         onLoadRecordingIntoSimplePlay = viewModel::loadRecordingIntoSimplePlay,
                         onDismissSoundcheckLoadPrompt = viewModel::dismissSoundcheckLoadPrompt,
-                        onPromptLoadSoundcheckAfterRecordChange = viewModel::setPromptLoadSoundcheckAfterRecord,
+                        onPostRecordBehaviorChange = viewModel::setPostRecordBehavior,
                         onShowRecordingStorageInfoButtonChange = viewModel::setShowRecordingStorageInfoButton,
                         onAutoShowRecordingStorageTooltipChange = viewModel::setAutoShowRecordingStorageTooltip,
                         onRecordWaveformNormalizedChange = viewModel::setRecordWaveformNormalized,

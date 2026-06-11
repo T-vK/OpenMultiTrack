@@ -85,9 +85,18 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_HIDE_ROUTING_BADGES, false)
         set(value) = prefs.edit().putBoolean(KEY_HIDE_ROUTING_BADGES, value).apply()
 
-    var promptLoadSoundcheckAfterRecord: Boolean
-        get() = prefs.getBoolean(KEY_PROMPT_SOUNDCHECK_AFTER_RECORD, true)
-        set(value) = prefs.edit().putBoolean(KEY_PROMPT_SOUNDCHECK_AFTER_RECORD, value).apply()
+    var postRecordBehavior: PostRecordBehavior
+        get() {
+            if (prefs.contains(KEY_POST_RECORD_BEHAVIOR)) {
+                return PostRecordBehavior.fromOrdinal(prefs.getInt(KEY_POST_RECORD_BEHAVIOR, 0))
+            }
+            return if (prefs.getBoolean(KEY_PROMPT_SOUNDCHECK_AFTER_RECORD, true)) {
+                PostRecordBehavior.FULL_PROMPT
+            } else {
+                PostRecordBehavior.NOTHING
+            }
+        }
+        set(value) = prefs.edit().putInt(KEY_POST_RECORD_BEHAVIOR, value.ordinal).apply()
 
     var showRecordingStorageInfoButton: Boolean
         get() = prefs.getBoolean(KEY_SHOW_RECORDING_STORAGE_INFO, true)
@@ -285,6 +294,7 @@ class AppSettingsStore(context: Context) {
         private const val KEY_HIDE_SOLO = "hide_solo_button"
         private const val KEY_HIDE_ROUTING_BADGES = "hide_routing_badges"
         private const val KEY_PROMPT_SOUNDCHECK_AFTER_RECORD = "prompt_soundcheck_after_record"
+        private const val KEY_POST_RECORD_BEHAVIOR = "post_record_behavior"
         private const val KEY_SHOW_RECORDING_STORAGE_INFO = "show_recording_storage_info_button"
         private const val KEY_AUTO_SHOW_RECORDING_STORAGE_TOOLTIP = "auto_show_recording_storage_tooltip"
         private const val KEY_CHAPTER_SUPPORT_ENABLED = "chapter_support_enabled"

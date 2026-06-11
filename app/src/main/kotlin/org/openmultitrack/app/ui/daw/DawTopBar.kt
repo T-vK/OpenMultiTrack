@@ -78,6 +78,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.openmultitrack.app.service.MixerSessionUiState
+import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.domain.remote.RemoteConnectionState
 import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.abbrevLabel
@@ -232,7 +233,7 @@ internal fun ToolbarChip(
 
 @Composable
 private fun MixerControlCluster(
-    activeMixerName: String?,
+    activeMixer: MixerProfile?,
     appMode: AppMode?,
     layout: ToolbarLayout,
     onOpenMixerPicker: () -> Unit,
@@ -248,10 +249,16 @@ private fun MixerControlCluster(
             Row(
                 Modifier.padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                Icon(
+                    imageVector = mixerProfileIcon(activeMixer),
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
                 Text(
-                    activeMixerName ?: "Select mixer",
+                    activeMixer?.displayName ?: "Select mixer",
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.widthIn(max = layout.mixerNameMaxWidth),
@@ -412,21 +419,34 @@ private fun RecordTransportCluster(
     val isRecording = session?.isRecording == true
     val hostReady = session?.probe != null || (isRemoteClient && session?.captureChannelCount?.let { it > 0 } == true)
     val elapsed = session?.recordElapsedSec ?: 0f
+    val onClick = if (isRecording) onStopRecord else onStartRecord
     TransportActionRow {
-        TransportBarIconButton(
-            onClick = if (isRecording) onStopRecord else onStartRecord,
+        Surface(
+            onClick = onClick,
             enabled = hostReady,
-            icon = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
-            contentDescription = if (isRecording) "Stop recording" else "Record",
-            tint = if (isRecording) RecordRed else RecordRed,
-        )
-        Text(
-            text = if (isRecording) formatAdaptiveTransportTime(elapsed) else "0:00",
-            style = MaterialTheme.typography.labelLarge,
-            color = if (isRecording) RecordRed else MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            modifier = Modifier.padding(horizontal = 8.dp),
-        )
+            color = Color.Transparent,
+            modifier = Modifier.height(ToolbarControlHeight),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(
+                    imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
+                    contentDescription = if (isRecording) "Stop recording" else "Record",
+                    modifier = Modifier.size(22.dp),
+                    tint = RecordRed,
+                )
+                Text(
+                    text = if (isRecording) formatAdaptiveTransportTime(elapsed) else "0:00",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (isRecording) RecordRed else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    modifier = Modifier.padding(end = 6.dp),
+                )
+            }
+        }
     }
 }
 
@@ -624,7 +644,7 @@ private fun clusterDivider() {
 @Composable
 internal fun DawTopBar(
     layout: ToolbarLayout,
-    activeMixerName: String?,
+    activeMixer: MixerProfile?,
     appMode: AppMode?,
     session: MixerSessionUiState?,
     showMixerCluster: Boolean,
@@ -720,7 +740,7 @@ internal fun DawTopBar(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         MixerControlCluster(
-                            activeMixerName = activeMixerName,
+                            activeMixer = activeMixer,
                             appMode = appMode,
                             layout = layout,
                             onOpenMixerPicker = onOpenMixerPicker,

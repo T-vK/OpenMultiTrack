@@ -12,7 +12,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import org.openmultitrack.app.data.PostRecordBehavior
 import org.openmultitrack.app.data.StripIconMode
 import org.openmultitrack.app.data.StripNumberMode
 
@@ -49,7 +54,7 @@ data class SettingsUiState(
     val playbackWaveformWindowSec: Float,
     val stripNumberMode: StripNumberMode,
     val stripIconMode: StripIconMode,
-    val promptLoadSoundcheckAfterRecord: Boolean = true,
+    val postRecordBehavior: PostRecordBehavior = PostRecordBehavior.FULL_PROMPT,
     val showRecordingStorageInfoButton: Boolean = true,
     val autoShowRecordingStorageTooltip: Boolean = true,
     val chapterSupportEnabled: Boolean = false,
@@ -79,7 +84,7 @@ fun SettingsScreen(
     onPlaybackWaveformWindowChange: (Float) -> Unit,
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
-    onPromptLoadSoundcheckAfterRecordChange: (Boolean) -> Unit = {},
+    onPostRecordBehaviorChange: (PostRecordBehavior) -> Unit = {},
     onShowRecordingStorageInfoButtonChange: (Boolean) -> Unit = {},
     onAutoShowRecordingStorageTooltipChange: (Boolean) -> Unit = {},
     onChapterSupportEnabledChange: (Boolean) -> Unit = {},
@@ -119,7 +124,7 @@ fun SettingsScreen(
             onPlaybackWaveformWindowChange = onPlaybackWaveformWindowChange,
             onStripNumberModeChange = onStripNumberModeChange,
             onStripIconModeChange = onStripIconModeChange,
-            onPromptLoadSoundcheckAfterRecordChange = onPromptLoadSoundcheckAfterRecordChange,
+            onPostRecordBehaviorChange = onPostRecordBehaviorChange,
             onShowRecordingStorageInfoButtonChange = onShowRecordingStorageInfoButtonChange,
             onAutoShowRecordingStorageTooltipChange = onAutoShowRecordingStorageTooltipChange,
             onChapterSupportEnabledChange = onChapterSupportEnabledChange,
@@ -149,7 +154,7 @@ private fun SettingsContent(
     onPlaybackWaveformWindowChange: (Float) -> Unit,
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
-    onPromptLoadSoundcheckAfterRecordChange: (Boolean) -> Unit = {},
+    onPostRecordBehaviorChange: (PostRecordBehavior) -> Unit = {},
     onShowRecordingStorageInfoButtonChange: (Boolean) -> Unit = {},
     onAutoShowRecordingStorageTooltipChange: (Boolean) -> Unit = {},
     onChapterSupportEnabledChange: (Boolean) -> Unit = {},
@@ -178,7 +183,7 @@ private fun SettingsContent(
             onStripNumberModeChange = onStripNumberModeChange,
             onStripIconModeChange = onStripIconModeChange,
             onMonitorGainChange = onMonitorGainChange,
-            onPromptLoadSoundcheckAfterRecordChange = onPromptLoadSoundcheckAfterRecordChange,
+            onPostRecordBehaviorChange = onPostRecordBehaviorChange,
             onShowRecordingStorageInfoButtonChange = onShowRecordingStorageInfoButtonChange,
             onAutoShowRecordingStorageTooltipChange = onAutoShowRecordingStorageTooltipChange,
             onChapterSupportEnabledChange = onChapterSupportEnabledChange,
@@ -314,6 +319,20 @@ private data class SettingsSliderRow(
     override val searchText: String = "$title $description $valueLabel".lowercase()
 }
 
+private data class SettingsDropdownRow<T>(
+    override val id: String,
+    override val section: String,
+    val title: String,
+    val description: String,
+    val options: List<T>,
+    val selected: T,
+    val label: (T) -> String,
+    val onSelect: (T) -> Unit,
+) : SettingsRowModel {
+    override val searchText: String =
+        "$title $description ${options.joinToString { label(it) }}".lowercase()
+}
+
 private data class SettingsPickerRow<T>(
     override val id: String,
     override val section: String,
@@ -334,6 +353,7 @@ private fun SettingsRow(row: SettingsRowModel) {
         is SettingsToggleRow -> SettingsToggleItem(row)
         is SettingsSliderRow -> SettingsSliderItem(row)
         is SettingsPickerRow<*> -> SettingsPickerItem(row)
+        is SettingsDropdownRow<*> -> SettingsDropdownItem(row)
     }
 }
 
@@ -388,6 +408,48 @@ private fun SettingsSliderItem(row: SettingsSliderRow) {
 }
 
 @Composable
+private fun <T> SettingsDropdownItem(row: SettingsDropdownRow<T>) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Column {
+            Text(row.title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                row.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Box {
+            OutlinedButton(
+                onClick = { expanded = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(row.label(row.selected))
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+            ) {
+                row.options.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(row.label(option)) },
+                        onClick = {
+                            expanded = false
+                            if (option != row.selected) row.onSelect(option)
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun <T> SettingsPickerItem(row: SettingsPickerRow<T>) {
     Column(
         modifier = Modifier
@@ -436,20 +498,22 @@ private fun buildSettingsRows(
     onStripNumberModeChange: (StripNumberMode) -> Unit,
     onStripIconModeChange: (StripIconMode) -> Unit,
     onMonitorGainChange: (Float) -> Unit,
-    onPromptLoadSoundcheckAfterRecordChange: (Boolean) -> Unit,
+    onPostRecordBehaviorChange: (PostRecordBehavior) -> Unit,
     onShowRecordingStorageInfoButtonChange: (Boolean) -> Unit,
     onAutoShowRecordingStorageTooltipChange: (Boolean) -> Unit,
     onChapterSupportEnabledChange: (Boolean) -> Unit,
     onRecordWaveformNormalizedChange: (Boolean) -> Unit,
     onPlaybackWaveformNormalizedChange: (Boolean) -> Unit,
 ): List<SettingsRowModel> = listOf(
-    SettingsToggleRow(
-        id = "prompt_soundcheck_after_record",
+    SettingsDropdownRow(
+        id = "post_record_behavior",
         section = "Recording",
-        title = "Prompt after recording stops",
-        description = "When you stop a recording, ask what to do next (load, rename, or dismiss).",
-        checked = state.promptLoadSoundcheckAfterRecord,
-        onCheckedChange = onPromptLoadSoundcheckAfterRecordChange,
+        title = "After recording stops",
+        description = "Choose automatic behavior or show a prompt when a recording finishes.",
+        options = PostRecordBehavior.entries,
+        selected = state.postRecordBehavior,
+        label = { it.label },
+        onSelect = onPostRecordBehaviorChange,
     ),
     SettingsToggleRow(
         id = "show_recording_storage_info",

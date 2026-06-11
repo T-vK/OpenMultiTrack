@@ -23,6 +23,7 @@ import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.data.RecordingStorageResolver
 import org.openmultitrack.app.data.StorageVolumeOption
 import org.openmultitrack.app.data.MixerDeviceStore
+import org.openmultitrack.app.data.PostRecordBehavior
 import org.openmultitrack.app.data.MixerRoutingStore
 import org.openmultitrack.app.data.ScribbleStripCache
 import org.openmultitrack.app.remote.RemoteSnapshotMapper
@@ -76,9 +77,15 @@ private sealed class PendingAudioAction {
     data class Resume(val mixerId: String, val sessionDir: java.io.File) : PendingAudioAction()
 }
 
+enum class PostRecordPromptMode {
+    FULL,
+    RENAME_ONLY,
+}
+
 data class SoundcheckLoadPromptState(
     val mixerId: String,
     val sessionDir: String,
+    val mode: PostRecordPromptMode = PostRecordPromptMode.FULL,
 )
 
 data class DawUiState(
@@ -127,7 +134,7 @@ data class DawUiState(
     val remoteError: String? = null,
     val remoteConnectedClientCount: Int = 0,
     val soundcheckLoadPrompt: SoundcheckLoadPromptState? = null,
-    val promptLoadSoundcheckAfterRecord: Boolean = true,
+    val postRecordBehavior: PostRecordBehavior = PostRecordBehavior.FULL_PROMPT,
     val showRecordingStorageInfoButton: Boolean = true,
     val autoShowRecordingStorageTooltip: Boolean = true,
     val chapterSupportEnabled: Boolean = false,
@@ -178,7 +185,7 @@ class MainViewModel(
             playbackWaveformWindowSec = settings.playbackWaveformWindowSec,
             stripNumberMode = settings.stripNumberMode,
             stripIconMode = settings.stripIconMode,
-            promptLoadSoundcheckAfterRecord = settings.promptLoadSoundcheckAfterRecord,
+            postRecordBehavior = settings.postRecordBehavior,
             showRecordingStorageInfoButton = settings.showRecordingStorageInfoButton,
             autoShowRecordingStorageTooltip = settings.autoShowRecordingStorageTooltip,
             chapterSupportEnabled = settings.chapterSupportEnabled,
@@ -252,11 +259,30 @@ class MainViewModel(
     ): SoundcheckLoadPromptState? {
         if (mixerId !in soundcheckPromptPending) return null
         if (session.isRecording) return null
-        if (!settings.promptLoadSoundcheckAfterRecord) return null
         val sessionDir = session.lastRecordingPath ?: return null
         if (session.appMode != AppMode.MULTITRACK_RECORD) return null
         soundcheckPromptPending.remove(mixerId)
-        return SoundcheckLoadPromptState(mixerId = mixerId, sessionDir = sessionDir)
+        return when (settings.postRecordBehavior) {
+            PostRecordBehavior.NOTHING -> null
+            PostRecordBehavior.AUTO_SOUNDCHECK -> {
+                loadRecordingIntoSoundcheckLocal(mixerId, sessionDir)
+                null
+            }
+            PostRecordBehavior.AUTO_SIMPLE_PLAY -> {
+                loadRecordingIntoSimplePlayLocal(mixerId, sessionDir)
+                null
+            }
+            PostRecordBehavior.RENAME_ONLY -> SoundcheckLoadPromptState(
+                mixerId = mixerId,
+                sessionDir = sessionDir,
+                mode = PostRecordPromptMode.RENAME_ONLY,
+            )
+            PostRecordBehavior.FULL_PROMPT -> SoundcheckLoadPromptState(
+                mixerId = mixerId,
+                sessionDir = sessionDir,
+                mode = PostRecordPromptMode.FULL,
+            )
+        }
     }
 
     private fun remoteCommand(command: String, payload: JSONObject = JSONObject()) {
@@ -796,9 +822,9 @@ class MainViewModel(
         _uiState.update { it.copy(soundcheckLoadPrompt = null) }
     }
 
-    fun setPromptLoadSoundcheckAfterRecord(enabled: Boolean) {
-        settings.promptLoadSoundcheckAfterRecord = enabled
-        _uiState.update { it.copy(promptLoadSoundcheckAfterRecord = enabled) }
+    fun setPostRecordBehavior(behavior: PostRecordBehavior) {
+        settings.postRecordBehavior = behavior
+        _uiState.update { it.copy(postRecordBehavior = behavior) }
     }
 
     fun setShowRecordingStorageInfoButton(enabled: Boolean) {
