@@ -12,7 +12,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -96,25 +96,15 @@ fun SettingsStorageSection(
         )
     }
 
-    HorizontalDivider(Modifier.padding(vertical = 8.dp))
-    Text(
-        "Storage",
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        fontWeight = FontWeight.SemiBold,
+    SettingsSubsectionHeader(
+        title = "Recording output",
+        description = "Where new takes are written.",
     )
-    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Text("Primary recording location", style = MaterialTheme.typography.bodyLarge)
-        Text(
-            "New multitrack recordings are saved here. OpenMultiTrack/Recordings is created automatically when needed.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
         Text(
             effectiveStorageRootPath,
             style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
+            modifier = Modifier.padding(bottom = 8.dp),
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
         )
@@ -152,38 +142,29 @@ fun SettingsStorageSection(
                 }
             }
         }
-        Spacer(Modifier.height(4.dp))
     }
-
-    MirrorRootsList(
-        title = "Mirror recording locations",
-        description = "Write every take to multiple storage devices at once.",
+    PathListBlock(
+        title = "Mirror locations",
+        description = "Write every take to multiple devices at once.",
         roots = redundantRecordingRoots,
         onAdd = { addMirrorDialog = true },
         onRemove = onRemoveRedundantRecordingRoot,
     )
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Column(Modifier.weight(1f).padding(end = 12.dp)) {
-            Text("Local spill buffer", style = MaterialTheme.typography.bodyLarge)
-            Text(
-                "Keep the last few minutes on internal storage so brief SD/USB disconnects do not lose audio.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Switch(checked = localSpillBufferEnabled, onCheckedChange = onLocalSpillBufferEnabledChange)
-    }
+    SettingsSubsectionHeader(
+        title = "Fault tolerance",
+        description = "Keep recording when a card disconnects or runs low on space.",
+    )
+    SettingsSwitchRow(
+        title = "Local spill buffer",
+        description = "Keep recent audio on internal storage during brief SD/USB disconnects.",
+        checked = localSpillBufferEnabled,
+        onCheckedChange = onLocalSpillBufferEnabledChange,
+    )
     if (localSpillBufferEnabled) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
             Text(
-                "Spill buffer window: $localSpillBufferMinutes min",
+                "Spill window: $localSpillBufferMinutes min",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Slider(
@@ -194,60 +175,90 @@ fun SettingsStorageSection(
             )
         }
     }
-
-    MinFreeStorageRow(
+    MinFreeStorageField(
         minFreeStorageBytes = minFreeStorageBytes,
         onMinFreeStorageBytesChange = onMinFreeStorageBytesChange,
     )
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Column(Modifier.weight(1f).padding(end = 12.dp)) {
-            Text("Always include OpenMultiTrack folders", style = MaterialTheme.typography.bodyLarge)
-            Text(
-                "When found on SD cards or USB drives, add them to the session library automatically.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Switch(
-            checked = alwaysIncludeOpenMultiTrackFolders,
-            onCheckedChange = onAlwaysIncludeOpenMultiTrackFoldersChange,
-        )
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Column(Modifier.weight(1f).padding(end = 12.dp)) {
-            Text("Scan removable media", style = MaterialTheme.typography.bodyLarge)
-            Text(
-                "Look for OpenMultiTrack/Recordings on SD cards and USB drives when listing sessions.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Switch(checked = autoScanRemovableMedia, onCheckedChange = onAutoScanRemovableMediaChange)
-    }
-
-    MirrorRootsList(
-        title = "Additional library locations",
-        description = "Extra folders to search for completed recordings.",
+    SettingsSubsectionHeader(
+        title = "Session library",
+        description = "Where completed recordings are listed for playback.",
+    )
+    SettingsSwitchRow(
+        title = "Auto-include OpenMultiTrack folders",
+        description = "Add OpenMultiTrack folders from SD/USB drives to the library.",
+        checked = alwaysIncludeOpenMultiTrackFolders,
+        onCheckedChange = onAlwaysIncludeOpenMultiTrackFoldersChange,
+    )
+    SettingsSwitchRow(
+        title = "Scan removable media",
+        description = "Search SD cards and USB drives for OpenMultiTrack/Recordings.",
+        checked = autoScanRemovableMedia,
+        onCheckedChange = onAutoScanRemovableMediaChange,
+    )
+    PathListBlock(
+        title = "Extra library folders",
+        description = "Additional paths to search for sessions.",
         roots = additionalLibraryRoots,
         onAdd = { addLibraryDialog = true },
         onRemove = onRemoveAdditionalLibraryRoot,
     )
+    Spacer(Modifier.height(8.dp))
 }
 
+@Composable
+fun SettingsSubsectionHeader(
+    title: String,
+    description: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Text(
+            title,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+    }
+}
+
+@Composable
+fun SettingsSwitchRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun StoragePathPickerDialog(
     title: String,
@@ -311,14 +322,14 @@ private fun StoragePathPickerDialog(
 }
 
 @Composable
-private fun MirrorRootsList(
+private fun PathListBlock(
     title: String,
     description: String,
     roots: List<String>,
     onAdd: () -> Unit,
     onRemove: (String) -> Unit,
 ) {
-    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -338,10 +349,10 @@ private fun MirrorRootsList(
         }
         if (roots.isEmpty()) {
             Text(
-                "No extra locations configured.",
+                "None configured",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp),
+                modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
             )
         } else {
             roots.forEach { path ->
@@ -372,33 +383,52 @@ private fun MirrorRootsList(
 }
 
 @Composable
-private fun MinFreeStorageRow(
+private fun MinFreeStorageField(
     minFreeStorageBytes: Long,
     onMinFreeStorageBytesChange: (Long) -> Unit,
 ) {
-    val presets = listOf(
-        0L to "Off",
-        500L * 1024 * 1024 to "500 MB",
-        1024L * 1024 * 1024 to "1 GB",
-        5L * 1024 * 1024 * 1024 to "5 GB",
-    )
-    val selectedLabel = presets.firstOrNull { it.first == minFreeStorageBytes }?.second ?: "Custom"
+    var text by remember(minFreeStorageBytes) {
+        mutableStateOf(StorageSizeInput.format(minFreeStorageBytes))
+    }
+    var focused by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Text("Stop writing when free space below", style = MaterialTheme.typography.bodyLarge)
+        Text("Minimum free space", style = MaterialTheme.typography.bodyLarge)
         Text(
-            "Recording continues on the local spill buffer; the affected device is skipped until space returns.",
+            "Stop writing to a device below this threshold. Leave empty to disable. Recording continues on the spill buffer.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 8.dp),
         )
-        Text("Current: $selectedLabel", style = MaterialTheme.typography.labelLarge)
-        presets.forEach { (bytes, label) ->
-            TextButton(
-                onClick = { onMinFreeStorageBytesChange(bytes) },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(label)
-            }
-        }
+        OutlinedTextField(
+            value = text,
+            onValueChange = {
+                text = it
+                error = null
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { focus ->
+                    val wasFocused = focused
+                    focused = focus.isFocused
+                    if (wasFocused && !focus.isFocused) {
+                        val parsed = StorageSizeInput.parse(text)
+                        if (parsed == null && text.isNotBlank()) {
+                            error = "Use a value like 500 MB or 1.5 GB"
+                        } else {
+                            val bytes = parsed ?: 0L
+                            onMinFreeStorageBytesChange(bytes)
+                            text = StorageSizeInput.format(bytes)
+                            error = null
+                        }
+                    }
+                },
+            singleLine = true,
+            label = { Text("Threshold") },
+            placeholder = { Text("e.g. 500 MB (empty = off)") },
+            isError = error != null,
+            supportingText = error?.let { err -> { Text(err) } },
+        )
     }
 }

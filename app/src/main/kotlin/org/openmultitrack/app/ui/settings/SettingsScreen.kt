@@ -1,23 +1,28 @@
 package org.openmultitrack.app.ui.settings
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -193,7 +198,9 @@ private fun SettingsContent(
     onOpenBatterySettings: () -> Unit = {},
 ) {
     var query by remember { mutableStateOf("") }
+    var openCategory by remember { mutableStateOf<SettingsCategory?>(null) }
     val normalizedQuery = query.trim().lowercase()
+    val isSearching = normalizedQuery.isNotEmpty()
 
     val rows = remember(state, monitorGain) {
         buildSettingsRows(
@@ -218,28 +225,14 @@ private fun SettingsContent(
             onPlaybackWaveformNormalizedChange = onPlaybackWaveformNormalizedChange,
         )
     }
-    val visibleRows = if (normalizedQuery.isEmpty()) {
-        rows
-    } else {
-        rows.filter { row ->
-            row.searchText.contains(normalizedQuery) ||
-                row.section.lowercase().contains(normalizedQuery)
-        }
-    }
-    val showStorageSection = normalizedQuery.isEmpty() ||
-        "storage".contains(normalizedQuery) ||
-        "recording".contains(normalizedQuery) ||
-        "reliability".contains(normalizedQuery) ||
-        "battery".contains(normalizedQuery)
-    val showReliabilitySection = normalizedQuery.isEmpty() ||
-        "reliability".contains(normalizedQuery) ||
-        "battery".contains(normalizedQuery) ||
-        "background".contains(normalizedQuery)
 
     Column(modifier = modifier) {
         OutlinedTextField(
             value = query,
-            onValueChange = { query = it },
+            onValueChange = {
+                query = it
+                if (it.isNotBlank()) openCategory = null
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -248,88 +241,258 @@ private fun SettingsContent(
             singleLine = true,
         )
 
-        if (visibleRows.isEmpty() && !showStorageSection) {
-            Text(
-                "No settings match \"$query\"",
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 24.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+        when {
+            isSearching -> SettingsSearchResults(
+                query = query,
+                normalizedQuery = normalizedQuery,
+                rows = rows,
+                state = state,
+                onSetStorageRootPath = onSetStorageRootPath,
+                onAddAdditionalLibraryRoot = onAddAdditionalLibraryRoot,
+                onRemoveAdditionalLibraryRoot = onRemoveAdditionalLibraryRoot,
+                onAddRedundantRecordingRoot = onAddRedundantRecordingRoot,
+                onRemoveRedundantRecordingRoot = onRemoveRedundantRecordingRoot,
+                onAutoScanRemovableMediaChange = onAutoScanRemovableMediaChange,
+                onAlwaysIncludeOpenMultiTrackFoldersChange = onAlwaysIncludeOpenMultiTrackFoldersChange,
+                onLocalSpillBufferEnabledChange = onLocalSpillBufferEnabledChange,
+                onLocalSpillBufferMinutesChange = onLocalSpillBufferMinutesChange,
+                onMinFreeStorageBytesChange = onMinFreeStorageBytesChange,
+                onOpenBatterySettings = onOpenBatterySettings,
             )
-        } else {
-            val listItems = remember(visibleRows) {
-                buildList {
-                    var lastSection: String? = null
-                    for (row in visibleRows) {
-                        if (row.section != lastSection) {
-                            if (lastSection != null) add(SettingsListItem.Divider)
-                            add(SettingsListItem.Header(row.section))
-                            lastSection = row.section
-                        }
-                        add(SettingsListItem.Entry(row))
+            openCategory == null -> SettingsCategoryList(
+                onSelect = { openCategory = it },
+            )
+            else -> SettingsCategoryDetail(
+                category = openCategory!!,
+                state = state,
+                rows = rows.filter { it.category == openCategory },
+                onBack = { openCategory = null },
+                onSetStorageRootPath = onSetStorageRootPath,
+                onAddAdditionalLibraryRoot = onAddAdditionalLibraryRoot,
+                onRemoveAdditionalLibraryRoot = onRemoveAdditionalLibraryRoot,
+                onAddRedundantRecordingRoot = onAddRedundantRecordingRoot,
+                onRemoveRedundantRecordingRoot = onRemoveRedundantRecordingRoot,
+                onAutoScanRemovableMediaChange = onAutoScanRemovableMediaChange,
+                onAlwaysIncludeOpenMultiTrackFoldersChange = onAlwaysIncludeOpenMultiTrackFoldersChange,
+                onLocalSpillBufferEnabledChange = onLocalSpillBufferEnabledChange,
+                onLocalSpillBufferMinutesChange = onLocalSpillBufferMinutesChange,
+                onMinFreeStorageBytesChange = onMinFreeStorageBytesChange,
+                onOpenBatterySettings = onOpenBatterySettings,
+            )
+        }
+    }
+}
+
+private enum class SettingsCategory(
+    val title: String,
+    val subtitle: String,
+) {
+    RECORDING("Recording", "After stop, storage hints"),
+    DISPLAY("Display", "Waveforms, meters, zoom"),
+    PLAYBACK("Playback", "Soundcheck and chapters"),
+    CHANNEL_STRIPS("Channel strips", "Icons, labels, visibility"),
+    AUDIO("Audio", "Monitor level"),
+    STORAGE("Storage", "Paths, mirrors, spill buffer"),
+    RELIABILITY("Background", "Battery and uninterrupted recording"),
+}
+
+@Composable
+private fun SettingsCategoryList(onSelect: (SettingsCategory) -> Unit) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        items(SettingsCategory.entries.size) { index ->
+            val category = SettingsCategory.entries[index]
+            Surface(
+                onClick = { onSelect(category) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                shape = MaterialTheme.shapes.medium,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(category.title, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            category.subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                items(
-                    count = listItems.size,
-                    key = { index ->
-                        when (val item = listItems[index]) {
-                            is SettingsListItem.Divider -> "divider-$index"
-                            is SettingsListItem.Header -> "header-${item.section}-$index"
-                            is SettingsListItem.Entry -> item.row.id
-                        }
-                    },
-                ) { index ->
-                    val item = listItems[index]
-                    when (item) {
-                        SettingsListItem.Divider -> HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                        is SettingsListItem.Header -> Text(
-                            item.section,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        is SettingsListItem.Entry -> SettingsRow(item.row)
-                    }
+        }
+    }
+}
+
+@Composable
+private fun SettingsCategoryDetail(
+    category: SettingsCategory,
+    state: SettingsUiState,
+    rows: List<SettingsRowModel>,
+    onBack: () -> Unit,
+    onSetStorageRootPath: (String?) -> Unit,
+    onAddAdditionalLibraryRoot: (String) -> Unit,
+    onRemoveAdditionalLibraryRoot: (String) -> Unit,
+    onAddRedundantRecordingRoot: (String) -> Unit,
+    onRemoveRedundantRecordingRoot: (String) -> Unit,
+    onAutoScanRemovableMediaChange: (Boolean) -> Unit,
+    onAlwaysIncludeOpenMultiTrackFoldersChange: (Boolean) -> Unit,
+    onLocalSpillBufferEnabledChange: (Boolean) -> Unit,
+    onLocalSpillBufferMinutesChange: (Int) -> Unit,
+    onMinFreeStorageBytesChange: (Long) -> Unit,
+    onOpenBatterySettings: () -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onBack)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to categories")
+            }
+            Text(
+                category.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            when (category) {
+                SettingsCategory.STORAGE -> item(key = "storage") {
+                    SettingsStorageSection(
+                        effectiveStorageRootPath = state.effectiveStorageRootPath,
+                        storageRootPath = state.storageRootPath,
+                        additionalLibraryRoots = state.additionalLibraryRoots,
+                        redundantRecordingRoots = state.redundantRecordingRoots,
+                        autoScanRemovableMedia = state.autoScanRemovableMedia,
+                        alwaysIncludeOpenMultiTrackFolders = state.alwaysIncludeOpenMultiTrackFolders,
+                        localSpillBufferEnabled = state.localSpillBufferEnabled,
+                        localSpillBufferMinutes = state.localSpillBufferMinutes,
+                        minFreeStorageBytes = state.minFreeStorageBytes,
+                        storageVolumeOptions = state.storageVolumeOptions,
+                        onSetStorageRootPath = onSetStorageRootPath,
+                        onAddAdditionalLibraryRoot = onAddAdditionalLibraryRoot,
+                        onRemoveAdditionalLibraryRoot = onRemoveAdditionalLibraryRoot,
+                        onAddRedundantRecordingRoot = onAddRedundantRecordingRoot,
+                        onRemoveRedundantRecordingRoot = onRemoveRedundantRecordingRoot,
+                        onAutoScanRemovableMediaChange = onAutoScanRemovableMediaChange,
+                        onAlwaysIncludeOpenMultiTrackFoldersChange = onAlwaysIncludeOpenMultiTrackFoldersChange,
+                        onLocalSpillBufferEnabledChange = onLocalSpillBufferEnabledChange,
+                        onLocalSpillBufferMinutesChange = onLocalSpillBufferMinutesChange,
+                        onMinFreeStorageBytesChange = onMinFreeStorageBytesChange,
+                    )
                 }
-                if (showStorageSection) {
-                    item(key = "storage-section") {
-                        SettingsStorageSection(
-                            effectiveStorageRootPath = state.effectiveStorageRootPath,
-                            storageRootPath = state.storageRootPath,
-                            additionalLibraryRoots = state.additionalLibraryRoots,
-                            redundantRecordingRoots = state.redundantRecordingRoots,
-                            autoScanRemovableMedia = state.autoScanRemovableMedia,
-                            alwaysIncludeOpenMultiTrackFolders = state.alwaysIncludeOpenMultiTrackFolders,
-                            localSpillBufferEnabled = state.localSpillBufferEnabled,
-                            localSpillBufferMinutes = state.localSpillBufferMinutes,
-                            minFreeStorageBytes = state.minFreeStorageBytes,
-                            storageVolumeOptions = state.storageVolumeOptions,
-                            onSetStorageRootPath = onSetStorageRootPath,
-                            onAddAdditionalLibraryRoot = onAddAdditionalLibraryRoot,
-                            onRemoveAdditionalLibraryRoot = onRemoveAdditionalLibraryRoot,
-                            onAddRedundantRecordingRoot = onAddRedundantRecordingRoot,
-                            onRemoveRedundantRecordingRoot = onRemoveRedundantRecordingRoot,
-                            onAutoScanRemovableMediaChange = onAutoScanRemovableMediaChange,
-                            onAlwaysIncludeOpenMultiTrackFoldersChange = onAlwaysIncludeOpenMultiTrackFoldersChange,
-                            onLocalSpillBufferEnabledChange = onLocalSpillBufferEnabledChange,
-                            onLocalSpillBufferMinutesChange = onLocalSpillBufferMinutesChange,
-                            onMinFreeStorageBytesChange = onMinFreeStorageBytesChange,
-                        )
-                    }
+                SettingsCategory.RELIABILITY -> item(key = "reliability") {
+                    SettingsReliabilitySection(
+                        batteryOptimizationIgnored = state.batteryOptimizationIgnored,
+                        onOpenBatterySettings = onOpenBatterySettings,
+                    )
                 }
-                if (showReliabilitySection) {
-                    item(key = "reliability-section") {
-                        SettingsReliabilitySection(
-                            batteryOptimizationIgnored = state.batteryOptimizationIgnored,
-                            onOpenBatterySettings = onOpenBatterySettings,
-                        )
-                    }
+                else -> items(rows, key = { it.id }) { row ->
+                    SettingsRow(row)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsSearchResults(
+    query: String,
+    normalizedQuery: String,
+    rows: List<SettingsRowModel>,
+    state: SettingsUiState,
+    onSetStorageRootPath: (String?) -> Unit,
+    onAddAdditionalLibraryRoot: (String) -> Unit,
+    onRemoveAdditionalLibraryRoot: (String) -> Unit,
+    onAddRedundantRecordingRoot: (String) -> Unit,
+    onRemoveRedundantRecordingRoot: (String) -> Unit,
+    onAutoScanRemovableMediaChange: (Boolean) -> Unit,
+    onAlwaysIncludeOpenMultiTrackFoldersChange: (Boolean) -> Unit,
+    onLocalSpillBufferEnabledChange: (Boolean) -> Unit,
+    onLocalSpillBufferMinutesChange: (Int) -> Unit,
+    onMinFreeStorageBytesChange: (Long) -> Unit,
+    onOpenBatterySettings: () -> Unit,
+) {
+    val visibleRows = rows.filter { row ->
+        row.searchText.contains(normalizedQuery) ||
+            row.category.title.lowercase().contains(normalizedQuery)
+    }
+    val showStorage = normalizedQuery.contains("storage") ||
+        normalizedQuery.contains("mirror") ||
+        normalizedQuery.contains("spill") ||
+        normalizedQuery.contains("library") ||
+        visibleRows.any { it.category == SettingsCategory.STORAGE }
+    val showReliability = normalizedQuery.contains("battery") ||
+        normalizedQuery.contains("background") ||
+        normalizedQuery.contains("reliability")
+
+    if (visibleRows.isEmpty() && !showStorage && !showReliability) {
+        Text(
+            "No settings match \"$query\"",
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 24.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        items(visibleRows, key = { it.id }) { row -> SettingsRow(row) }
+        if (showStorage) {
+            item(key = "search-storage") {
+                SettingsStorageSection(
+                    effectiveStorageRootPath = state.effectiveStorageRootPath,
+                    storageRootPath = state.storageRootPath,
+                    additionalLibraryRoots = state.additionalLibraryRoots,
+                    redundantRecordingRoots = state.redundantRecordingRoots,
+                    autoScanRemovableMedia = state.autoScanRemovableMedia,
+                    alwaysIncludeOpenMultiTrackFolders = state.alwaysIncludeOpenMultiTrackFolders,
+                    localSpillBufferEnabled = state.localSpillBufferEnabled,
+                    localSpillBufferMinutes = state.localSpillBufferMinutes,
+                    minFreeStorageBytes = state.minFreeStorageBytes,
+                    storageVolumeOptions = state.storageVolumeOptions,
+                    onSetStorageRootPath = onSetStorageRootPath,
+                    onAddAdditionalLibraryRoot = onAddAdditionalLibraryRoot,
+                    onRemoveAdditionalLibraryRoot = onRemoveAdditionalLibraryRoot,
+                    onAddRedundantRecordingRoot = onAddRedundantRecordingRoot,
+                    onRemoveRedundantRecordingRoot = onRemoveRedundantRecordingRoot,
+                    onAutoScanRemovableMediaChange = onAutoScanRemovableMediaChange,
+                    onAlwaysIncludeOpenMultiTrackFoldersChange = onAlwaysIncludeOpenMultiTrackFoldersChange,
+                    onLocalSpillBufferEnabledChange = onLocalSpillBufferEnabledChange,
+                    onLocalSpillBufferMinutesChange = onLocalSpillBufferMinutesChange,
+                    onMinFreeStorageBytesChange = onMinFreeStorageBytesChange,
+                )
+            }
+        }
+        if (showReliability) {
+            item(key = "search-reliability") {
+                SettingsReliabilitySection(
+                    batteryOptimizationIgnored = state.batteryOptimizationIgnored,
+                    onOpenBatterySettings = onOpenBatterySettings,
+                )
             }
         }
     }
@@ -340,16 +503,11 @@ private fun SettingsReliabilitySection(
     batteryOptimizationIgnored: Boolean,
     onOpenBatterySettings: () -> Unit,
 ) {
-    HorizontalDivider(Modifier.padding(vertical = 8.dp))
-    Text(
-        "Background reliability",
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        fontWeight = FontWeight.SemiBold,
+    SettingsSubsectionHeader(
+        title = "Battery optimization",
+        description = "Prevent Android from pausing recording when the app is in the background.",
     )
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Text("Battery optimization", style = MaterialTheme.typography.bodyLarge)
         Text(
             if (batteryOptimizationIgnored) {
                 "OpenMultiTrack is allowed to run in the background during recording."
@@ -358,29 +516,24 @@ private fun SettingsReliabilitySection(
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(vertical = 6.dp),
+            modifier = Modifier.padding(bottom = 12.dp),
         )
         OutlinedButton(onClick = onOpenBatterySettings, modifier = Modifier.fillMaxWidth()) {
             Text(if (batteryOptimizationIgnored) "Review battery settings" else "Disable battery optimization")
         }
     }
-}
-
-private sealed interface SettingsListItem {
-    data object Divider : SettingsListItem
-    data class Header(val section: String) : SettingsListItem
-    data class Entry(val row: SettingsRowModel) : SettingsListItem
+    Spacer(Modifier.height(8.dp))
 }
 
 private sealed interface SettingsRowModel {
     val id: String
-    val section: String
+    val category: SettingsCategory
     val searchText: String
 }
 
 private data class SettingsToggleRow(
     override val id: String,
-    override val section: String,
+    override val category: SettingsCategory,
     val title: String,
     val description: String,
     val checked: Boolean,
@@ -391,7 +544,7 @@ private data class SettingsToggleRow(
 
 private data class SettingsSliderRow(
     override val id: String,
-    override val section: String,
+    override val category: SettingsCategory,
     val title: String,
     val description: String,
     val value: Float,
@@ -404,7 +557,7 @@ private data class SettingsSliderRow(
 
 private data class SettingsDropdownRow<T>(
     override val id: String,
-    override val section: String,
+    override val category: SettingsCategory,
     val title: String,
     val description: String,
     val options: List<T>,
@@ -418,7 +571,7 @@ private data class SettingsDropdownRow<T>(
 
 private data class SettingsPickerRow<T>(
     override val id: String,
-    override val section: String,
+    override val category: SettingsCategory,
     val title: String,
     val description: String,
     val options: List<T>,
@@ -590,7 +743,7 @@ private fun buildSettingsRows(
 ): List<SettingsRowModel> = listOf(
     SettingsDropdownRow(
         id = "post_record_behavior",
-        section = "Recording",
+        category = SettingsCategory.RECORDING,
         title = "After recording stops",
         description = "Choose automatic behavior or show a prompt when a recording finishes.",
         options = PostRecordBehavior.entries,
@@ -600,7 +753,7 @@ private fun buildSettingsRows(
     ),
     SettingsToggleRow(
         id = "show_recording_storage_info",
-        section = "Recording",
+        category = SettingsCategory.RECORDING,
         title = "Show storage info button while recording",
         description = "Display the info button next to the record timer for free space and estimated recording time.",
         checked = state.showRecordingStorageInfoButton,
@@ -608,7 +761,7 @@ private fun buildSettingsRows(
     ),
     SettingsToggleRow(
         id = "auto_show_recording_storage_tooltip",
-        section = "Recording",
+        category = SettingsCategory.RECORDING,
         title = "Show storage tooltip when recording starts",
         description = "Automatically show free space and estimated recording time for five seconds when recording begins.",
         checked = state.autoShowRecordingStorageTooltip,
@@ -616,7 +769,7 @@ private fun buildSettingsRows(
     ),
     SettingsToggleRow(
         id = "record_waveform_normalized",
-        section = "Display",
+        category = SettingsCategory.DISPLAY,
         title = "Normalize live recording waveforms",
         description = "Scale each channel waveform to full height while recording or monitoring.",
         checked = state.recordWaveformNormalized,
@@ -624,7 +777,7 @@ private fun buildSettingsRows(
     ),
     SettingsToggleRow(
         id = "playback_waveform_normalized",
-        section = "Display",
+        category = SettingsCategory.DISPLAY,
         title = "Normalize playback waveforms",
         description = "Scale each channel waveform to full height in Simple Play and Virtual Soundcheck.",
         checked = state.playbackWaveformNormalized,
@@ -632,7 +785,7 @@ private fun buildSettingsRows(
     ),
     SettingsToggleRow(
         id = "chapter_support",
-        section = "Playback",
+        category = SettingsCategory.PLAYBACK,
         title = "Chapter / trackmark support",
         description = "Enable trackmarks stored in a session .cue file, with previous/next navigation in playback modes.",
         checked = state.chapterSupportEnabled,
@@ -640,7 +793,7 @@ private fun buildSettingsRows(
     ),
     SettingsSliderRow(
         id = "monitor_gain",
-        section = "Audio",
+        category = SettingsCategory.AUDIO,
         title = "Monitor gain",
         description = "Output level for the monitor bus when monitoring is active.",
         value = monitorGain,
@@ -649,7 +802,7 @@ private fun buildSettingsRows(
     ),
     SettingsSliderRow(
         id = "record_waveform_window",
-        section = "Display",
+        category = SettingsCategory.DISPLAY,
         title = "Live waveform window",
         description = "How many seconds of recent audio each strip waveform shows while recording or monitoring.",
         value = state.recordWaveformWindowSec,
@@ -659,7 +812,7 @@ private fun buildSettingsRows(
     ),
     SettingsSliderRow(
         id = "playback_waveform_window",
-        section = "Display",
+        category = SettingsCategory.DISPLAY,
         title = "Soundcheck waveform zoom",
         description = "Default visible time span on session waveforms in Virtual soundcheck mode.",
         value = state.playbackWaveformWindowSec,
@@ -669,7 +822,7 @@ private fun buildSettingsRows(
     ),
     SettingsToggleRow(
         id = "show_waveforms",
-        section = "Display",
+        category = SettingsCategory.DISPLAY,
         title = "Show waveforms",
         description = "Draw live level waveforms on each channel strip.",
         checked = state.showWaveforms,
@@ -677,7 +830,7 @@ private fun buildSettingsRows(
     ),
     SettingsToggleRow(
         id = "show_vu_meters",
-        section = "Display",
+        category = SettingsCategory.DISPLAY,
         title = "Show VU meters",
         description = "Live input level bars on each strip. Works without monitor; uses a light USB capture stream.",
         checked = state.showVuMeters,
@@ -685,7 +838,7 @@ private fun buildSettingsRows(
     ),
     SettingsToggleRow(
         id = "hide_arm_icon",
-        section = "Channel strips",
+        category = SettingsCategory.CHANNEL_STRIPS,
         title = "Hide arm icon",
         description = "Hide the record-arm indicator (●) on strips in the main view.",
         checked = state.hideArmIcon,
@@ -693,7 +846,7 @@ private fun buildSettingsRows(
     ),
     SettingsToggleRow(
         id = "hide_monitor_icon",
-        section = "Channel strips",
+        category = SettingsCategory.CHANNEL_STRIPS,
         title = "Hide monitor icon",
         description = "Hide the monitor indicator (🎧) on strips in the main view.",
         checked = state.hideMonitorIcon,
@@ -701,7 +854,7 @@ private fun buildSettingsRows(
     ),
     SettingsToggleRow(
         id = "hide_solo_icon",
-        section = "Channel strips",
+        category = SettingsCategory.CHANNEL_STRIPS,
         title = "Hide solo icon",
         description = "Hide the solo indicator (S) on strips in the main view.",
         checked = state.hideSoloIcon,
@@ -709,7 +862,7 @@ private fun buildSettingsRows(
     ),
     SettingsToggleRow(
         id = "hide_routing_badges",
-        section = "Channel strips",
+        category = SettingsCategory.CHANNEL_STRIPS,
         title = "Hide IN/OUT badges",
         description = "Hide the small USB routing badges on each channel strip.",
         checked = state.hideRoutingBadges,
@@ -717,7 +870,7 @@ private fun buildSettingsRows(
     ),
     SettingsPickerRow(
         id = "strip_numbers",
-        section = "Channel strips",
+        category = SettingsCategory.CHANNEL_STRIPS,
         title = "Channel numbers",
         description = "How channel index numbers appear next to scribble labels.",
         options = StripNumberMode.entries,
@@ -727,7 +880,7 @@ private fun buildSettingsRows(
     ),
     SettingsPickerRow(
         id = "strip_icons",
-        section = "Channel strips",
+        category = SettingsCategory.CHANNEL_STRIPS,
         title = "Scribble icons",
         description = "How mixer icon emojis appear on imported strip labels.",
         options = StripIconMode.entries,
