@@ -33,4 +33,5 @@
     <string name="notification_action_stop">Stop</string>
     <string name="notification_action_previous">Previous</string>
     <string name="notification_action_next">Next</string>
+    <string name="notification_playback_total">Total %1$s</string>
 </resources>

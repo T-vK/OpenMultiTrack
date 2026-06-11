@@ -17,20 +17,26 @@ object PlaybackNotificationBuilder {
         mixerName: String?,
         media: PlaybackMediaNotification,
     ): NotificationCompat.Builder {
-        val title = mixerName ?: context.getString(R.string.notification_title)
-        val subtitle = statusLine(session)
-        val timeSubtitle = timeSubtitle(session)
+        val display = PlaybackNotificationContent.resolve(context, session, mixerName)
+        val status = statusLine(session)
         val openIntent = PendingIntent.getActivity(
             context,
             0,
             Intent(context, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val art = PlaybackNotificationArt.albumArt(context)
         val builder = NotificationCompat.Builder(context, AudioSessionService.CHANNEL_PLAYBACK)
-            .setContentTitle(title)
-            .setContentText(timeSubtitle ?: subtitle)
-            .setSubText(if (timeSubtitle != null) subtitle else null)
+            .setContentTitle(display.sessionTitle)
+            .setContentText(display.totalTimeLine ?: display.progressLine ?: status)
+            .setSubText(
+                buildList {
+                    add(display.mixerLine)
+                    display.progressLine?.let { add(it) }
+                }.joinToString(" · ").takeIf { it.isNotBlank() },
+            )
             .setSmallIcon(R.drawable.ic_notification)
+            .setLargeIcon(art)
             .setContentIntent(openIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -53,15 +59,6 @@ object PlaybackNotificationBuilder {
         session.isPlaying -> "Playing"
         session.appMode.isPlaybackMode -> "Soundcheck"
         else -> "Audio session active"
-    }
-
-    private fun timeSubtitle(session: MixerSessionUiState?): String? {
-        if (session?.appMode?.isPlaybackMode != true) return null
-        if (!session.isPlaying && session.playbackDurationSec <= 0f) return null
-        return PlaybackNotificationTransport.formatTimestamp(
-            session.playbackPositionSec,
-            session.playbackDurationSec.takeIf { it > 0f },
-        )
     }
 
     private fun addTransportActions(

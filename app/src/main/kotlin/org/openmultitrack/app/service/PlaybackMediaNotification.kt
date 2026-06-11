@@ -1,6 +1,7 @@
 package org.openmultitrack.app.service
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.os.Bundle
 import android.os.SystemClock
 import android.support.v4.media.MediaMetadataCompat
@@ -16,7 +17,9 @@ class PlaybackMediaNotification(
     private val mediaSession = MediaSessionCompat(context, "OpenMultiTrackPlayback")
     private var lastPublishedPositionMs: Long = -1L
     private var lastPublishedDurationMs: Long = -1L
+    private var lastPublishedProgressLine: String? = null
     private var lastSnapshot: PlaybackNotificationTransport.Snapshot? = null
+    private var albumArt: Bitmap? = null
 
     init {
         mediaSession.setCallback(
@@ -62,14 +65,17 @@ class PlaybackMediaNotification(
     fun release() {
         mediaSession.isActive = false
         mediaSession.release()
+        albumArt = null
+        PlaybackNotificationArt.invalidateCache()
     }
 
     fun layoutSignature(session: MixerSessionUiState?, mixerName: String?): Int {
         val snap = PlaybackNotificationTransport.snapshot(session)
-        val title = mixerName ?: context.getString(R.string.notification_title)
+        val display = PlaybackNotificationContent.resolve(context, session, mixerName)
         val chapters = session?.trackmarks?.isNotEmpty() == true
         return listOf(
-            title,
+            display.sessionTitle,
+            display.totalTimeLine,
             snap.state,
             snap.standardActions,
             snap.customActionIds,
@@ -82,6 +88,7 @@ class PlaybackMediaNotification(
     fun applySession(session: MixerSessionUiState?, mixerName: String?) {
         lastPublishedPositionMs = -1L
         lastPublishedDurationMs = -1L
+        lastPublishedProgressLine = null
         lastSnapshot = null
         publish(session, mixerName, force = true)
     }
@@ -93,27 +100,31 @@ class PlaybackMediaNotification(
 
     private fun publish(session: MixerSessionUiState?, mixerName: String?, force: Boolean) {
         val snap = PlaybackNotificationTransport.snapshot(session)
+        val display = PlaybackNotificationContent.resolve(context, session, mixerName)
         val structureChanged = force ||
             lastSnapshot?.state != snap.state ||
             lastSnapshot?.standardActions != snap.standardActions ||
             lastSnapshot?.customActionIds != snap.customActionIds
         val positionChanged = snap.positionMs != lastPublishedPositionMs
         val durationChanged = snap.durationMs != lastPublishedDurationMs && snap.durationMs > 0L
+        val progressChanged = display.progressLine != lastPublishedProgressLine
 
         if (structureChanged) {
-            publishMetadata(session, mixerName, snap.durationMs)
+            publishMetadata(session, mixerName, snap.durationMs, display)
             publishPlaybackState(snap)
             lastSnapshot = snap
             lastPublishedPositionMs = snap.positionMs
             lastPublishedDurationMs = snap.durationMs
+            lastPublishedProgressLine = display.progressLine
             return
         }
 
-        if (!positionChanged && !durationChanged) return
+        if (!positionChanged && !durationChanged && !progressChanged) return
 
-        if (durationChanged) {
-            publishMetadata(session, mixerName, snap.durationMs)
+        if (durationChanged || progressChanged) {
+            publishMetadata(session, mixerName, snap.durationMs, display)
             lastPublishedDurationMs = snap.durationMs
+            lastPublishedProgressLine = display.progressLine
         }
         if (positionChanged) {
             publishPlaybackState(snap)
@@ -125,12 +136,21 @@ class PlaybackMediaNotification(
         session: MixerSessionUiState?,
         mixerName: String?,
         durationMs: Long,
+        display: PlaybackNotificationContent.Display,
     ) {
-        val title = mixerName ?: context.getString(R.string.notification_title)
+        val art = albumArt ?: PlaybackNotificationArt.albumArt(context).also { albumArt = it }
         val metadata = MediaMetadataCompat.Builder()
-            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, title)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, PlaybackNotificationBuilder.statusLine(session))
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, display.sessionTitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, display.sessionTitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, display.mixerLine)
+            .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, art)
+            .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, art)
+        display.totalTimeLine?.let {
+            metadata.putString(MediaMetadataCompat.METADATA_KEY_ALBUM, it)
+        }
+        display.progressLine?.let {
+            metadata.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, it)
+        }
         if (durationMs > 0L) {
             metadata.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, durationMs)
         }
