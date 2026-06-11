@@ -352,8 +352,15 @@ class MainViewModel(
         val sessionDir = session.lastRecordingPath ?: return null
         if (session.appMode != AppMode.MULTITRACK_RECORD) return null
         soundcheckPromptPending.remove(mixerId)
+        org.openmultitrack.app.audio.TransportTraceHub.mark(
+            mixerId,
+            "ViewModel post-record trigger behavior=${settings.postRecordBehavior} dir=${java.io.File(sessionDir).name}",
+        )
         return when (settings.postRecordBehavior) {
-            PostRecordBehavior.NOTHING -> null
+            PostRecordBehavior.NOTHING -> {
+                org.openmultitrack.app.audio.TransportTraceHub.finish(mixerId, "post-record: nothing")
+                null
+            }
             PostRecordBehavior.AUTO_SOUNDCHECK -> {
                 loadRecordingIntoSoundcheckLocal(mixerId, sessionDir)
                 null
@@ -908,12 +915,14 @@ class MainViewModel(
     }
 
     private fun loadRecordingIntoSoundcheckLocal(mixerId: String, sessionDir: String) {
+        org.openmultitrack.app.audio.TransportTraceHub.mark(mixerId, "ViewModel loadIntoSoundcheck")
         setAppMode(mixerId, AppMode.VIRTUAL_SOUNDCHECK)
         selectSoundcheckSession(mixerId, sessionDir)
         refreshSoundcheckLibrary(mixerId)
     }
 
     private fun loadRecordingIntoSimplePlayLocal(mixerId: String, sessionDir: String) {
+        org.openmultitrack.app.audio.TransportTraceHub.mark(mixerId, "ViewModel loadIntoSimplePlay")
         setAppMode(mixerId, AppMode.SIMPLE_PLAY)
         selectSoundcheckSession(mixerId, sessionDir)
         refreshSoundcheckLibrary(mixerId)
@@ -1005,9 +1014,9 @@ class MainViewModel(
     }
 
     fun toggleSoundcheckPlayback(mixerId: String) {
-        org.openmultitrack.app.audio.TransportTrace.instant(
-            "MainViewModel.toggleSoundcheckPlayback mixerId=$mixerId " +
-                "isPlaying=${_uiState.value.sessionByMixer[mixerId]?.isPlaying}",
+        org.openmultitrack.app.audio.TransportTraceHub.mark(
+            mixerId,
+            "ViewModel.toggleSoundcheckPlayback isPlaying=${_uiState.value.sessionByMixer[mixerId]?.isPlaying}",
         )
         if (isRemoteClient()) {
             val playing = _uiState.value.sessionByMixer[mixerId]?.isPlaying == true
@@ -1254,10 +1263,14 @@ class MainViewModel(
     }
 
     private fun startRecordInternal(mixerId: String) {
+        org.openmultitrack.app.audio.TransportTraceHub.start(mixerId, "RECORD-START")
+        org.openmultitrack.app.audio.TransportTraceHub.mark(mixerId, "ViewModel promoteForeground")
         if (!sessionClient.promoteForeground("Recording")) {
+            org.openmultitrack.app.audio.TransportTraceHub.finish(mixerId, "promoteForeground denied")
             showStatus("Could not start recording — allow microphone permission and try again.", mixerId)
             return
         }
+        org.openmultitrack.app.audio.TransportTraceHub.mark(mixerId, "ViewModel → session.startRecording")
         sessionClient.withManager { it.getOrCreate(mixerId).startRecording() }
     }
 
@@ -1267,6 +1280,11 @@ class MainViewModel(
             remoteCommand("stop_record", JSONObject().put("mixerId", mixerId))
             return
         }
+        org.openmultitrack.app.audio.TransportTraceHub.start(mixerId, "RECORD-STOP→SOUNDCHECK")
+        org.openmultitrack.app.audio.TransportTraceHub.mark(
+            mixerId,
+            "ViewModel.stopRecord postRecord=${settings.postRecordBehavior}",
+        )
         soundcheckPromptPending.add(mixerId)
         sessionClient.withManager { it.getOrCreate(mixerId).stopRecording() }
         clearInterruptedRecordingIfNeeded(mixerId)

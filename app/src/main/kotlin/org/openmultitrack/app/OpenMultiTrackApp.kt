@@ -4,6 +4,7 @@ import android.app.Application
 import org.openmultitrack.app.util.AppLogBuffer
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.mixer.behringer.OscDiscoveryLog
+import org.openmultitrack.app.audio.TransportTraceHub
 import org.openmultitrack.mixer.behringer.Xr18RoutingLog
 
 class OpenMultiTrackApp : Application() {
@@ -18,6 +19,7 @@ class OpenMultiTrackApp : Application() {
         }
         Xr18RoutingLog.onInfo = { message ->
             OmtLog.i("Xr18Routing", message)
+            TransportTraceHub.markActive("osc $message")
         }
         OmtLog.i("App", "OpenMultiTrack ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) starting")
     }

@@ -26,6 +26,7 @@ import org.openmultitrack.app.audio.MonitorMixConfig
 import org.openmultitrack.app.audio.PlaybackMixContext
 import org.openmultitrack.app.audio.SessionPlayer
 import org.openmultitrack.app.audio.TransportTrace
+import org.openmultitrack.app.audio.TransportTraceHub
 import org.openmultitrack.app.routing.RoutingAutomationBridge
 import org.openmultitrack.app.routing.RoutingHookResult
 import org.openmultitrack.app.routing.SoundcheckTrackChannels
@@ -227,6 +228,7 @@ class MixerSessionController(
 
     fun setAppMode(mode: AppMode) {
         if (_state.value.appMode == mode) return
+        TransportTraceHub.mark(mixerId, "setAppMode $mode")
         if (mode.isPlaybackMode && _state.value.isRecording) {
             scope.launch { stopRecording(restoreRouting = false) }
         }
@@ -257,6 +259,7 @@ class MixerSessionController(
 
     fun refreshSoundcheckLibrary() {
         val prof = profile ?: return
+        TransportTraceHub.mark(mixerId, "refreshSoundcheckLibrary")
         scope.launch {
             val sessions = withContext(Dispatchers.IO) {
                 SessionLibrary.listCompletedSessionsFromRoots(
@@ -273,6 +276,7 @@ class MixerSessionController(
                     channelCount = summary.channelCount,
                 )
             }
+            TransportTraceHub.mark(mixerId, "refreshSoundcheckLibrary listed ${sessions.size} sessions")
             _state.update { s ->
                 val selected = s.selectedSoundcheckDir?.takeIf { dir ->
                     sessions.any { it.sessionDir == dir }
@@ -289,22 +293,32 @@ class MixerSessionController(
 
     fun selectSoundcheckSession(sessionDir: String) {
         val item = _state.value.soundcheckSessions.firstOrNull { it.sessionDir == sessionDir }
+        TransportTraceHub.mark(mixerId, "selectSoundcheckSession ${File(sessionDir).name}")
         scope.launch {
             captureMutex.withLock {
+                TransportTraceHub.mark(mixerId, "selectSoundcheck stop prior playback")
                 stopSoundcheckLocked()
                 soundcheckWaveformJob?.cancel()
             }
             val dir = File(sessionDir)
+            TransportTraceHub.mark(mixerId, "selectSoundcheck read metadata")
             val metadata = withContext(Dispatchers.IO) {
                 SessionMetadata.read(dir)?.withResolvedChannels(dir)
-            } ?: return@launch
+            } ?: run {
+                TransportTraceHub.finish(mixerId, "selectSoundcheck failed: no metadata")
+                return@launch
+            }
             val durationSec = item?.durationSec?.takeIf { it > 0f }
                 ?: withContext(Dispatchers.IO) { SessionPlaybackDuration.durationSec(dir, metadata) }
+            TransportTraceHub.mark(mixerId, "selectSoundcheck prepare UI duration=${durationSec}s ch=${metadata.channels.size}")
             prepareSoundcheckSessionUi(sessionDir, metadata, durationSec)
+            TransportTraceHub.mark(mixerId, "selectSoundcheck UI ready (waveforms loading async)")
             loadSoundcheckWaveformsBackground(dir, metadata)
             if (_state.value.appMode.isPlaybackMode) {
+                TransportTraceHub.mark(mixerId, "selectSoundcheck warmPlaybackRoute")
                 captureMutex.withLock { warmPlaybackRouteLocked() }
             }
+            TransportTraceHub.finish(mixerId, "soundcheck session loaded")
         }
     }
 
@@ -565,10 +579,13 @@ class MixerSessionController(
     }
 
     fun toggleSoundcheckPlayback() {
-        val trace = TransportTrace(
-            if (player.isPlaying || _state.value.isPlaying) "uiPause" else "uiPlay",
-        )
-        trace.mark("toggleSoundcheckPlayback isPlaying=${_state.value.isPlaying} player=${player.isPlaying}")
+        val playing = player.isPlaying || _state.value.isPlaying
+        val trace = if (playing) {
+            TransportTrace("SOUNDCHECK-PAUSE")
+        } else {
+            TransportTraceHub.start(mixerId, "SOUNDCHECK-PLAY")
+        }
+        trace.mark("toggle isPlaying=$playing player=${player.isPlaying}")
         if (player.isPlaying || _state.value.isPlaying) {
             val sampleRate = _state.value.soundcheckSampleRate.takeIf { it > 0 } ?: 48_000
             val posSec = if (sampleRate > 0 && player.isPlaying) {
@@ -607,6 +624,7 @@ class MixerSessionController(
                     trace.mark("captureMutex acquired for start")
                     try {
                         startSoundcheckPlaybackLockedFromCurrentPosition(trace)
+                        TransportTraceHub.finish(mixerId, "playback started")
                     } catch (e: Exception) {
                         OmtLog.e("MixerSession", "toggleSoundcheckPlayback failed", e)
                         player.stopAndAwait()
@@ -618,6 +636,7 @@ class MixerSessionController(
                                 statusMessage = e.message,
                             )
                         }
+                        TransportTraceHub.finish(mixerId, "playback failed: ${e.message}")
                     }
                 }
             }
@@ -651,6 +670,7 @@ class MixerSessionController(
     }
 
     fun playSoundcheckPlayback() {
+        val trace = TransportTraceHub.start(mixerId, "SOUNDCHECK-PLAY")
         _state.update {
             it.copy(
                 isPlaying = true,
@@ -658,10 +678,13 @@ class MixerSessionController(
                 warningMessage = null,
             )
         }
+        trace.mark("UI isPlaying=true")
         scope.launch(Dispatchers.IO) {
             captureMutex.withLock {
+                trace.mark("captureMutex acquired")
                 try {
-                    startSoundcheckPlaybackLockedFromCurrentPosition()
+                    startSoundcheckPlaybackLockedFromCurrentPosition(trace)
+                    TransportTraceHub.finish(mixerId, "playback started")
                 } catch (e: Exception) {
                     OmtLog.e("MixerSession", "playSoundcheckPlayback failed", e)
                     player.stopAndAwait()
@@ -673,6 +696,7 @@ class MixerSessionController(
                             statusMessage = e.message,
                         )
                     }
+                    TransportTraceHub.finish(mixerId, "playback failed: ${e.message}")
                 }
             }
         }
@@ -1062,23 +1086,38 @@ class MixerSessionController(
         val descriptor = activeDescriptor ?: return
         val probe = activeProbe ?: return
         val prof = profile ?: return
+        if (TransportTraceHub.trace(mixerId) == null) {
+            TransportTraceHub.start(mixerId, "RECORD-START")
+        }
+        TransportTraceHub.mark(mixerId, "session.startRecording")
         scope.launch {
             try {
                 var recordingStarted = false
+                TransportTraceHub.mark(mixerId, "waiting captureMutex")
                 captureMutex.withLock {
+                    TransportTraceHub.mark(mixerId, "captureMutex acquired")
                     withContext(Dispatchers.IO) {
+                        TransportTraceHub.mark(mixerId, "quiesceUsb")
                         quiesceUsbBeforeRoutingLocked()
+                        TransportTraceHub.mark(mixerId, "routing.beforeRecord")
                         when (val routing = routingBeforeRecordLocked()) {
-                            RoutingHookResult.Cancelled -> return@withContext
+                            RoutingHookResult.Cancelled -> {
+                                TransportTraceHub.finish(mixerId, "cancelled at routing")
+                                return@withContext
+                            }
                             is RoutingHookResult.Failed -> {
+                                TransportTraceHub.finish(mixerId, "routing failed")
                                 _state.update { it.copy(warningMessage = routing.message) }
                                 return@withContext
                             }
-                            else -> Unit
+                            else -> TransportTraceHub.mark(mixerId, "routing.beforeRecord → $routing")
                         }
                         if (!captureEngine.isCaptureActive) {
+                            TransportTraceHub.mark(mixerId, "ensureCapture")
                             ensureCapture(descriptor, probe).getOrThrow()
+                            TransportTraceHub.mark(mixerId, "ensureCapture ok ch=${captureEngine.activeChannelCount}")
                         } else {
+                            TransportTraceHub.mark(mixerId, "capture already active")
                             syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
                         }
                         val writePlan = org.openmultitrack.app.data.RecordingWritePlan.create(
@@ -1086,6 +1125,7 @@ class MixerSessionController(
                             settings,
                             prof.storageFolderName(),
                         )
+                        TransportTraceHub.mark(mixerId, "captureEngine.startRecording")
                         captureEngine.startRecording(
                             CaptureSessionEngine.RecordingConfig(
                                 mixerId = prof.id,
@@ -1095,6 +1135,7 @@ class MixerSessionController(
                                 writePlan = writePlan,
                             ),
                         ).getOrThrow()
+                        TransportTraceHub.mark(mixerId, "captureEngine.startRecording ok")
                         recordingStarted = true
                     }
                 }
@@ -1125,8 +1166,11 @@ class MixerSessionController(
                 }
                 startCaptureUiUpdates()
                 AudioSessionBridge.rebuildNotification()
+                TransportTraceHub.mark(mixerId, "UI isRecording=true")
+                TransportTraceHub.finish(mixerId, "recording active dir=${sessionDir?.name}")
             } catch (e: Exception) {
                 OmtLog.e("MixerSession", "startRecording failed", e)
+                TransportTraceHub.finish(mixerId, "failed: ${e.message}")
                 _state.update { it.copy(statusMessage = e.message) }
             }
         }
@@ -1226,13 +1270,22 @@ class MixerSessionController(
     }
 
     fun stopRecording(restoreRouting: Boolean = true) {
+        if (TransportTraceHub.trace(mixerId) == null) {
+            TransportTraceHub.start(mixerId, "RECORD-STOP")
+        }
+        TransportTraceHub.mark(mixerId, "stopRecording restoreRouting=$restoreRouting")
         scope.launch {
             val session = captureMutex.withLock {
+                TransportTraceHub.mark(mixerId, "captureMutex acquired for stop")
                 withContext(Dispatchers.IO) {
+                    TransportTraceHub.mark(mixerId, "captureEngine.stopRecording")
                     val ended = captureEngine.stopRecording()
+                    TransportTraceHub.mark(mixerId, "captureEngine.stopRecording done path=${ended?.filePath}")
                     if (restoreRouting) {
+                        TransportTraceHub.mark(mixerId, "routing.afterRecordRestore")
                         quiesceUsbBeforeRoutingLocked()
                         RoutingAutomationBridge.hooks?.afterRecordRestore()
+                        TransportTraceHub.mark(mixerId, "routing.afterRecordRestore done")
                     }
                     ended
                 }
@@ -1240,6 +1293,7 @@ class MixerSessionController(
             settings.clearActiveRecording()
             releaseRecordingWakeLock()
             lastMediaProgressSec = -1
+            TransportTraceHub.mark(mixerId, "UI isRecording=false")
             _state.update {
                 it.copy(
                     isRecording = false,
@@ -1252,9 +1306,11 @@ class MixerSessionController(
             resetRecordViewAfterStop()
             syncVuMeterCapture()
             if (_state.value.appMode.isPlaybackMode) {
+                TransportTraceHub.mark(mixerId, "refreshSoundcheckLibrary (playback mode)")
                 refreshSoundcheckLibrary()
             }
             AudioSessionBridge.rebuildNotification()
+            TransportTraceHub.mark(mixerId, "stopRecording session layer done")
         }
     }
 
@@ -1661,11 +1717,19 @@ class MixerSessionController(
     private fun loadSoundcheckWaveformsBackground(dir: File, metadata: SessionMetadata) {
         soundcheckWaveformJob?.cancel()
         soundcheckWaveformJob = scope.launch {
+            TransportTraceHub.mark(mixerId, "waveforms load begin ${dir.name}")
+            val wfT0 = System.nanoTime()
             val cached = withContext(Dispatchers.IO) { SessionWaveformCache.load(dir, metadata) }
             if (cached != null) {
                 applySoundcheckWaveformOverview(cached, loading = false)
+                TransportTraceHub.mark(
+                    mixerId,
+                    "waveforms cache hit ${cached.peaksByChannel.size} ch " +
+                        "${(System.nanoTime() - wfT0) / 1_000_000}ms",
+                )
                 return@launch
             }
+            TransportTraceHub.mark(mixerId, "waveforms extracting ${metadata.channels.size} ch")
             val overview = withContext(Dispatchers.IO) {
                 SessionWaveformExtractor.extractIncremental(dir, metadata) { chIndex, peaks, completed, total ->
                     launch(Dispatchers.Main.immediate) {
@@ -1675,6 +1739,11 @@ class MixerSessionController(
             }
             withContext(Dispatchers.IO) { SessionWaveformCache.save(dir, overview) }
             applySoundcheckWaveformOverview(overview, loading = false)
+            TransportTraceHub.mark(
+                mixerId,
+                "waveforms extract done ${overview.peaksByChannel.size} ch " +
+                    "${(System.nanoTime() - wfT0) / 1_000_000}ms",
+            )
         }
     }
 
@@ -1935,6 +2004,7 @@ class MixerSessionController(
         descriptor: UsbAudioDeviceDescriptor,
         probe: FullUsbProbeResult,
     ): Result<Int> {
+        val capT0 = System.nanoTime()
         updateWaveformConfig()
         if (VirtualMixer.isDemoMixer(profile ?: return Result.failure(IllegalStateException("No mixer profile")))) {
             if (captureEngine.isCaptureActive && captureEngine.isSyntheticCapture()) {
@@ -1976,6 +2046,11 @@ class MixerSessionController(
             ?: return Result.failure(IllegalStateException("No capture route"))
         return captureEngine.startCapture(scope, route, device).map {
             syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
+            TransportTraceHub.mark(
+                mixerId,
+                "ensureCapture native ${(System.nanoTime() - capT0) / 1_000_000}ms " +
+                    "ch=${captureEngine.activeChannelCount}",
+            )
             captureEngine.activeChannelCount
         }
     }
@@ -2049,6 +2124,7 @@ class MixerSessionController(
         probe: FullUsbProbeResult,
         channelCount: Int,
     ): Result<org.openmultitrack.usb.PlaybackRoute> {
+        val playT0 = System.nanoTime()
         val prof = profile
         if (prof != null && VirtualMixer.isDemoMixer(prof)) {
             val rate = probe.input?.sampleRate?.takeIf { it > 0 } ?: 48_000
@@ -2068,6 +2144,10 @@ class MixerSessionController(
         }
         val route = AudioEngineRouter.resolvePlaybackRoute(probe, usbStream, channelCount)
             ?: return Result.failure(IllegalStateException("No playback route"))
+        TransportTraceHub.mark(
+            mixerId,
+            "ensurePlayback ${(System.nanoTime() - playT0) / 1_000_000}ms backend=${route.backend}",
+        )
         return Result.success(route)
     }
 

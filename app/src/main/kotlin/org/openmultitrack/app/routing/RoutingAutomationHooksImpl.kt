@@ -8,6 +8,7 @@ import org.openmultitrack.app.data.MixerRoutingAutomationConfig
 import org.openmultitrack.app.data.RoutingAutomationLevel
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.mixer.MixerProfile
+import org.openmultitrack.app.audio.TransportTraceHub
 import org.openmultitrack.app.util.AppLogBuffer
 import java.util.concurrent.atomic.AtomicReference
 
@@ -52,13 +53,22 @@ class RoutingAutomationHooksImpl(
         restoreDeferred.getAndSet(null)?.complete(false)
     }
 
-    override suspend fun beforeRecordApply(profile: MixerProfile, armedChannels: Set<Int>): RoutingHookResult =
-        beforeApply(profile, RoutingOverrideKind.RECORD, armedChannels)
+    override suspend fun beforeRecordApply(profile: MixerProfile, armedChannels: Set<Int>): RoutingHookResult {
+        TransportTraceHub.mark(profile.id, "routing hooks beforeRecordApply (${armedChannels.size} ch)")
+        return beforeApply(profile, RoutingOverrideKind.RECORD, armedChannels).also { result ->
+            TransportTraceHub.mark(profile.id, "routing hooks beforeRecordApply → $result")
+        }
+    }
 
     override suspend fun beforeSoundcheckApply(
         profile: MixerProfile,
         trackChannels: Set<Int>,
-    ): RoutingHookResult = beforeCapture(profile, RoutingOverrideKind.SOUNDCHECK, trackChannels)
+    ): RoutingHookResult {
+        TransportTraceHub.mark(profile.id, "routing hooks beforeSoundcheckCapture (${trackChannels.size} ch)")
+        return beforeCapture(profile, RoutingOverrideKind.SOUNDCHECK, trackChannels).also { result ->
+            TransportTraceHub.mark(profile.id, "routing hooks beforeSoundcheckCapture → $result")
+        }
+    }
 
     private suspend fun beforeCapture(
         profile: MixerProfile,
@@ -161,9 +171,19 @@ class RoutingAutomationHooksImpl(
         return RoutingHookResult.Failed(message)
     }
 
-    override suspend fun afterRecordRestore() = afterRestore(RoutingOverrideKind.RECORD)
+    override suspend fun afterRecordRestore() {
+        val mixerId = coordinator.loadPending()?.mixerId
+        if (mixerId != null) {
+            TransportTraceHub.mark(mixerId, "routing hooks afterRecordRestore begin")
+        }
+        afterRestore(RoutingOverrideKind.RECORD)
+        if (mixerId != null) {
+            TransportTraceHub.mark(mixerId, "routing hooks afterRecordRestore end")
+        }
+    }
 
     override suspend fun afterSoundcheckPlaybackStarted(profile: MixerProfile): RoutingHookResult {
+        TransportTraceHub.mark(profile.id, "routing hooks afterSoundcheckPlaybackStarted")
         val pending = coordinator.loadPending() ?: return RoutingHookResult.Skipped
         if (pending.kind != RoutingOverrideKind.SOUNDCHECK || pending.mixerId != profile.id) {
             return RoutingHookResult.Skipped
@@ -171,9 +191,13 @@ class RoutingAutomationHooksImpl(
         val config = settings.routingAutomationForMixer(profile.id)
         if (config.level == RoutingAutomationLevel.OFF) return RoutingHookResult.Skipped
         return when (val outcome = coordinator.reapplyOverrideOnly(config, pending)) {
-            is RoutingApplyOutcome.Applied -> RoutingHookResult.Proceed
+            is RoutingApplyOutcome.Applied -> RoutingHookResult.Proceed.also {
+                TransportTraceHub.mark(profile.id, "routing hooks afterSoundcheckPlaybackStarted → Proceed")
+            }
             is RoutingApplyOutcome.Failed ->
-                routingFailed(profile, RoutingOverrideKind.SOUNDCHECK, outcome.message)
+                routingFailed(profile, RoutingOverrideKind.SOUNDCHECK, outcome.message).also {
+                    TransportTraceHub.mark(profile.id, "routing hooks afterSoundcheckPlaybackStarted → Failed")
+                }
             is RoutingApplyOutcome.SkippedUnreachable ->
                 routingFailed(profile, RoutingOverrideKind.SOUNDCHECK, "Mixer not reachable on LAN — check Wi‑Fi and OSC IP")
             else -> RoutingHookResult.Skipped
