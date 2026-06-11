@@ -973,6 +973,18 @@ class MainViewModel(
         sessionClient.withManager { it.getOrCreate(mixerId).setSoundcheckView(viewStartSec, viewWindowSec) }
     }
 
+    fun panRecordView(mixerId: String, deltaSec: Float) {
+        sessionClient.withManager { it.getOrCreate(mixerId).panRecordView(deltaSec) }
+    }
+
+    fun zoomRecordView(mixerId: String, scale: Float, focalSec: Float) {
+        sessionClient.withManager { it.getOrCreate(mixerId).zoomRecordView(scale, focalSec) }
+    }
+
+    fun setRecordView(mixerId: String, viewStartSec: Float, viewWindowSec: Float) {
+        sessionClient.withManager { it.getOrCreate(mixerId).setRecordView(viewStartSec, viewWindowSec) }
+    }
+
     fun setSoundcheckLoopRegion(mixerId: String, startSec: Float, endSec: Float) {
         if (isRemoteClient()) {
             remoteCommand(

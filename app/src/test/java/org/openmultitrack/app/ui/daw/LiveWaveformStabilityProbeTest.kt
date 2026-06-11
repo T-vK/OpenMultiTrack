@@ -43,10 +43,12 @@ class LiveWaveformStabilityProbeTest {
                 val scaled = scalePeaksForLiveDisplay(peaks, normalized, ceiling)
                 val columns = liveWaveformColumnsForDisplay(
                     peaks = scaled,
-                    windowSec = windowSec,
+                    bufferWindowSec = windowSec,
                     elapsedSec = displayElapsed,
                     peaksPerSec = peaksPerSec,
                     pixelCount = pixelCount,
+                    viewStartSec = if (displayElapsed > windowSec) displayElapsed - windowSec else 0f,
+                    viewWindowSec = windowSec,
                 )
                 add(ProbeFrame(checkIndex, displayElapsed, peakCount, columns))
             }

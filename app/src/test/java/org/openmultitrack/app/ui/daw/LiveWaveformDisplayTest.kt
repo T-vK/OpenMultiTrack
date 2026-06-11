@@ -14,35 +14,45 @@ class LiveWaveformDisplayTest {
         pixelCount: Int = pixels,
     ): FloatArray = liveWaveformColumnsForDisplay(
         peaks = peaks,
-        windowSec = windowSec,
+        bufferWindowSec = windowSec,
         elapsedSec = elapsedSec,
         peaksPerSec = peaksPerSec,
         pixelCount = pixelCount,
+        viewStartSec = if (elapsedSec > windowSec) elapsedSec - windowSec else 0f,
+        viewWindowSec = windowSec,
     )
+
+    private fun filledCount(cols: FloatArray, elapsedSec: Float): Int =
+        liveWaveformFilledPixelCount(
+            cols,
+            elapsedSec = elapsedSec,
+            viewStartSec = if (elapsedSec > windowSec) elapsedSec - windowSec else 0f,
+            viewWindowSec = windowSec,
+        )
 
     @Test
     fun growthPhase_fillsFromLeft_oneSecondIsOneFifteenth() {
         val cols = columns(peaks = FloatArray(30) { 0.8f }, elapsedSec = 1f)
-        assertThat(liveWaveformFilledPixelCount(cols, elapsedSec = 1f, windowSec = windowSec)).isEqualTo(6)
+        assertThat(filledCount(cols, elapsedSec = 1f)).isEqualTo(6)
     }
 
     @Test
     fun growthPhase_twoSecondsIsTwoFifteenths() {
         val cols = columns(peaks = FloatArray(60) { 0.5f }, elapsedSec = 2f)
-        assertThat(liveWaveformFilledPixelCount(cols, elapsedSec = 2f, windowSec = windowSec)).isEqualTo(12)
+        assertThat(filledCount(cols, elapsedSec = 2f)).isEqualTo(12)
     }
 
     @Test
     fun growthPhase_fullWindowUsesEntireContainer() {
         val cols = columns(peaks = FloatArray(450) { 0.7f }, elapsedSec = 15f)
-        assertThat(liveWaveformFilledPixelCount(cols, elapsedSec = 15f, windowSec = windowSec))
+        assertThat(filledCount(cols, elapsedSec = 15f))
             .isEqualTo(pixels)
     }
 
     @Test
     fun growthPhase_clampsBloatedPeakBufferToElapsedTime() {
         val cols = columns(peaks = FloatArray(300) { 0.5f }, elapsedSec = 2f)
-        assertThat(liveWaveformFilledPixelCount(cols, elapsedSec = 2f, windowSec = windowSec)).isEqualTo(12)
+        assertThat(filledCount(cols, elapsedSec = 2f)).isEqualTo(12)
     }
 
     @Test
@@ -85,7 +95,7 @@ class LiveWaveformDisplayTest {
     @Test
     fun growthPhase_peakBufferLag_leavesTrailingColumnsEmpty() {
         val cols = columns(peaks = FloatArray(60) { 0.5f }, elapsedSec = 3f)
-        assertThat(liveWaveformFilledPixelCount(cols, elapsedSec = 3f, windowSec = windowSec)).isEqualTo(12)
+        assertThat(filledCount(cols, elapsedSec = 3f)).isEqualTo(12)
     }
 
     @Test
@@ -101,7 +111,7 @@ class LiveWaveformDisplayTest {
     @Test
     fun rollingPhase_usesFullWidth() {
         val cols = columns(peaks = FloatArray(600) { 0.6f }, elapsedSec = 30f)
-        assertThat(liveWaveformFilledPixelCount(cols, elapsedSec = 30f, windowSec = windowSec))
+        assertThat(filledCount(cols, elapsedSec = 30f))
             .isEqualTo(pixels)
     }
 }

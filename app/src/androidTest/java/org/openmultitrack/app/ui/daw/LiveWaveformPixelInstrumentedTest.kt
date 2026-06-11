@@ -76,7 +76,7 @@ class LiveWaveformPixelInstrumentedTest {
                 val liveNormalized by normalizedState
                 LiveWaveformStrip(
                     peaks = livePeaks,
-                    windowSec = windowSec,
+                    bufferWindowSec = windowSec,
                     elapsedSec = liveElapsed,
                     peaksPerSec = peaksPerSec,
                     color = color,
@@ -158,7 +158,7 @@ class LiveWaveformPixelInstrumentedTest {
         )
         assertRecordingStabilityProbe(
             frames = frames,
-            windowSec = windowSec,
+            bufferWindowSec = windowSec,
             requireDenseInterior = false,
         )
     }
@@ -173,7 +173,7 @@ class LiveWaveformPixelInstrumentedTest {
         )
         assertRecordingStabilityProbe(
             frames = frames,
-            windowSec = windowSec,
+            bufferWindowSec = windowSec,
             requireDenseInterior = false,
         )
     }
@@ -213,7 +213,7 @@ class LiveWaveformPixelInstrumentedTest {
         }
         assertRecordingStabilityProbe(
             frames = frames,
-            windowSec = windowSec,
+            bufferWindowSec = windowSec,
             requireDenseInterior = false,
         )
     }

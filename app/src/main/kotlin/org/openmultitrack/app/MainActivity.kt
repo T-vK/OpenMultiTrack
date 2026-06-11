@@ -200,6 +200,8 @@ class MainActivity : ComponentActivity() {
                         onPanSoundcheckView = viewModel::panSoundcheckView,
                         onZoomSoundcheckView = viewModel::zoomSoundcheckView,
                         onSetSoundcheckView = viewModel::setSoundcheckView,
+                        onZoomRecordView = viewModel::zoomRecordView,
+                        onSetRecordView = viewModel::setRecordView,
                         onSetSoundcheckLoopRegion = viewModel::setSoundcheckLoopRegion,
                         onToggleSoundcheckLoop = viewModel::toggleSoundcheckLoop,
                         onSetSoundcheckLoopIn = viewModel::setSoundcheckLoopIn,

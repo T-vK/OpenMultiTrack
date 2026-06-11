@@ -33,42 +33,39 @@ internal data class LiveRecordingTimelineView(
 )
 
 /**
- * Maps [elapsedSec] and the rolling [windowSec] into ruler/waveform viewport coordinates.
- * Growth: 0…window with playhead advancing. Rolling: sliding window ending at playhead.
+ * Maps recording time into ruler/waveform viewport coordinates.
+ * [viewStartSec] and [viewWindowSec] come from the interactive viewport (pinch/pan).
  */
 internal fun liveRecordingTimelineView(
     elapsedSec: Float,
-    windowSec: Float,
+    viewStartSec: Float,
+    viewWindowSec: Float,
 ): LiveRecordingTimelineView {
-    if (windowSec <= 0f) {
+    if (viewWindowSec <= 0f) {
         return LiveRecordingTimelineView(0f, 1f, 0f, 0f)
     }
     val elapsed = elapsedSec.coerceAtLeast(0f)
-    val rolling = elapsed > windowSec
-    return if (rolling) {
-        LiveRecordingTimelineView(
-            viewStartSec = elapsed - windowSec,
-            viewWindowSec = windowSec,
-            contentDurationSec = windowSec,
-            playheadSec = elapsed,
-        )
-    } else {
-        LiveRecordingTimelineView(
-            viewStartSec = 0f,
-            viewWindowSec = windowSec,
-            contentDurationSec = elapsed,
-            playheadSec = elapsed,
-        )
-    }
+    val start = viewStartSec.coerceAtLeast(0f)
+    val window = viewWindowSec
+    val visibleEnd = start + window
+    val contentEnd = minOf(elapsed, visibleEnd)
+    val contentDuration = (contentEnd - start).coerceAtLeast(0f)
+    return LiveRecordingTimelineView(
+        viewStartSec = start,
+        viewWindowSec = window,
+        contentDurationSec = contentDuration,
+        playheadSec = elapsed,
+    )
 }
 
 @Composable
 internal fun RecordingTimelineRuler(
     elapsedSec: Float,
-    windowSec: Float,
+    viewStartSec: Float,
+    viewWindowSec: Float,
     modifier: Modifier = Modifier,
 ) {
-    val timeline = liveRecordingTimelineView(elapsedSec, windowSec)
+    val timeline = liveRecordingTimelineView(elapsedSec, viewStartSec, viewWindowSec)
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(3.dp))
@@ -93,60 +90,72 @@ internal fun RecordingTimelineRuler(
 }
 
 /**
- * Maps live recording peaks into per-pixel columns with fixed timeline anchors.
- *
- * Growth (elapsed ≤ window): columns fill left-to-right — 1 s of a 15 s window
- * occupies the left 1/15 of the strip. [elapsedSec] controls how far right
- * drawing may extend so a bloated peak buffer cannot zoom the view.
- *
- * Rolling (elapsed > window): the last [windowSec] of audio spans all columns.
- *
- * Column [i] always represents the same moment in the rolling window, so existing
- * columns never shift horizontally as new peaks arrive.
+ * Maps live recording peaks into per-pixel columns for the visible viewport.
+ * Column [i] represents a fixed slice of [viewWindowSec] starting at [viewStartSec].
  */
 internal fun liveWaveformColumnsForDisplay(
     peaks: FloatArray,
-    windowSec: Float,
+    bufferWindowSec: Float,
     elapsedSec: Float,
     peaksPerSec: Int,
     pixelCount: Int,
+    viewStartSec: Float = 0f,
+    viewWindowSec: Float = bufferWindowSec,
 ): FloatArray {
-    if (pixelCount <= 0 || windowSec <= 0f || peaksPerSec <= 0) return FloatArray(0)
+    if (pixelCount <= 0 || viewWindowSec <= 0f || peaksPerSec <= 0) return FloatArray(0)
     val out = FloatArray(pixelCount)
     if (peaks.isEmpty() || elapsedSec <= 0f) return out
 
-    val capacitySlots = (windowSec * peaksPerSec).toInt().coerceAtLeast(1)
-    val elapsedSlots = (elapsedSec * peaksPerSec).toInt().coerceAtLeast(0)
-    if (elapsedSlots <= 0) return out
-
-    val rolling = elapsedSec > windowSec
-    val samples = if (rolling) {
-        val count = minOf(peaks.size, capacitySlots)
-        peaks.copyOfRange(peaks.size - count, peaks.size)
-    } else {
-        val activeSlots = elapsedSlots.coerceAtMost(capacitySlots)
-        val count = minOf(peaks.size, activeSlots)
-        peaks.copyOfRange(0, count)
-    }
-
     for (px in 0 until pixelCount) {
-        val slotLo = px * capacitySlots / pixelCount
-        val slotHi = (px + 1) * capacitySlots / pixelCount
-        var maxPeak = 0f
-        for (slot in slotLo until slotHi) {
-            if (!rolling && slot >= elapsedSlots) continue
-            val sampleIdx = if (rolling) {
-                slot - (capacitySlots - samples.size)
-            } else {
-                slot
-            }
-            if (sampleIdx in samples.indices) {
-                maxPeak = maxOf(maxPeak, samples[sampleIdx])
-            }
-        }
-        out[px] = maxPeak
+        val tLo = viewStartSec + px * viewWindowSec / pixelCount
+        val tHi = viewStartSec + (px + 1) * viewWindowSec / pixelCount
+        out[px] = peakInTimeRange(
+            peaks = peaks,
+            elapsedSec = elapsedSec,
+            bufferWindowSec = bufferWindowSec,
+            peaksPerSec = peaksPerSec,
+            startSec = tLo,
+            endSec = tHi,
+        )
     }
     return out
+}
+
+internal fun peakInTimeRange(
+    peaks: FloatArray,
+    elapsedSec: Float,
+    bufferWindowSec: Float,
+    peaksPerSec: Int,
+    startSec: Float,
+    endSec: Float,
+): Float {
+    if (peaks.isEmpty() || elapsedSec <= 0f || endSec <= startSec) return 0f
+    val step = 1f / peaksPerSec
+    var t = startSec
+    var maxPeak = 0f
+    while (t < endSec) {
+        maxPeak = maxOf(maxPeak, peakAtElapsedTime(peaks, elapsedSec, bufferWindowSec, peaksPerSec, t))
+        t += step
+    }
+    return maxPeak
+}
+
+internal fun peakAtElapsedTime(
+    peaks: FloatArray,
+    elapsedSec: Float,
+    bufferWindowSec: Float,
+    peaksPerSec: Int,
+    timeSec: Float,
+): Float {
+    if (timeSec < 0f || timeSec > elapsedSec || peaks.isEmpty()) return 0f
+    val rolling = elapsedSec > bufferWindowSec
+    val index = if (rolling) {
+        val oldestSec = elapsedSec - peaks.size.toFloat() / peaksPerSec
+        ((timeSec - oldestSec) * peaksPerSec).toInt()
+    } else {
+        (timeSec * peaksPerSec).toInt()
+    }
+    return peaks.getOrNull(index) ?: 0f
 }
 
 /** Horizontal anchor for timeline slot [slot] across [widthPx] (stable as recording grows). */
@@ -161,16 +170,16 @@ internal fun liveWaveformRightmostFilledColumn(columns: FloatArray): Int =
 internal fun liveWaveformFilledPixelCount(
     columns: FloatArray,
     elapsedSec: Float,
-    windowSec: Float,
+    viewStartSec: Float,
+    viewWindowSec: Float,
 ): Int {
-    if (columns.isEmpty() || windowSec <= 0f || elapsedSec <= 0f) return 0
-    val rolling = elapsedSec > windowSec
-    val contentEnd = if (rolling) {
-        columns.size
-    } else {
-        (columns.size * (elapsedSec / windowSec)).toInt().coerceIn(0, columns.size)
-    }
-    return columns.take(contentEnd).count { it > 0.01f }
+    if (columns.isEmpty() || viewWindowSec <= 0f || elapsedSec <= 0f) return 0
+    val contentEndSec = minOf(elapsedSec, viewStartSec + viewWindowSec)
+    if (contentEndSec <= viewStartSec) return 0
+    val contentEndPx = (
+        columns.size * ((contentEndSec - viewStartSec) / viewWindowSec)
+        ).toInt().coerceIn(0, columns.size)
+    return columns.take(contentEndPx).count { it > 0.01f }
 }
 
 /**
@@ -188,7 +197,15 @@ internal fun findGrowthColumnStabilityViolation(
     for (frame in 1..frames) {
         val peaks = FloatArray(frame) { 0.6f }
         val elapsed = frame / peaksPerSec.toFloat()
-        val columns = liveWaveformColumnsForDisplay(peaks, windowSec, elapsed, peaksPerSec, pixelCount)
+        val columns = liveWaveformColumnsForDisplay(
+            peaks = peaks,
+            bufferWindowSec = windowSec,
+            elapsedSec = elapsed,
+            peaksPerSec = peaksPerSec,
+            pixelCount = pixelCount,
+            viewStartSec = if (elapsed > windowSec) elapsed - windowSec else 0f,
+            viewWindowSec = windowSec,
+        )
         val rightmost = liveWaveformRightmostFilledColumn(columns)
         if (prevRightmost >= 0) {
             for (px in 0..prevRightmost.coerceAtMost(rightmost)) {
@@ -209,8 +226,6 @@ internal fun findGrowthColumnStabilityViolation(
  */
 internal fun DrawScope.drawLiveWaveformColumns(
     columns: FloatArray,
-    elapsedSec: Float,
-    windowSec: Float,
     color: Color,
 ) {
     if (columns.isEmpty()) return
@@ -218,19 +233,15 @@ internal fun DrawScope.drawLiveWaveformColumns(
     if (fullW <= 0f) return
     val h = size.height
     if (h <= 0f) return
-    val rolling = elapsedSec > windowSec
-    val contentW = if (rolling) fullW else fullW * (elapsedSec / windowSec).coerceIn(0f, 1f)
-    if (contentW <= 0f) return
     val colWidth = fullW / columns.size
     val stroke = colWidth.coerceAtLeast(1f)
     val mid = h / 2f
     val minBar = h * 0.06f
     val barColor = color.copy(alpha = 0.9f)
     for (i in columns.indices) {
-        val x = (i + 0.5f) * colWidth
-        if (x > contentW) break
         val amp = columns[i].coerceIn(0f, 1f)
         if (amp <= 0f) continue
+        val x = (i + 0.5f) * colWidth
         val barH = maxOf(amp * h * 0.9f, minBar)
         drawLine(
             color = barColor,
@@ -244,15 +255,17 @@ internal fun DrawScope.drawLiveWaveformColumns(
 @Composable
 internal fun LiveWaveformStrip(
     peaks: FloatArray,
-    windowSec: Float,
+    bufferWindowSec: Float,
     elapsedSec: Float,
     peaksPerSec: Int,
     color: Color,
     normalized: Boolean,
+    viewStartSec: Float = 0f,
+    viewWindowSec: Float = bufferWindowSec,
     modifier: Modifier = Modifier,
     testTag: String = LIVE_WAVEFORM_TEST_TAG,
 ) {
-    val hasDrawableData = peaks.isNotEmpty() && windowSec > 0f && elapsedSec > 0f
+    val hasDrawableData = peaks.isNotEmpty() && viewWindowSec > 0f && elapsedSec > 0f
     // Freeze the scale divisor on the first meaningful peak so a later loud transient
     // cannot rescale already-drawn timeline columns to invisibility.
     var livePeakCeiling by remember { mutableFloatStateOf(0f) }
@@ -270,25 +283,22 @@ internal fun LiveWaveformStrip(
         Canvas(Modifier.fillMaxSize()) {
             val h = size.height
             if (h <= 0f) return@Canvas
-            val capacitySlots = (windowSec * peaksPerSec).toInt().coerceAtLeast(1)
+            val capacitySlots = (bufferWindowSec * peaksPerSec).toInt().coerceAtLeast(1)
             // Never use more columns than timeline slots — otherwise integer slot binning
             // leaves most columns empty on wide strips (sparse vertical ticks / background gaps).
             val pixelCount = size.width.toInt().coerceIn(1, capacitySlots)
             val scaledPeaks = scalePeaksForLiveDisplay(peaks, normalized, livePeakCeiling)
             val columns = liveWaveformColumnsForDisplay(
                 peaks = scaledPeaks,
-                windowSec = windowSec,
+                bufferWindowSec = bufferWindowSec,
                 elapsedSec = elapsedSec,
                 peaksPerSec = peaksPerSec,
                 pixelCount = pixelCount,
+                viewStartSec = viewStartSec,
+                viewWindowSec = viewWindowSec,
             )
             if (columns.all { it <= 0f }) return@Canvas
-            drawLiveWaveformColumns(
-                columns = columns,
-                elapsedSec = elapsedSec,
-                windowSec = windowSec,
-                color = color,
-            )
+            drawLiveWaveformColumns(columns = columns, color = color)
         }
     }
 }

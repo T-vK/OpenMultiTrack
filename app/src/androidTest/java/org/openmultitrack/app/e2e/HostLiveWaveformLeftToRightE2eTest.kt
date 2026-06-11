@@ -78,7 +78,7 @@ class HostLiveWaveformLeftToRightE2eTest {
 
                 assertRecordingStabilityProbe(
                     frames = frames,
-                    windowSec = windowSec,
+                    bufferWindowSec = windowSec,
                     checksPerSec = 1,
                     probeSec = probeSeconds,
                     requireDenseInterior = false,

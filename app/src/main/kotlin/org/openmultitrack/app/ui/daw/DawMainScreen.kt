@@ -22,7 +22,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.runtime.rememberUpdatedState
+import kotlin.math.max
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -60,6 +65,7 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -147,6 +153,8 @@ fun DawMainScreen(
     onPanSoundcheckView: (String, Float) -> Unit,
     onZoomSoundcheckView: (String, Float, Float) -> Unit,
     onSetSoundcheckView: (String, Float, Float) -> Unit,
+    onZoomRecordView: (String, Float, Float) -> Unit = { _, _, _ -> },
+    onSetRecordView: (String, Float, Float) -> Unit = { _, _, _ -> },
     onSetSoundcheckLoopRegion: (String, Float, Float) -> Unit,
     onToggleSoundcheckLoop: (String) -> Unit,
     onSetSoundcheckLoopIn: (String) -> Unit,
@@ -558,6 +566,9 @@ fun DawMainScreen(
                                 normalized = recordWaveformNormalized,
                                 waveformPeaks = s.waveformPeaks,
                                 recordWaveformWindowSec = recordWaveformWindowSec,
+                                recordViewStartSec = s.recordViewStartSec,
+                                recordViewWindowSec = s.recordViewWindowSec
+                                    .takeIf { it > 0f } ?: recordWaveformWindowSec,
                                 recordElapsedSec = s.recordElapsedSec,
                                 captureMeterLevels = s.captureMeterLevels,
                                 isMonitoring = s.isMonitoring,
@@ -581,6 +592,12 @@ fun DawMainScreen(
                                 },
                                 onSetHiddenSoundcheck = { ch, hidden ->
                                     onSetChannelHidden(s.mixerId, ch, true, hidden)
+                                },
+                                onZoomRecordView = { scale, focal ->
+                                    onZoomRecordView(s.mixerId, scale, focal)
+                                },
+                                onSetRecordView = { start, window ->
+                                    onSetRecordView(s.mixerId, start, window)
                                 },
                             )
                         }
@@ -787,6 +804,8 @@ private fun ChannelStripList(
     normalized: Boolean,
     waveformPeaks: Map<Int, LiveWaveformSnapshot>,
     recordWaveformWindowSec: Float,
+    recordViewStartSec: Float,
+    recordViewWindowSec: Float,
     recordElapsedSec: Float,
     captureMeterLevels: Map<Int, Float>,
     isMonitoring: Boolean,
@@ -807,6 +826,8 @@ private fun ChannelStripList(
     onUpdateOutput: (Int, Int) -> Unit,
     onSetHiddenRecord: (Int, Boolean) -> Unit,
     onSetHiddenSoundcheck: (Int, Boolean) -> Unit,
+    onZoomRecordView: (Float, Float) -> Unit = { _, _ -> },
+    onSetRecordView: (Float, Float) -> Unit = { _, _ -> },
 ) {
     var overlayIndex by remember { mutableStateOf<Int?>(null) }
     val visibleStrips = strips.filter { !routing.isHidden(it.index, soundcheckMode) }
@@ -817,7 +838,7 @@ private fun ChannelStripList(
     ) {
         val count = visibleStrips.size.coerceAtLeast(1)
         val gap = 2.dp
-        val showTimeline = showWaveforms && isRecording
+        val showTimeline = showWaveforms
         val rulerAndGap = if (showTimeline) WaveformTimeRulerHeight + gap else 0.dp
         val totalGaps = gap * (count - 1).coerceAtLeast(0)
         val naturalHeight = (maxHeight - rulerAndGap - totalGaps) / count
@@ -836,6 +857,56 @@ private fun ChannelStripList(
             hideMonitor,
             hideSolo,
         )
+        val waveformAreaStart = innerPad + labelColumnWidth + labelGap
+        var waveformWidthPx by remember { mutableFloatStateOf(0f) }
+        var gestureActive by remember { mutableStateOf(false) }
+        var gestureViewStart by remember(recordViewStartSec, recordViewWindowSec) {
+            mutableFloatStateOf(recordViewStartSec)
+        }
+        var gestureViewWindow by remember(recordViewStartSec, recordViewWindowSec) {
+            mutableFloatStateOf(recordViewWindowSec)
+        }
+        val elapsedState by rememberUpdatedState(recordElapsedSec)
+        val bufferWindowState by rememberUpdatedState(recordWaveformWindowSec)
+        val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+            if (waveformWidthPx <= 0f) return@rememberTransformableState
+            gestureActive = true
+            if (zoomChange != 1f) {
+                val focalSec = gestureViewStart + gestureViewWindow / 2f
+                val bufferMax = bufferWindowState.coerceIn(5f, 120f)
+                val newWindow = (gestureViewWindow / zoomChange).coerceIn(5f, bufferMax)
+                gestureViewWindow = newWindow
+                val maxStart = max(0f, elapsedState - newWindow)
+                gestureViewStart = (focalSec - newWindow / 2f).coerceIn(0f, maxStart)
+            }
+            if (panChange.x != 0f) {
+                val deltaSec = -(panChange.x / waveformWidthPx) * gestureViewWindow
+                val maxStart = max(0f, elapsedState - gestureViewWindow)
+                gestureViewStart = (gestureViewStart + deltaSec).coerceIn(0f, maxStart)
+            }
+        }
+        LaunchedEffect(transformState.isTransformInProgress) {
+            if (!transformState.isTransformInProgress && gestureActive) {
+                gestureActive = false
+                onSetRecordView(gestureViewStart, gestureViewWindow)
+            }
+        }
+        LaunchedEffect(recordViewStartSec, recordViewWindowSec) {
+            if (!gestureActive && !transformState.isTransformInProgress) {
+                gestureViewStart = recordViewStartSec
+                gestureViewWindow = recordViewWindowSec
+            }
+        }
+        val displayViewStart = if (gestureActive || transformState.isTransformInProgress) {
+            gestureViewStart
+        } else {
+            recordViewStartSec
+        }
+        val displayViewWindow = if (gestureActive || transformState.isTransformInProgress) {
+            gestureViewWindow
+        } else {
+            recordViewWindowSec
+        }
 
         if (visibleStrips.isEmpty()) {
             Column(
@@ -864,7 +935,8 @@ private fun ChannelStripList(
         } else {
             Modifier.fillMaxSize()
         }
-        Column(modifier = listModifier) {
+        Box(modifier = listModifier) {
+        Column(Modifier.fillMaxSize()) {
             if (showTimeline) {
                 Row(
                     modifier = Modifier
@@ -876,13 +948,19 @@ private fun ChannelStripList(
                 ) {
                     Spacer(Modifier.width(labelColumnWidth))
                     Spacer(Modifier.width(StripVuMeterWidth))
-                    RecordingTimelineRuler(
-                        elapsedSec = recordElapsedSec,
-                        windowSec = recordWaveformWindowSec,
+                    Box(
                         modifier = Modifier
                             .weight(1f)
-                            .height(WaveformTimeRulerHeight),
-                    )
+                            .height(WaveformTimeRulerHeight)
+                            .onSizeChanged { waveformWidthPx = it.width.toFloat() },
+                    ) {
+                        RecordingTimelineRuler(
+                            elapsedSec = recordElapsedSec,
+                            viewStartSec = displayViewStart,
+                            viewWindowSec = displayViewWindow,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
                 Spacer(Modifier.height(gap))
             }
@@ -900,6 +978,8 @@ private fun ChannelStripList(
                     labelColumnWidth = labelColumnWidth,
                     waveform = if (showWaveforms && isRecording) waveformPeaks[strip.index] else null,
                     recordWaveformWindowSec = recordWaveformWindowSec,
+                    recordViewStartSec = displayViewStart,
+                    recordViewWindowSec = displayViewWindow,
                     recordElapsedSec = recordElapsedSec,
                     captureMeterLevel = if (showVuMeters && (isMonitoring || isRecording || isVuMetering)) {
                         captureMeterLevels[strip.index] ?: 0f
@@ -917,6 +997,18 @@ private fun ChannelStripList(
                     onOpenControls = { overlayIndex = strip.index },
                 )
             }
+            }
+        }
+            if (showWaveforms) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .padding(start = waveformAreaStart, end = innerPad)
+                        .transformable(
+                            state = transformState,
+                            lockRotationOnZoomPan = true,
+                        ),
+                )
             }
         }
     }
@@ -953,6 +1045,8 @@ private fun ChannelStripRow(
     labelColumnWidth: Dp,
     waveform: LiveWaveformSnapshot?,
     recordWaveformWindowSec: Float,
+    recordViewStartSec: Float,
+    recordViewWindowSec: Float,
     recordElapsedSec: Float,
     captureMeterLevel: Float?,
     normalized: Boolean,
@@ -997,11 +1091,13 @@ private fun ChannelStripRow(
         if (showWaveform) {
             LiveWaveformStrip(
                 peaks = waveform?.peaks ?: floatArrayOf(),
-                windowSec = recordWaveformWindowSec,
+                bufferWindowSec = recordWaveformWindowSec,
                 elapsedSec = recordElapsedSec,
                 peaksPerSec = RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC,
                 color = Color(strip.colorArgb),
                 normalized = normalized,
+                viewStartSec = recordViewStartSec,
+                viewWindowSec = recordViewWindowSec,
                 modifier = Modifier
                     .weight(1f)
                     .height(colorBarHeight)

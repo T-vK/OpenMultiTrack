@@ -89,6 +89,9 @@ data class MixerSessionUiState(
     val captureChannelCount: Int = 0,
     val playbackChannelCount: Int = 0,
     val recordElapsedSec: Float = 0f,
+    val recordViewStartSec: Float = 0f,
+    val recordViewWindowSec: Float = 0f,
+    val recordViewFollowPlayhead: Boolean = true,
     val storageFreeBytes: Long = 0L,
     val storageRecordEstimateSec: Float = 0f,
     val waveformPeaks: Map<Int, LiveWaveformSnapshot> = emptyMap(),
@@ -754,9 +757,65 @@ class MixerSessionController(
     }
 
     fun updateWaveformConfig() {
+        val window = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
         captureEngine.setWaveformConfig(
-            windowSec = settings.recordWaveformWindowSec,
-            peaksPerSecond = CaptureSessionEngine.peaksPerSecondForWindow(settings.recordWaveformWindowSec),
+            windowSec = window,
+            peaksPerSecond = CaptureSessionEngine.peaksPerSecondForWindow(window),
+        )
+        _state.update { s ->
+            if (s.recordViewFollowPlayhead) {
+                s.copy(recordViewWindowSec = window)
+            } else {
+                s
+            }
+        }
+    }
+
+    fun setRecordView(viewStartSec: Float, viewWindowSec: Float) {
+        val bufferMax = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
+        val window = viewWindowSec.coerceIn(5f, bufferMax)
+        val elapsed = _state.value.recordElapsedSec
+        val maxStart = max(0f, elapsed - window)
+        _state.update {
+            it.copy(
+                recordViewStartSec = viewStartSec.coerceIn(0f, maxStart),
+                recordViewWindowSec = window,
+                recordViewFollowPlayhead = false,
+            )
+        }
+    }
+
+    fun panRecordView(deltaSec: Float) {
+        val s = _state.value
+        setRecordView(s.recordViewStartSec + deltaSec, effectiveRecordViewWindow(s))
+    }
+
+    fun zoomRecordView(scale: Float, focalSec: Float) {
+        val s = _state.value
+        val bufferMax = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
+        val currentWindow = effectiveRecordViewWindow(s)
+        val newWindow = (currentWindow / scale).coerceIn(5f, bufferMax)
+        val rel = if (currentWindow > 0f) {
+            (focalSec - s.recordViewStartSec) / currentWindow
+        } else {
+            0.5f
+        }
+        val newStart = focalSec - rel * newWindow
+        setRecordView(newStart, newWindow)
+    }
+
+    private fun effectiveRecordViewWindow(s: MixerSessionUiState): Float {
+        val buffer = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
+        return s.recordViewWindowSec.takeIf { it > 0f }?.coerceIn(5f, buffer) ?: buffer
+    }
+
+    private fun withRecordViewFollowPlayhead(s: MixerSessionUiState, elapsedSec: Float): MixerSessionUiState {
+        if (!s.recordViewFollowPlayhead) return s
+        val window = effectiveRecordViewWindow(s)
+        val start = if (elapsedSec > window) elapsedSec - window else 0f
+        return s.copy(
+            recordViewStartSec = start,
+            recordViewWindowSec = window,
         )
     }
 
@@ -831,6 +890,7 @@ class MixerSessionController(
                     settings.setActiveRecording(prof.id, sessionDir.absolutePath)
                 }
                 acquireRecordingWakeLock()
+                val bufferWindow = settings.recordWaveformWindowSec.coerceIn(5f, 120f)
                 _state.update {
                     it.copy(
                         isRecording = true,
@@ -838,6 +898,9 @@ class MixerSessionController(
                         statusMessage = "Recording…",
                         warningMessage = null,
                         lastRecordingPath = sessionDir?.absolutePath ?: it.lastRecordingPath,
+                        recordViewStartSec = 0f,
+                        recordViewWindowSec = bufferWindow,
+                        recordViewFollowPlayhead = true,
                     )
                 }
                 startCaptureUiUpdates()
@@ -1373,11 +1436,14 @@ class MixerSessionController(
                     }
                     _state.update { s ->
                         when {
-                            s.isRecording -> s.copy(
-                                waveformPeaks = captureEngine.waveformSnapshots(normalize = false),
-                                recordElapsedSec = captureEngine.recordElapsedSec(),
-                                captureMeterLevels = levels,
-                            )
+                            s.isRecording -> {
+                                val elapsed = captureEngine.recordElapsedSec()
+                                withRecordViewFollowPlayhead(s, elapsed).copy(
+                                    waveformPeaks = captureEngine.waveformSnapshots(normalize = false),
+                                    recordElapsedSec = elapsed,
+                                    captureMeterLevels = levels,
+                                )
+                            }
                             s.isMonitoring -> s.copy(
                                 captureMeterLevels = levels,
                                 waveformPeaks = emptyMap(),

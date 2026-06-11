@@ -6,7 +6,7 @@ import org.junit.Test
 class LiveRecordingTimelineTest {
     @Test
     fun growthPhase_startsAtZero() {
-        val view = liveRecordingTimelineView(elapsedSec = 5f, windowSec = 15f)
+        val view = liveRecordingTimelineView(elapsedSec = 5f, viewStartSec = 0f, viewWindowSec = 15f)
         assertThat(view.viewStartSec).isEqualTo(0f)
         assertThat(view.viewWindowSec).isEqualTo(15f)
         assertThat(view.contentDurationSec).isEqualTo(5f)
@@ -15,7 +15,7 @@ class LiveRecordingTimelineTest {
 
     @Test
     fun rollingPhase_slidesWindowWithPlayhead() {
-        val view = liveRecordingTimelineView(elapsedSec = 42f, windowSec = 15f)
+        val view = liveRecordingTimelineView(elapsedSec = 42f, viewStartSec = 27f, viewWindowSec = 15f)
         assertThat(view.viewStartSec).isEqualTo(27f)
         assertThat(view.viewWindowSec).isEqualTo(15f)
         assertThat(view.contentDurationSec).isEqualTo(15f)
