@@ -1359,9 +1359,7 @@ class MixerSessionController(
                     _state.update { s ->
                         when {
                             s.isRecording -> s.copy(
-                                waveformPeaks = captureEngine.waveformSnapshots(
-                                    normalize = settings.recordWaveformNormalized,
-                                ),
+                                waveformPeaks = captureEngine.waveformSnapshots(normalize = false),
                                 recordElapsedSec = captureEngine.recordElapsedSec(),
                                 captureMeterLevels = levels,
                             )

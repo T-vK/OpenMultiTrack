@@ -66,36 +66,15 @@ internal fun liveWaveformSlotAnchorX(slot: Int, capacitySlots: Int, widthPx: Flo
 
 internal fun liveWaveformFilledSlotCount(
     slotPeaks: FloatArray,
+    peakCount: Int,
     elapsedSec: Float,
     peaksPerSec: Int,
     rolling: Boolean,
 ): Int {
-    if (slotPeaks.isEmpty()) return 0
-    if (rolling) {
-        val last = slotPeaks.indexOfLast { it > 0f }
-        return if (last < 0) 0 else last + 1
-    }
-    return (elapsedSec * peaksPerSec).toInt().coerceIn(0, slotPeaks.size)
-}
-
-/**
- * Fills quiet gaps between peak samples so the live trace reads as a continuous waveform.
- * Timeline slot positions stay fixed; only amplitudes between attacks are bridged.
- */
-internal fun liveWaveformDisplayEnvelope(
-    slotPeaks: FloatArray,
-    filledCount: Int,
-    decay: Float = 0.72f,
-): FloatArray {
-    if (filledCount <= 0) return slotPeaks
-    val out = slotPeaks.copyOf()
-    var carry = 0f
-    for (i in 0 until filledCount.coerceAtMost(out.size)) {
-        val raw = out[i]
-        carry = maxOf(raw, carry * decay)
-        out[i] = carry
-    }
-    return out
+    if (slotPeaks.isEmpty() || peakCount <= 0) return 0
+    if (rolling) return minOf(peakCount, slotPeaks.size)
+    val elapsedCap = (elapsedSec * peaksPerSec).toInt().coerceIn(0, slotPeaks.size)
+    return minOf(peakCount, elapsedCap)
 }
 
 /**
@@ -174,15 +153,15 @@ internal fun DrawScope.drawLiveWaveformTimeline(
     val contentW = drawWidthPx * (elapsedSec / windowSec).coerceIn(0f, 1f)
     if (contentW <= 0f) return
     val slotWidth = drawWidthPx / capacity
-    val stroke = slotWidth.coerceIn(1.5f, 6f)
+    val stroke = (slotWidth * 0.75f).coerceIn(1f, 4f)
     val minBar = h * 0.06f
     val barColor = color.copy(alpha = 0.9f)
     for (slot in 0 until filledCount) {
         val x = (slot + 0.5f) * slotWidth
         if (x > contentW) break
         val amp = slotPeaks[slot].coerceIn(0f, 1f)
-        if (amp <= 0.001f) continue
-        val barH = maxOf(amp * h * 0.9f, minBar)
+        val barH = maxOf(amp * h * 0.9f, if (amp > 0.02f) minBar else 0f)
+        if (barH <= 0f) continue
         drawLine(
             color = barColor,
             start = Offset(x, mid - barH / 2f),
@@ -236,13 +215,13 @@ internal fun LiveWaveformStrip(
             val rolling = elapsedSec > windowSec
             val filledCount = liveWaveformFilledSlotCount(
                 slotPeaks = slotPeaks,
+                peakCount = scaledPeaks.size,
                 elapsedSec = elapsedSec,
                 peaksPerSec = peaksPerSec,
                 rolling = rolling,
             )
-            val displayPeaks = liveWaveformDisplayEnvelope(slotPeaks, filledCount)
             drawLiveWaveformTimeline(
-                slotPeaks = displayPeaks,
+                slotPeaks = slotPeaks,
                 capacity = capacity,
                 filledCount = filledCount,
                 elapsedSec = elapsedSec,

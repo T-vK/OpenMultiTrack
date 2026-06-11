@@ -111,22 +111,24 @@ class LiveWaveformDisplayTest {
     }
 
     @Test
-    fun displayEnvelope_bridgesQuietGapsBetweenPeaks() {
-        val slots = FloatArray(30)
-        slots[0] = 0.9f
-        slots[15] = 0.9f
-        slots[29] = 0.9f
-        val display = liveWaveformDisplayEnvelope(slots, filledCount = 30)
-        assertThat(display[1]).isGreaterThan(0.1f)
-        assertThat(display[7]).isGreaterThan(0.05f)
-        assertThat(display[16]).isGreaterThan(0.3f)
-    }
-
-    @Test
-    fun growthPhase_filledSlotCountTracksElapsedTime() {
+    fun growthPhase_filledSlotCountUsesPeakBufferNotElapsedAhead() {
         val slots = FloatArray(450)
         val count = liveWaveformFilledSlotCount(
             slotPeaks = slots,
+            peakCount = 60,
+            elapsedSec = 3f,
+            peaksPerSec = 30,
+            rolling = false,
+        )
+        assertThat(count).isEqualTo(60)
+    }
+
+    @Test
+    fun growthPhase_filledSlotCountTracksElapsedWhenPeaksCatchUp() {
+        val slots = FloatArray(450)
+        val count = liveWaveformFilledSlotCount(
+            slotPeaks = slots,
+            peakCount = 120,
             elapsedSec = 3f,
             peaksPerSec = 30,
             rolling = false,
