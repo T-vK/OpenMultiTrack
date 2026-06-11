@@ -3,6 +3,7 @@ package org.openmultitrack.app.service
 import android.content.Context
 import java.io.File
 import org.openmultitrack.app.R
+import org.openmultitrack.domain.session.isPlaybackMode
 /** Shared copy for the playback notification and its [android.support.v4.media.session.MediaSessionCompat]. */
 object PlaybackNotificationContent {
     data class Display(
