@@ -28,7 +28,10 @@ class HostLiveWaveformLeftToRightE2eTest {
     val usbDeviceRule = UsbDeviceRule()
 
     @get:Rule(order = 1)
-    val appRule = E2eAppRule(enableWaveformsAndVu = true)
+    val appRule = E2eAppRule()
+
+    @get:Rule(order = 2)
+    val waveformDisplayRule = E2eWaveformDisplayRule { appRule.appContext }
 
     private var harness: E2eMixerHarness? = null
     private val peaksPerSec = RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC

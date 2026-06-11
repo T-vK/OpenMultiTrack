@@ -48,12 +48,6 @@ class E2eRemoteHarness(
         configureTestPin()
     }
 
-    fun ensureHostDisplayDefaults() {
-        val settings = AppSettingsStore(context)
-        settings.showWaveforms = true
-        settings.showVuMeters = true
-    }
-
     suspend fun startHost(): String {
         configureTestPin()
         remote.applyRole(RemoteRole.HOST)

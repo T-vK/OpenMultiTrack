@@ -11,10 +11,11 @@ import org.openmultitrack.domain.remote.RemoteRole
 
 /**
  * Launches [MainActivity] in the app process and supports relaunch after force-stop.
+ *
+ * Does not change waveform, VU, normalization, or other user display prefs — use
+ * [E2eWaveformDisplayRule] in tests that need waveforms enabled temporarily.
  */
-class E2eAppRule(
-    private val enableWaveformsAndVu: Boolean = false,
-) : ExternalResource(), E2eActivityHost {
+class E2eAppRule : ExternalResource(), E2eActivityHost {
     private var scenario: ActivityScenario<MainActivity>? = null
     override lateinit var appContext: Context
         private set
@@ -31,11 +32,7 @@ class E2eAppRule(
     fun launchFresh() {
         scenario?.close()
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val settings = AppSettingsStore(context)
-        settings.remoteRole = RemoteRole.OFF
-        settings.showVuMeters = enableWaveformsAndVu
-        settings.showWaveforms = enableWaveformsAndVu
-        settings.recordWaveformNormalized = enableWaveformsAndVu
+        AppSettingsStore(context).remoteRole = RemoteRole.OFF
         MixerDeviceStore(context).listMixers()
             .filter { it.vendorId != E2eConfig.XR18_VENDOR_ID || it.productId != E2eConfig.XR18_PRODUCT_ID }
             .forEach { MixerDeviceStore(context).removeMixer(it.id) }

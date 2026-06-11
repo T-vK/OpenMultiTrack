@@ -17,8 +17,11 @@ import org.openmultitrack.domain.remote.RemoteConnectionState
  */
 @RunWith(AndroidJUnit4::class)
 class RemoteE2eClientTest {
-    @get:Rule
-    val appRule = E2eAppRule(enableWaveformsAndVu = true)
+    @get:Rule(order = 0)
+    val appRule = E2eAppRule()
+
+    @get:Rule(order = 1)
+    val waveformDisplayRule = E2eWaveformDisplayRule { appRule.appContext }
 
     private var harness: E2eRemoteHarness? = null
 

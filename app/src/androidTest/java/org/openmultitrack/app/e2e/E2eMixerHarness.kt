@@ -95,8 +95,6 @@ class E2eMixerHarness(
         manager: MultiMixerSessionManager,
         preserveActiveRecording: Boolean = false,
     ) {
-        val settings = AppSettingsStore(context)
-        settings.showVuMeters = false
         manager.mixerIds().forEach { id ->
             val ctrl = manager.getOrCreate(id)
             runCatching { ctrl.stopMonitoring() }
