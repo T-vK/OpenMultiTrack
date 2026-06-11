@@ -6,6 +6,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.Dp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -21,6 +23,74 @@ import androidx.compose.ui.unit.dp
 
 /** Tag for instrumented pixel-stability tests. */
 const val LIVE_WAVEFORM_TEST_TAG = "live_waveform_strip"
+
+/** Timeline scale for the live recording waveform window. */
+internal data class LiveRecordingTimelineView(
+    val viewStartSec: Float,
+    val viewWindowSec: Float,
+    val contentDurationSec: Float,
+    val playheadSec: Float,
+)
+
+/**
+ * Maps [elapsedSec] and the rolling [windowSec] into ruler/waveform viewport coordinates.
+ * Growth: 0…window with playhead advancing. Rolling: sliding window ending at playhead.
+ */
+internal fun liveRecordingTimelineView(
+    elapsedSec: Float,
+    windowSec: Float,
+): LiveRecordingTimelineView {
+    if (windowSec <= 0f) {
+        return LiveRecordingTimelineView(0f, 1f, 0f, 0f)
+    }
+    val elapsed = elapsedSec.coerceAtLeast(0f)
+    val rolling = elapsed > windowSec
+    return if (rolling) {
+        LiveRecordingTimelineView(
+            viewStartSec = elapsed - windowSec,
+            viewWindowSec = windowSec,
+            contentDurationSec = windowSec,
+            playheadSec = elapsed,
+        )
+    } else {
+        LiveRecordingTimelineView(
+            viewStartSec = 0f,
+            viewWindowSec = windowSec,
+            contentDurationSec = elapsed,
+            playheadSec = elapsed,
+        )
+    }
+}
+
+@Composable
+internal fun RecordingTimelineRuler(
+    elapsedSec: Float,
+    windowSec: Float,
+    modifier: Modifier = Modifier,
+) {
+    val timeline = liveRecordingTimelineView(elapsedSec, windowSec)
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(3.dp))
+            .background(MaterialTheme.colorScheme.surface),
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            drawTimeRuler(
+                viewStartSec = timeline.viewStartSec,
+                viewWindowSec = timeline.viewWindowSec,
+                contentDurationSec = timeline.contentDurationSec,
+            )
+            drawPlayheadAndLoop(
+                viewStartSec = timeline.viewStartSec,
+                viewWindowSec = timeline.viewWindowSec,
+                playheadSec = timeline.playheadSec,
+                loopStartSec = null,
+                loopEndSec = null,
+                loopEnabled = false,
+            )
+        }
+    }
+}
 
 /**
  * Maps live recording peaks into per-pixel columns with fixed timeline anchors.
