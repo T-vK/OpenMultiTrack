@@ -14,8 +14,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -63,6 +63,40 @@ internal fun liveWaveformSlotPeaks(
 /** Horizontal anchor for slot [slot] across [widthPx] (stable as new peaks append). */
 internal fun liveWaveformSlotAnchorX(slot: Int, capacitySlots: Int, widthPx: Float): Float =
     slot.toFloat() / capacitySlots.toFloat() * widthPx
+
+internal fun liveWaveformFilledSlotCount(
+    slotPeaks: FloatArray,
+    elapsedSec: Float,
+    peaksPerSec: Int,
+    rolling: Boolean,
+): Int {
+    if (slotPeaks.isEmpty()) return 0
+    if (rolling) {
+        val last = slotPeaks.indexOfLast { it > 0f }
+        return if (last < 0) 0 else last + 1
+    }
+    return (elapsedSec * peaksPerSec).toInt().coerceIn(0, slotPeaks.size)
+}
+
+/**
+ * Fills quiet gaps between peak samples so the live trace reads as a continuous waveform.
+ * Timeline slot positions stay fixed; only amplitudes between attacks are bridged.
+ */
+internal fun liveWaveformDisplayEnvelope(
+    slotPeaks: FloatArray,
+    filledCount: Int,
+    decay: Float = 0.72f,
+): FloatArray {
+    if (filledCount <= 0) return slotPeaks
+    val out = slotPeaks.copyOf()
+    var carry = 0f
+    for (i in 0 until filledCount.coerceAtMost(out.size)) {
+        val raw = out[i]
+        carry = maxOf(raw, carry * decay)
+        out[i] = carry
+    }
+    return out
+}
 
 /**
  * Bins [slotPeaks] into [pixelCount] columns. Slot i always maps to the same column index
@@ -124,6 +158,40 @@ internal fun findGrowthColumnStabilityViolation(
     return -1
 }
 
+internal fun DrawScope.drawLiveWaveformTimeline(
+    slotPeaks: FloatArray,
+    capacity: Int,
+    filledCount: Int,
+    elapsedSec: Float,
+    windowSec: Float,
+    color: Color,
+    drawWidthPx: Float,
+) {
+    if (filledCount <= 0 || capacity <= 0 || drawWidthPx <= 0f) return
+    val h = size.height
+    if (h <= 0f) return
+    val mid = h / 2f
+    val contentW = drawWidthPx * (elapsedSec / windowSec).coerceIn(0f, 1f)
+    if (contentW <= 0f) return
+    val slotWidth = drawWidthPx / capacity
+    val stroke = slotWidth.coerceIn(1.5f, 6f)
+    val minBar = h * 0.06f
+    val barColor = color.copy(alpha = 0.9f)
+    for (slot in 0 until filledCount) {
+        val x = (slot + 0.5f) * slotWidth
+        if (x > contentW) break
+        val amp = slotPeaks[slot].coerceIn(0f, 1f)
+        if (amp <= 0.001f) continue
+        val barH = maxOf(amp * h * 0.9f, minBar)
+        drawLine(
+            color = barColor,
+            start = Offset(x, mid - barH / 2f),
+            end = Offset(x, mid + barH / 2f),
+            strokeWidth = stroke,
+        )
+    }
+}
+
 @Composable
 internal fun LiveWaveformStrip(
     peaks: FloatArray,
@@ -165,25 +233,23 @@ internal fun LiveWaveformStrip(
             )
             if (slotPeaks.isEmpty()) return@Canvas
             val capacity = slotPeaks.size
-            val slotWidth = drawWidth / capacity
-            val mid = h / 2f
-            val minBar = h * 0.06f
-            val barColor = color.copy(alpha = 0.9f)
-            val inset = slotWidth * 0.04f
-            slotPeaks.forEachIndexed { slot, peak ->
-                val amp = peak.coerceIn(0f, 1f)
-                if (amp <= 0.01f) return@forEachIndexed
-                val barH = maxOf(amp * h * 0.9f, minBar)
-                val x = liveWaveformSlotAnchorX(slot, capacity, drawWidth)
-                drawRect(
-                    color = barColor,
-                    topLeft = Offset(x + inset, mid - barH / 2f),
-                    size = Size(
-                        (slotWidth - inset * 2f).coerceAtLeast(1f),
-                        barH,
-                    ),
-                )
-            }
+            val rolling = elapsedSec > windowSec
+            val filledCount = liveWaveformFilledSlotCount(
+                slotPeaks = slotPeaks,
+                elapsedSec = elapsedSec,
+                peaksPerSec = peaksPerSec,
+                rolling = rolling,
+            )
+            val displayPeaks = liveWaveformDisplayEnvelope(slotPeaks, filledCount)
+            drawLiveWaveformTimeline(
+                slotPeaks = displayPeaks,
+                capacity = capacity,
+                filledCount = filledCount,
+                elapsedSec = elapsedSec,
+                windowSec = windowSec,
+                color = color,
+                drawWidthPx = drawWidth,
+            )
         }
     }
 }
