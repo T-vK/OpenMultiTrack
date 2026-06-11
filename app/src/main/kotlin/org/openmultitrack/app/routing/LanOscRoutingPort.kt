@@ -1,0 +1,39 @@
+package org.openmultitrack.app.routing
+
+import android.content.Context
+import org.openmultitrack.mixer.behringer.MixerRoutingPort
+import org.openmultitrack.mixer.behringer.XAirChannelInputState
+
+/** Runs [MixerRoutingPort] OSC I/O on Android LAN (multicast lock + bound socket). */
+class LanOscRoutingPort(
+    private val context: Context,
+    private val delegate: MixerRoutingPort,
+) : MixerRoutingPort {
+    override suspend fun probe(timeoutMs: Long): Boolean =
+        OscLanSession.withMulticastLock(context) { delegate.probe(timeoutMs) }
+
+    override suspend fun readChannelInput(channelIndex: Int): XAirChannelInputState? =
+        OscLanSession.withMulticastLock(context) { delegate.readChannelInput(channelIndex) }
+
+    override suspend fun readAllChannelInputs(): Map<Int, XAirChannelInputState> =
+        OscLanSession.withMulticastLock(context) { delegate.readAllChannelInputs() }
+
+    override suspend fun writeChannelInput(channelIndex: Int, state: XAirChannelInputState): Boolean =
+        OscLanSession.withMulticastLock(context) { delegate.writeChannelInput(channelIndex, state) }
+
+    override suspend fun applyRecordRouting(channelIndices: Iterable<Int>): Boolean =
+        OscLanSession.withMulticastLock(context) { delegate.applyRecordRouting(channelIndices) }
+
+    override suspend fun applySoundcheckRouting(channelIndices: Iterable<Int>): Boolean =
+        OscLanSession.withMulticastLock(context) { delegate.applySoundcheckRouting(channelIndices) }
+
+    override suspend fun restoreChannels(
+        baseline: Map<Int, XAirChannelInputState>,
+        channels: Set<Int>,
+    ): Boolean = OscLanSession.withMulticastLock(context) {
+        delegate.restoreChannels(baseline, channels)
+    }
+
+    override suspend fun loadSnapshot(slot: Int): Boolean =
+        OscLanSession.withMulticastLock(context) { delegate.loadSnapshot(slot) }
+}

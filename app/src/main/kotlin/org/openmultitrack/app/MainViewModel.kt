@@ -64,10 +64,13 @@ import org.openmultitrack.app.data.MixerRoutingAutomationConfig
 import org.openmultitrack.app.data.RoutingAutomationLevel
 import org.openmultitrack.app.routing.PendingRoutingRestore
 import org.openmultitrack.app.routing.RoutingApplyPromptState
+import org.openmultitrack.app.routing.LanOscRoutingPort
+import org.openmultitrack.app.routing.OscLanSession
 import org.openmultitrack.app.routing.RoutingAutomationBridge
 import org.openmultitrack.app.routing.RoutingAutomationHooksImpl
 import org.openmultitrack.app.routing.RoutingBaselineStore
 import org.openmultitrack.app.routing.RoutingOverrideCoordinator
+import org.openmultitrack.mixer.behringer.Xr18RoutingService
 import org.openmultitrack.app.routing.RoutingRestorePromptState
 import org.openmultitrack.mixer.behringer.XAirChannelInputState
 import org.openmultitrack.usb.UsbAudioEnumerator
@@ -197,7 +200,18 @@ class MainViewModel(
 ) : ViewModel() {
     private val storageResolver = RecordingStorageResolver(appContext, settings)
     private val routingBaselineStore = RoutingBaselineStore(appContext)
-    private val routingCoordinator = RoutingOverrideCoordinator(routingBaselineStore)
+    private val routingCoordinator = RoutingOverrideCoordinator(
+        routingBaselineStore,
+        routingFactory = { host ->
+            LanOscRoutingPort(
+                appContext,
+                Xr18RoutingService(
+                    host,
+                    socketSetup = OscLanSession.wifiSocketSetup(appContext),
+                ),
+            )
+        },
+    )
     private val routingHooks = RoutingAutomationHooksImpl(
         settings = settings,
         coordinator = routingCoordinator,

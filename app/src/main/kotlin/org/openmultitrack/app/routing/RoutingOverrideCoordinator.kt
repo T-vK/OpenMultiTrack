@@ -46,11 +46,16 @@ class RoutingOverrideCoordinator(
     ): RoutingApplyOutcome {
         if (!isEligible(profile, config)) return RoutingApplyOutcome.Disabled
         if (channelIndices.isEmpty()) return RoutingApplyOutcome.SkippedEmptyScope
+        val host = profile.oscHost ?: return RoutingApplyOutcome.SkippedNoOsc
+        val port = routingFactory(host)
+        if (!port.probe(timeoutMs = 2500)) return RoutingApplyOutcome.SkippedUnreachable
         if (config.level == RoutingAutomationLevel.PROMPT) {
             return RoutingApplyOutcome.ReadyToApply(channelIndices.size, kind)
         }
-        return applyInternal(profile, config, kind, channelIndices)
+        return applyInternal(profile, config, kind, channelIndices, port = port)
     }
+
+    fun createRoutingPort(host: String): MixerRoutingPort = routingFactory(host)
 
     suspend fun applyConfirmed(
         profile: MixerProfile,
@@ -58,7 +63,11 @@ class RoutingOverrideCoordinator(
         kind: RoutingOverrideKind,
         channelIndices: Set<Int>,
         recordingActive: Boolean = false,
-    ): RoutingApplyOutcome = applyInternal(profile, config, kind, channelIndices, recordingActive)
+    ): RoutingApplyOutcome {
+        val host = profile.oscHost ?: return RoutingApplyOutcome.SkippedNoOsc
+        val port = routingFactory(host)
+        return applyInternal(profile, config, kind, channelIndices, recordingActive, port)
+    }
 
     suspend fun peekRestore(
         config: MixerRoutingAutomationConfig,
@@ -104,12 +113,13 @@ class RoutingOverrideCoordinator(
         kind: RoutingOverrideKind,
         channelIndices: Set<Int>,
         recordingActive: Boolean = false,
+        port: MixerRoutingPort? = null,
     ): RoutingApplyOutcome {
         val host = profile.oscHost ?: return RoutingApplyOutcome.SkippedNoOsc
-        val port = routingFactory(host)
-        if (!port.probe()) return RoutingApplyOutcome.SkippedUnreachable
+        val routing = port ?: routingFactory(host)
+        if (!routing.probe(timeoutMs = 2500)) return RoutingApplyOutcome.SkippedUnreachable
 
-        val all = port.readAllChannelInputs()
+        val all = routing.readAllChannelInputs()
         val baseline = channelIndices.associateWith { ch -> all[ch] }.filterValues { it != null }
             .mapValues { it.value!! }
         if (baseline.isEmpty()) return RoutingApplyOutcome.Failed("Could not read mixer routing")
@@ -142,8 +152,8 @@ class RoutingOverrideCoordinator(
 
         val ok = when (config.method) {
             RoutingAutomationMethod.PER_CHANNEL -> when (kind) {
-                RoutingOverrideKind.RECORD -> port.applyRecordRouting(channelIndices)
-                RoutingOverrideKind.SOUNDCHECK -> port.applySoundcheckRouting(channelIndices)
+                RoutingOverrideKind.RECORD -> routing.applyRecordRouting(channelIndices)
+                RoutingOverrideKind.SOUNDCHECK -> routing.applySoundcheckRouting(channelIndices)
             }
             RoutingAutomationMethod.SNAPSHOT_SLOT -> {
                 val slot = pending.snapshotSlot
@@ -151,12 +161,14 @@ class RoutingOverrideCoordinator(
                     baselineStore.clear()
                     return RoutingApplyOutcome.Failed("Snapshot slot not configured")
                 }
-                port.loadSnapshot(slot)
+                routing.loadSnapshot(slot)
             }
         }
         if (!ok) {
             baselineStore.clear()
-            return RoutingApplyOutcome.Failed("Mixer routing apply failed")
+            return RoutingApplyOutcome.Failed(
+                "Mixer routing apply failed — XR18 did not confirm channel input change (check Wi‑Fi / OSC IP)",
+            )
         }
         return RoutingApplyOutcome.Applied(transactionId)
     }

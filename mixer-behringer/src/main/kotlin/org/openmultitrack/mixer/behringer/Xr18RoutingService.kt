@@ -12,11 +12,15 @@ import kotlinx.coroutines.withContext
 class Xr18RoutingService(
     private val host: String,
     private val port: Int = Xr18Mixer.DEFAULT_PORT,
-    private val clientFactory: (String, Int) -> OscUdpClient = { h, p -> OscUdpClient(h, p) },
+    private val socketSetup: OscSocketSetup? = null,
+    private val clientFactory: (String, Int, OscSocketSetup?) -> OscUdpClient = { h, p, setup ->
+        OscUdpClient(h, p, setup)
+    },
 ) : MixerRoutingPort {
+    private fun openClient(): OscUdpClient = clientFactory(host, port, socketSetup)
     override suspend fun probe(timeoutMs: Long): Boolean = withContext(Dispatchers.IO) {
         runCatching {
-            clientFactory(host, port).use { client ->
+            openClient().use { client ->
                 val replies = client.query(listOf(OscPath.info()), timeoutMs = timeoutMs, rounds = 2)
                 replies.isNotEmpty()
             }
@@ -26,7 +30,7 @@ class Xr18RoutingService(
     override suspend fun readChannelInput(channelIndex: Int): XAirChannelInputState? =
         withContext(Dispatchers.IO) {
             runCatching {
-                clientFactory(host, port).use { client ->
+                openClient().use { client ->
                     val replies = client.query(
                         Xr18RoutingOsc.channelQueryPaths(channelIndex),
                         timeoutMs = 1500,
@@ -40,7 +44,7 @@ class Xr18RoutingService(
     override suspend fun readAllChannelInputs(): Map<Int, XAirChannelInputState> =
         withContext(Dispatchers.IO) {
             runCatching {
-                clientFactory(host, port).use { client ->
+                openClient().use { client ->
                     val replies = client.query(Xr18RoutingOsc.queryPaths(), timeoutMs = 4000, rounds = 5)
                     Xr18RoutingOsc.parseAllChannels(replies)
                 }
@@ -62,7 +66,7 @@ class Xr18RoutingService(
     ): Boolean = withContext(Dispatchers.IO) {
         if (channels.isEmpty()) return@withContext true
         runCatching {
-            clientFactory(host, port).use { client ->
+            openClient().use { client ->
                 for (ch in channels.sorted()) {
                     val target = baseline[ch] ?: continue
                     if (!Xr18RoutingOsc.writeAndVerify(client, ch, target)) {
@@ -77,7 +81,7 @@ class Xr18RoutingService(
     override suspend fun loadSnapshot(slot: Int): Boolean = withContext(Dispatchers.IO) {
         if (slot !in 1..64) return@withContext false
         runCatching {
-            clientFactory(host, port).use { client ->
+            openClient().use { client ->
                 client.send(OscPath.xremote())
                 client.send(OscPath.snapLoad(), listOf(OscArgument.IntArg(slot)))
                 Thread.sleep(300)
@@ -93,7 +97,7 @@ class Xr18RoutingService(
         val ch = channelIndex + 1
         if (ch !in 1..XAirInputSourceCatalog.CHANNEL_COUNT) return@withContext false
         runCatching {
-            clientFactory(host, port).use { client ->
+            openClient().use { client ->
                 Xr18RoutingOsc.writeAndVerify(client, channelIndex, state)
             }
         }.getOrDefault(false)
@@ -106,7 +110,7 @@ class Xr18RoutingService(
         val indices = channelIndices.toList()
         if (indices.isEmpty()) return@withContext true
         runCatching {
-            clientFactory(host, port).use { client ->
+            openClient().use { client ->
                 client.send(OscPath.xremote())
                 for (ch in indices.sorted()) {
                     val target = targetFor(ch)

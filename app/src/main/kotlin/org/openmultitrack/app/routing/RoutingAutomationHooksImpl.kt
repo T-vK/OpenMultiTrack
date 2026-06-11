@@ -8,7 +8,7 @@ import org.openmultitrack.app.data.MixerRoutingAutomationConfig
 import org.openmultitrack.app.data.RoutingAutomationLevel
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.mixer.MixerProfile
-import org.openmultitrack.mixer.behringer.Xr18RoutingService
+import org.openmultitrack.app.util.AppLogBuffer
 import java.util.concurrent.atomic.AtomicReference
 
 data class RoutingApplyPromptState(
@@ -69,11 +69,13 @@ class RoutingAutomationHooksImpl(
         when (val peek = coordinator.peekApply(profile, config, kind, channels)) {
             is RoutingApplyOutcome.Disabled,
             is RoutingApplyOutcome.SkippedNoOsc,
-            is RoutingApplyOutcome.SkippedUnreachable,
-            is RoutingApplyOutcome.SkippedEmptyScope,
             -> return RoutingHookResult.Skipped
+            is RoutingApplyOutcome.SkippedUnreachable ->
+                return routingFailed(profile, kind, "Mixer not reachable on LAN — check Wi‑Fi and OSC IP")
+            is RoutingApplyOutcome.SkippedEmptyScope ->
+                return routingFailed(profile, kind, "No channels in scope for routing automation")
             is RoutingApplyOutcome.Applied -> return RoutingHookResult.Proceed
-            is RoutingApplyOutcome.Failed -> return RoutingHookResult.Failed(peek.message)
+            is RoutingApplyOutcome.Failed -> return routingFailed(profile, kind, peek.message)
             is RoutingApplyOutcome.ReadyToApply -> {
                 val deferred = CompletableDeferred<Boolean>()
                 applyDeferred.set(deferred)
@@ -86,7 +88,7 @@ class RoutingAutomationHooksImpl(
             }
         }
         return when (
-            coordinator.applyConfirmed(
+            val outcome = coordinator.applyConfirmed(
                 profile,
                 config,
                 kind,
@@ -95,11 +97,23 @@ class RoutingAutomationHooksImpl(
             )
         ) {
             is RoutingApplyOutcome.Applied -> RoutingHookResult.Proceed
-            is RoutingApplyOutcome.Failed -> RoutingHookResult.Failed(
-                "Mixer routing could not be verified — ${kind.name.lowercase()} cancelled",
-            )
-            else -> RoutingHookResult.Failed("Mixer routing apply failed")
+            is RoutingApplyOutcome.Failed -> routingFailed(profile, kind, outcome.message)
+            is RoutingApplyOutcome.SkippedUnreachable ->
+                routingFailed(profile, kind, "Mixer not reachable on LAN — check Wi‑Fi and OSC IP")
+            is RoutingApplyOutcome.SkippedEmptyScope ->
+                routingFailed(profile, kind, "No channels in scope for routing automation")
+            else -> routingFailed(profile, kind, "Routing apply failed ($outcome)")
         }
+    }
+
+    private fun routingFailed(
+        profile: MixerProfile,
+        kind: RoutingOverrideKind,
+        message: String,
+    ): RoutingHookResult.Failed {
+        OmtLog.w("RoutingHooks", "$kind apply failed for ${profile.displayName}: $message")
+        AppLogBuffer.append("W", "Routing", "$kind: $message")
+        return RoutingHookResult.Failed(message)
     }
 
     override suspend fun afterRecordRestore() = afterRestore(RoutingOverrideKind.RECORD)
@@ -111,7 +125,7 @@ class RoutingAutomationHooksImpl(
         if (pending.kind != expectedKind) return
         val config = settings.routingAutomationForMixer(pending.mixerId)
         if (config.level == RoutingAutomationLevel.OFF) return
-        val port = Xr18RoutingService(pending.oscHost)
+        val port = coordinator.createRoutingPort(pending.oscHost)
         when (val peek = coordinator.peekRestore(config, pending, port)) {
             RoutingRestoreOutcome.NothingPending,
             RoutingRestoreOutcome.SkippedUnreachable,
