@@ -4,6 +4,9 @@ package org.openmultitrack.mixer.behringer
 internal object Xr18RoutingOsc {
     private const val SETTLE_MS = 100L
 
+    /** Optional diagnostic hook (set from app layer). */
+    var onVerifyFailure: ((channelIndex: Int, target: XAirChannelInputState, live: XAirChannelInputState?, replies: Map<String, List<Any>>) -> Unit)? = null
+
     fun parseAllChannels(replies: Map<String, List<Any>>): Map<Int, XAirChannelInputState> =
         buildMap {
             for (ch in 1..XAirInputSourceCatalog.CHANNEL_COUNT) {
@@ -15,9 +18,9 @@ internal object Xr18RoutingOsc {
 
     fun queryPaths(): List<String> = buildList {
         for (ch in 1..XAirInputSourceCatalog.CHANNEL_COUNT) {
+            add(OscPath.channelPreampRtnSw(ch))
             add(OscPath.channelConfigInsrc(ch))
             add(OscPath.channelConfigRtnsrc(ch))
-            add(OscPath.channelPreampRtnSw(ch))
         }
     }
 
@@ -72,18 +75,24 @@ internal object Xr18RoutingOsc {
         target: XAirChannelInputState,
         maxAttempts: Int = 5,
     ): Boolean {
+        val paths = channelQueryPaths(channelIndex)
+        val initial = client.query(paths, timeoutMs = 2000, rounds = 3)
+        val already = readChannel(initial, channelIndex)
+        if (already != null && already.matchesRouting(target)) {
+            return true
+        }
+
         repeat(maxAttempts) { attempt ->
             sendChannelTarget(client, channelIndex, target)
             val waitMs = SETTLE_MS * (attempt + 1)
             Thread.sleep(waitMs)
-            val replies = client.query(
-                channelQueryPaths(channelIndex),
-                timeoutMs = 2000,
-                rounds = 4,
-            )
+            val replies = client.query(paths, timeoutMs = 2500, rounds = 4)
             val live = readChannel(replies, channelIndex)
             if (live != null && live.matchesRouting(target)) {
                 return true
+            }
+            if (attempt == maxAttempts - 1) {
+                onVerifyFailure?.invoke(channelIndex, target, live, replies)
             }
         }
         return false

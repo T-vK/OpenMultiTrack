@@ -18,6 +18,17 @@ class Xr18RoutingService(
     },
 ) : MixerRoutingPort {
     private fun openClient(): OscUdpClient = clientFactory(host, port, socketSetup)
+
+    companion object {
+        /** Diagnostic hook for failed post-write verification (set from app). */
+        @Volatile
+        var onVerifyFailure: ((
+            channelIndex: Int,
+            target: XAirChannelInputState,
+            live: XAirChannelInputState?,
+            replyPaths: Set<String>,
+        ) -> Unit)? = null
+    }
     override suspend fun probe(timeoutMs: Long): Boolean = withContext(Dispatchers.IO) {
         runCatching {
             openClient().use { client ->
@@ -67,6 +78,9 @@ class Xr18RoutingService(
         if (channels.isEmpty()) return@withContext true
         runCatching {
             openClient().use { client ->
+                Xr18RoutingOsc.onVerifyFailure = { ch, target, live, replies ->
+                    onVerifyFailure?.invoke(ch, target, live, replies.keys)
+                }
                 for (ch in channels.sorted()) {
                     val target = baseline[ch] ?: continue
                     if (!Xr18RoutingOsc.writeAndVerify(client, ch, target)) {
@@ -111,6 +125,9 @@ class Xr18RoutingService(
         if (indices.isEmpty()) return@withContext true
         runCatching {
             openClient().use { client ->
+                Xr18RoutingOsc.onVerifyFailure = { ch, target, live, replies ->
+                    onVerifyFailure?.invoke(ch, target, live, replies.keys)
+                }
                 client.send(OscPath.xremote())
                 for (ch in indices.sorted()) {
                     val target = targetFor(ch)

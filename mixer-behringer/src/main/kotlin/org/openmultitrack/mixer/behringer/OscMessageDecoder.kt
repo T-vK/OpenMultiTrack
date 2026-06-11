@@ -3,17 +3,45 @@ package org.openmultitrack.mixer.behringer
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 
-/** Decodes OSC 1.0 messages from UDP payloads. */
+/** Decodes OSC 1.0 messages (including [#bundle](https://opensoundcontrol.stanford.edu/spec-1_0-html)) from UDP payloads. */
 object OscMessageDecoder {
     data class Message(val path: String, val args: List<Any>)
 
-    fun decode(data: ByteArray): Message? {
-        if (data.isEmpty()) return null
-        var offset = 0
-        val pathEnd = indexOfNull(data, offset)
+    /** Decode a single packet — one message or all messages from an OSC bundle. */
+    fun decodeAll(data: ByteArray): List<Message> {
+        if (data.isEmpty()) return emptyList()
+        val pathEnd = indexOfNull(data, 0)
+        if (pathEnd < 0) return emptyList()
+        val path = String(data, 0, pathEnd, StandardCharsets.UTF_8)
+        return if (path == "#bundle") {
+            decodeBundle(data, align4(pathEnd + 1))
+        } else {
+            decodeMessage(data, 0)?.let { listOf(it) }.orEmpty()
+        }
+    }
+
+    fun decode(data: ByteArray): Message? = decodeAll(data).firstOrNull()
+
+    private fun decodeBundle(data: ByteArray, offset: Int): List<Message> {
+        if (offset + 8 > data.size) return emptyList()
+        var pos = offset + 8 // timetag
+        val messages = mutableListOf<Message>()
+        while (pos + 4 <= data.size) {
+            val size = readInt32(data, pos)
+            pos += 4
+            if (size <= 0 || pos + size > data.size) break
+            decodeMessage(data, pos)?.let { messages.add(it) }
+            pos += size
+        }
+        return messages
+    }
+
+    private fun decodeMessage(data: ByteArray, start: Int): Message? {
+        if (start >= data.size) return null
+        val pathEnd = indexOfNull(data, start)
         if (pathEnd < 0) return null
-        val path = String(data, offset, pathEnd - offset, StandardCharsets.UTF_8)
-        offset = align4(pathEnd + 1)
+        val path = String(data, start, pathEnd - start, StandardCharsets.UTF_8)
+        var offset = align4(pathEnd + 1)
         if (offset >= data.size) return Message(path, emptyList())
         val tagsEnd = indexOfNull(data, offset)
         if (tagsEnd < 0) return Message(path, emptyList())

@@ -47,10 +47,11 @@ class OscUdpClient(
                         val buf = ByteArray(4096)
                         val packet = DatagramPacket(buf, buf.size)
                         socket.receive(packet)
-                        val msg = OscMessageDecoder.decode(buf.copyOf(packet.length)) ?: continue
-                        if (msg.path in pending && msg.args.isNotEmpty()) {
-                            replies[msg.path] = msg.args
-                            pending.remove(msg.path)
+                        for (msg in OscMessageDecoder.decodeAll(buf.copyOf(packet.length))) {
+                            if (msg.path in pending && msg.args.isNotEmpty()) {
+                                replies[msg.path] = msg.args
+                                pending.remove(msg.path)
+                            }
                         }
                     } catch (_: java.net.SocketTimeoutException) {
                         break
@@ -279,9 +280,10 @@ class OscUdpClient(
                     val buf = ByteArray(4096)
                     val packet = DatagramPacket(buf, buf.size)
                     socket.receive(packet)
-                    val msg = OscMessageDecoder.decode(buf.copyOf(packet.length)) ?: continue
-                    if (msg.path == "/xinfo" || msg.path == "/info") {
-                        return if (expectedHost.isNotEmpty()) expectedHost else packet.address.hostAddress
+                    for (msg in OscMessageDecoder.decodeAll(buf.copyOf(packet.length))) {
+                        if (msg.path == "/xinfo" || msg.path == "/info") {
+                            return if (expectedHost.isNotEmpty()) expectedHost else packet.address.hostAddress
+                        }
                     }
                 } catch (_: java.net.SocketTimeoutException) {
                     continue
@@ -314,9 +316,10 @@ class OscUdpClient(
                     val buf = ByteArray(4096)
                     val packet = DatagramPacket(buf, buf.size)
                     socket.receive(packet)
-                    val msg = OscMessageDecoder.decode(buf.copyOf(packet.length)) ?: continue
-                    if (msg.path == "/xinfo" || msg.path == "/info") {
-                        return packet.address.hostAddress
+                    for (msg in OscMessageDecoder.decodeAll(buf.copyOf(packet.length))) {
+                        if (msg.path == "/xinfo" || msg.path == "/info") {
+                            return packet.address.hostAddress
+                        }
                     }
                 } catch (_: java.net.SocketTimeoutException) {
                     continue

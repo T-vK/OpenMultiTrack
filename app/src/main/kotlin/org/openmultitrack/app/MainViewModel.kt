@@ -291,6 +291,12 @@ class MainViewModel(
     private val soundcheckPromptPending = mutableSetOf<String>()
 
     init {
+        Xr18RoutingService.onVerifyFailure = { ch, target, live, replyPaths ->
+            val detail = "ch${ch + 1} wanted ${target.describe()} (${if (target.usesUsbReturn) "USB" else "A/D"}) " +
+                "got ${live?.describe() ?: "?"} replyPaths=$replyPaths"
+            OmtLog.w("Xr18Routing", "verify failed: $detail")
+            AppLogBuffer.append("W", "Routing", "Verify failed: $detail")
+        }
         RoutingAutomationBridge.hooks = routingHooks
         sessionClient.onManagerLost {
             observedMixerIds.clear()
