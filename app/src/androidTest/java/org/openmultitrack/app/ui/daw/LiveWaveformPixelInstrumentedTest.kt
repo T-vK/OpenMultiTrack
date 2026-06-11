@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -30,6 +31,47 @@ class LiveWaveformPixelInstrumentedTest {
     private val windowSec = 15f
     private val peaksPerSec = 30
     private val capacitySlots = (windowSec * peaksPerSec).toInt()
+
+    @Test
+    fun growth_leftToRight_secondMarkersAppearThenLock() {
+        var peaks by mutableStateOf(floatArrayOf())
+        var elapsed by mutableStateOf(0f)
+
+        composeRule.setContent {
+            LiveWaveformStrip(
+                peaks = peaks,
+                windowSec = windowSec,
+                elapsedSec = elapsed,
+                peaksPerSec = peaksPerSec,
+                color = Color(0xFF3366CC),
+                normalized = true,
+                modifier = Modifier
+                    .width(900.dp)
+                    .height(64.dp),
+            )
+        }
+
+        val frames = linkedMapOf<Int, ImageBitmap>()
+        for (second in 0..9) {
+            if (second == 0) {
+                peaks = floatArrayOf()
+                elapsed = 0f
+            } else {
+                peaks = FloatArray(second * peaksPerSec) { 0.85f }
+                elapsed = second.toFloat()
+            }
+            composeRule.waitForIdle()
+            frames[second] = composeRule.onNodeWithTag(LIVE_WAVEFORM_TEST_TAG).captureToImage()
+        }
+
+        assertLeftToRightWaveformGrowth(
+            framesByElapsedSec = frames,
+            capacitySlots = capacitySlots,
+            peaksPerSec = peaksPerSec,
+            windowSec = windowSec,
+            maxSecond = 9,
+        )
+    }
 
     @Test
     fun growth_slotCentroidStaysFixedAsRecordingGrows() {
