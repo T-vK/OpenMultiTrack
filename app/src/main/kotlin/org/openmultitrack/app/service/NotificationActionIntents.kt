@@ -3,7 +3,6 @@ package org.openmultitrack.app.service
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import org.openmultitrack.app.MainActivity
 
 /** Pending intents for notification actions. Activity intents collapse the notification shade. */
 object NotificationActionIntents {
@@ -11,8 +10,11 @@ object NotificationActionIntents {
         context: Context,
         requestCode: Int,
         action: String,
+        mixerId: String? = null,
     ): PendingIntent {
-        val intent = Intent(context, SessionTransportReceiver::class.java).setAction(action)
+        val intent = Intent(context, SessionTransportReceiver::class.java)
+            .setAction(action)
+            .apply { mixerId?.let { putExtra(SessionTransportActions.EXTRA_MIXER_ID, it) } }
         return PendingIntent.getBroadcast(
             context,
             requestCode,
@@ -26,8 +28,9 @@ object NotificationActionIntents {
         context: Context,
         requestCode: Int,
         action: String,
+        mixerId: String? = null,
     ): PendingIntent {
-        val intent = SessionTransportActions.openMainActivityIntent(context).setAction(action)
+        val intent = SessionTransportActions.openMainActivityIntent(context, mixerId, action)
         return PendingIntent.getActivity(
             context,
             requestCode,

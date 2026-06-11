@@ -7,7 +7,8 @@ import android.content.Intent
 class SessionTransportReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
-        if (SessionTransportActions.handle(context, action, fromActivity = false)) {
+        val mixerId = intent.getStringExtra(SessionTransportActions.EXTRA_MIXER_ID)
+        if (SessionTransportActions.handle(context, action, fromActivity = false, mixerId = mixerId)) {
             AudioSessionBridge.rebuildNotification()
         }
     }

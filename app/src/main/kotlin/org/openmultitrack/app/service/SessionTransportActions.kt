@@ -7,6 +7,8 @@ import org.openmultitrack.domain.session.isPlaybackMode
 
 /** Handles notification transport commands for recording and playback. */
 object SessionTransportActions {
+    const val EXTRA_MIXER_ID = "org.openmultitrack.extra.MIXER_ID"
+
     private val notificationActions = setOf(
         SessionTransportReceiver.ACTION_PAUSE_RECORD,
         SessionTransportReceiver.ACTION_STOP_RECORD,
@@ -24,10 +26,18 @@ object SessionTransportActions {
      * @param fromActivity when true, the user already opened [MainActivity] (shade collapses on its own).
      * @return whether the caller should synchronously rebuild the foreground notification.
      */
-    fun handle(context: Context, action: String, fromActivity: Boolean = false): Boolean {
+    fun handle(
+        context: Context,
+        action: String,
+        fromActivity: Boolean = false,
+        mixerId: String? = null,
+    ): Boolean {
         val manager = AudioSessionBridge.mixerManager ?: return false
-        val mixerId = AudioSessionBridge.activeMixerId() ?: manager.activeMixerId.value ?: return false
-        val ctrl = manager.getOrCreate(mixerId)
+        val resolvedMixerId = mixerId
+            ?: AudioSessionBridge.activeMixerId()
+            ?: manager.activeMixerId.value
+            ?: return false
+        val ctrl = manager.getOrCreate(resolvedMixerId)
         return when (action) {
             SessionTransportReceiver.ACTION_PAUSE_RECORD -> {
                 ctrl.pauseRecording()
@@ -35,9 +45,11 @@ object SessionTransportActions {
             }
             SessionTransportReceiver.ACTION_STOP_RECORD -> {
                 if (!fromActivity) {
-                    context.startActivity(openMainActivityIntent(context))
+                    context.startActivity(
+                        openMainActivityIntent(context, resolvedMixerId, action),
+                    )
                 }
-                AudioSessionBridge.onNotificationStopRecord?.invoke(mixerId)
+                AudioSessionBridge.onNotificationStopRecord?.invoke(resolvedMixerId)
                     ?: ctrl.stopRecording()
                 false
             }
@@ -75,8 +87,14 @@ object SessionTransportActions {
         }
     }
 
-    fun openMainActivityIntent(context: Context): Intent =
+    fun openMainActivityIntent(
+        context: Context,
+        mixerId: String? = null,
+        action: String? = null,
+    ): Intent =
         Intent(context, MainActivity::class.java).apply {
+            action?.let { setAction(it) }
+            mixerId?.let { putExtra(EXTRA_MIXER_ID, it) }
             addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or
                     Intent.FLAG_ACTIVITY_SINGLE_TOP or

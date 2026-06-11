@@ -315,11 +315,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun deliverNotificationTransportIntent(intent: Intent?) {
-        val action = intent?.action ?: return
-        if (!SessionTransportActions.isNotificationAction(action)) return
-        SessionTransportActions.handle(this, action, fromActivity = true)
-        intent.action = Intent.ACTION_MAIN
-        setIntent(intent)
+        val action = intent?.action
+        val mixerId = intent?.getStringExtra(SessionTransportActions.EXTRA_MIXER_ID)
+        if (action != null && SessionTransportActions.isNotificationAction(action)) {
+            SessionTransportActions.handle(this, action, fromActivity = true, mixerId = mixerId)
+            intent.action = Intent.ACTION_MAIN
+            setIntent(intent)
+            return
+        }
+        if (mixerId != null) {
+            viewModel.setActiveMixer(mixerId)
+        }
     }
 
     override fun onDestroy() {
