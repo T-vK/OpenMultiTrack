@@ -11,6 +11,12 @@ data class XAirChannelInputState(
 ) {
     val usesUsbReturn: Boolean get() = rtnSw == 1
 
+    /** True when live routing matches the intended record or soundcheck target. */
+    fun matchesRouting(target: XAirChannelInputState): Boolean = when {
+        target.usesUsbReturn -> usesUsbReturn && rtnsrc == target.rtnsrc
+        else -> !usesUsbReturn && insrc == target.insrc
+    }
+
     fun describe(): String = when {
         usesUsbReturn -> XAirInputSourceCatalog.rtnLabel(rtnsrc)
         insrc == 0 -> "OFF"

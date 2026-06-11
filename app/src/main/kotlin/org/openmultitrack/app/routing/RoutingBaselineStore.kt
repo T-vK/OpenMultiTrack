@@ -2,17 +2,23 @@ package org.openmultitrack.app.routing
 
 import android.content.Context
 
-class RoutingBaselineStore(context: Context) {
+interface RoutingPendingStore {
+    fun save(pending: PendingRoutingRestore)
+    fun load(): PendingRoutingRestore?
+    fun clear()
+}
+
+class RoutingBaselineStore(context: Context) : RoutingPendingStore {
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun save(pending: PendingRoutingRestore) {
+    override fun save(pending: PendingRoutingRestore) {
         prefs.edit().putString(KEY_PENDING, pending.toJson().toString()).commit()
     }
 
-    fun load(): PendingRoutingRestore? =
+    override fun load(): PendingRoutingRestore? =
         prefs.getString(KEY_PENDING, null)?.let(PendingRoutingRestore::fromJson)
 
-    fun clear() {
+    override fun clear() {
         prefs.edit().remove(KEY_PENDING).commit()
     }
 

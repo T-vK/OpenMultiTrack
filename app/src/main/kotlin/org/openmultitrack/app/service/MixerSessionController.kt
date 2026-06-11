@@ -228,10 +228,10 @@ class MixerSessionController(
     fun setAppMode(mode: AppMode) {
         if (_state.value.appMode == mode) return
         if (mode.isPlaybackMode && _state.value.isRecording) {
-            scope.launch { stopRecording() }
+            scope.launch { stopRecording(restoreRouting = false) }
         }
         if (mode == AppMode.MULTITRACK_RECORD) {
-            stopSoundcheckHard()
+            stopSoundcheckHard(restoreRouting = false)
             refreshStorageEstimate()
         }
         _state.update { it.copy(appMode = mode) }
@@ -475,12 +475,20 @@ class MixerSessionController(
         }
     }
 
-    fun stopSoundcheck(resetPosition: Boolean = true) {
-        finishPlaybackTransport(resetPosition = resetPosition, releaseNative = false)
+    fun stopSoundcheck(resetPosition: Boolean = true, restoreRouting: Boolean = true) {
+        finishPlaybackTransport(
+            resetPosition = resetPosition,
+            releaseNative = false,
+            restoreRouting = restoreRouting,
+        )
     }
 
-    private fun stopSoundcheckHard(resetPosition: Boolean = true) {
-        finishPlaybackTransport(resetPosition = resetPosition, releaseNative = true)
+    private fun stopSoundcheckHard(resetPosition: Boolean = true, restoreRouting: Boolean = true) {
+        finishPlaybackTransport(
+            resetPosition = resetPosition,
+            releaseNative = true,
+            restoreRouting = restoreRouting,
+        )
     }
 
     fun seekSoundcheck(positionSec: Float) {
@@ -737,8 +745,12 @@ class MixerSessionController(
             trace?.mark("ensurePlaybackRoute usbStream=${usbStream != null} fd=${usbStream?.fd}")
             val route = ensurePlaybackLocked(descriptor, probe, usbOutputs).getOrThrow()
             trace?.mark("route resolved backend=${route.backend}")
-            if (!routingBeforeSoundcheckLocked(dir, metadata)) {
-                throw IllegalStateException("Soundcheck routing cancelled")
+            when (val routing = routingBeforeSoundcheckLocked(dir, metadata)) {
+                RoutingHookResult.Cancelled ->
+                    throw IllegalStateException("Soundcheck routing cancelled")
+                is RoutingHookResult.Failed ->
+                    throw IllegalStateException(routing.message)
+                else -> Unit
             }
             val mixContext = PlaybackMixContext(
                 appMode = ui.appMode,
@@ -797,6 +809,7 @@ class MixerSessionController(
     private suspend fun stopSoundcheckLocked(
         skipStateUpdate: Boolean = false,
         releaseNative: Boolean = false,
+        restoreRouting: Boolean = true,
         trace: TransportTrace? = null,
     ) {
         trace?.mark("stopSoundcheckLocked releaseNative=$releaseNative")
@@ -815,7 +828,9 @@ class MixerSessionController(
         } else {
             player.suspendAndAwait()
             trace?.mark("suspend complete (native engine kept warm)")
-            RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
+            if (restoreRouting) {
+                RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
+            }
         }
         if (!skipStateUpdate) {
             _state.update {
@@ -1027,8 +1042,13 @@ class MixerSessionController(
                         } else {
                             syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
                         }
-                        if (!routingBeforeRecordLocked()) {
-                            return@withContext
+                        when (val routing = routingBeforeRecordLocked()) {
+                            RoutingHookResult.Cancelled -> return@withContext
+                            is RoutingHookResult.Failed -> {
+                                _state.update { it.copy(warningMessage = routing.message) }
+                                return@withContext
+                            }
+                            else -> Unit
                         }
                         val writePlan = org.openmultitrack.app.data.RecordingWritePlan.create(
                             storageResolver,
@@ -1174,7 +1194,7 @@ class MixerSessionController(
         }
     }
 
-    fun stopRecording() {
+    fun stopRecording(restoreRouting: Boolean = true) {
         scope.launch {
             val session = captureMutex.withLock {
                 withContext(Dispatchers.IO) { captureEngine.stopRecording() }
@@ -1196,7 +1216,9 @@ class MixerSessionController(
             if (_state.value.appMode.isPlaybackMode) {
                 refreshSoundcheckLibrary()
             }
-            RoutingAutomationBridge.hooks?.afterRecordRestore()
+            if (restoreRouting) {
+                RoutingAutomationBridge.hooks?.afterRecordRestore()
+            }
             AudioSessionBridge.rebuildNotification()
         }
     }
@@ -1368,6 +1390,7 @@ class MixerSessionController(
         resetPosition: Boolean,
         cancelStatusJob: Boolean = true,
         releaseNative: Boolean = false,
+        restoreRouting: Boolean = true,
     ) {
         val trace = TransportTrace(if (releaseNative) "uiStopHard" else "uiStopSuspend")
         trace.mark("finishPlaybackTransport resetPosition=$resetPosition releaseNative=$releaseNative")
@@ -1395,25 +1418,24 @@ class MixerSessionController(
                     player.suspendAndAwait()
                     trace.mark("suspend complete (native engine kept warm)")
                 }
-                RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
+                if (restoreRouting) {
+                    RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
+                }
             }
         }
     }
 
-    private suspend fun routingBeforeRecordLocked(): Boolean {
+    private suspend fun routingBeforeRecordLocked(): RoutingHookResult {
+        val prof = profile ?: return RoutingHookResult.Skipped
         val armed = _state.value.channelStrips.filter { it.armed }.map { it.index }.toSet()
-        return when (RoutingAutomationBridge.hooks?.beforeRecordApply(armed)) {
-            RoutingHookResult.Cancelled -> false
-            else -> true
-        }
+        return RoutingAutomationBridge.hooks?.beforeRecordApply(prof, armed) ?: RoutingHookResult.Skipped
     }
 
-    private suspend fun routingBeforeSoundcheckLocked(dir: File, metadata: SessionMetadata): Boolean {
+    private suspend fun routingBeforeSoundcheckLocked(dir: File, metadata: SessionMetadata): RoutingHookResult {
+        val prof = profile ?: return RoutingHookResult.Skipped
         val trackChannels = SoundcheckTrackChannels.indicesWithTracks(dir, metadata)
-        return when (RoutingAutomationBridge.hooks?.beforeSoundcheckApply(trackChannels)) {
-            RoutingHookResult.Cancelled -> false
-            else -> true
-        }
+        return RoutingAutomationBridge.hooks?.beforeSoundcheckApply(prof, trackChannels)
+            ?: RoutingHookResult.Skipped
     }
 
     private fun startPlaybackStatusUpdates(sampleRate: Int, trace: TransportTrace? = null) {

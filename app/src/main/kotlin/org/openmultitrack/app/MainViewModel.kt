@@ -201,7 +201,6 @@ class MainViewModel(
     private val routingHooks = RoutingAutomationHooksImpl(
         settings = settings,
         coordinator = routingCoordinator,
-        profileProvider = { activeMixerProfile() },
         onApplyPrompt = { prompt ->
             _uiState.update { it.copy(routingApplyPrompt = prompt) }
         },

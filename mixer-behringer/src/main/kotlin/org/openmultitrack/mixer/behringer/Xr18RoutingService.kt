@@ -24,63 +24,55 @@ class Xr18RoutingService(
     }
 
     override suspend fun readChannelInput(channelIndex: Int): XAirChannelInputState? =
-        readAllChannelInputs()[channelIndex]
+        withContext(Dispatchers.IO) {
+            runCatching {
+                clientFactory(host, port).use { client ->
+                    val replies = client.query(
+                        Xr18RoutingOsc.channelQueryPaths(channelIndex),
+                        timeoutMs = 1500,
+                        rounds = 3,
+                    )
+                    Xr18RoutingOsc.readChannel(replies, channelIndex)
+                }
+            }.getOrNull()
+        }
 
     override suspend fun readAllChannelInputs(): Map<Int, XAirChannelInputState> =
         withContext(Dispatchers.IO) {
-            val paths = buildList {
-                for (ch in 1..XAirInputSourceCatalog.CHANNEL_COUNT) {
-                    add(OscPath.channelConfigInsrc(ch))
-                    add(OscPath.channelConfigRtnsrc(ch))
-                    add(OscPath.channelPreampRtnSw(ch))
-                }
-            }
             runCatching {
                 clientFactory(host, port).use { client ->
-                    val replies = client.query(paths, timeoutMs = 3000, rounds = 4)
-                    buildMap {
-                        for (ch in 1..XAirInputSourceCatalog.CHANNEL_COUNT) {
-                            val idx = ch - 1
-                            val insrc = (replies[OscPath.channelConfigInsrc(ch)]?.firstOrNull() as? Int) ?: continue
-                            val rtnsrc = (replies[OscPath.channelConfigRtnsrc(ch)]?.firstOrNull() as? Int) ?: 0
-                            val rtnSw = (replies[OscPath.channelPreampRtnSw(ch)]?.firstOrNull() as? Int) ?: 0
-                            put(idx, XAirChannelInputState(insrc, rtnsrc, rtnSw))
-                        }
-                    }
+                    val replies = client.query(Xr18RoutingOsc.queryPaths(), timeoutMs = 4000, rounds = 5)
+                    Xr18RoutingOsc.parseAllChannels(replies)
                 }
             }.getOrDefault(emptyMap())
         }
 
     override suspend fun writeChannelInput(channelIndex: Int, state: XAirChannelInputState): Boolean =
-        withContext(Dispatchers.IO) {
-            val ch = channelIndex + 1
-            if (ch !in 1..XAirInputSourceCatalog.CHANNEL_COUNT) return@withContext false
-            runCatching {
-                clientFactory(host, port).use { client ->
-                    client.send(OscPath.xremote())
-                    if (state.usesUsbReturn) {
-                        client.send(
-                            OscPath.channelConfigRtnsrc(ch),
-                            listOf(OscArgument.IntArg(state.rtnsrc)),
-                        )
-                        client.send(
-                            OscPath.channelPreampRtnSw(ch),
-                            listOf(OscArgument.IntArg(1)),
-                        )
-                    } else {
-                        client.send(
-                            OscPath.channelConfigInsrc(ch),
-                            listOf(OscArgument.IntArg(state.insrc)),
-                        )
-                        client.send(
-                            OscPath.channelPreampRtnSw(ch),
-                            listOf(OscArgument.IntArg(0)),
-                        )
+        writeChannelInputVerified(channelIndex, state)
+
+    override suspend fun applyRecordRouting(channelIndices: Iterable<Int>): Boolean =
+        applyChannelsVerified(channelIndices) { XAirInputSourceCatalog.recordTarget(it) }
+
+    override suspend fun applySoundcheckRouting(channelIndices: Iterable<Int>): Boolean =
+        applyChannelsVerified(channelIndices) { XAirInputSourceCatalog.soundcheckTarget(it) }
+
+    override suspend fun restoreChannels(
+        baseline: Map<Int, XAirChannelInputState>,
+        channels: Set<Int>,
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (channels.isEmpty()) return@withContext true
+        runCatching {
+            clientFactory(host, port).use { client ->
+                for (ch in channels.sorted()) {
+                    val target = baseline[ch] ?: continue
+                    if (!Xr18RoutingOsc.writeAndVerify(client, ch, target)) {
+                        return@withContext false
                     }
-                    true
                 }
-            }.getOrDefault(false)
-        }
+                true
+            }
+        }.getOrDefault(false)
+    }
 
     override suspend fun loadSnapshot(slot: Int): Boolean = withContext(Dispatchers.IO) {
         if (slot !in 1..64) return@withContext false
@@ -88,22 +80,42 @@ class Xr18RoutingService(
             clientFactory(host, port).use { client ->
                 client.send(OscPath.xremote())
                 client.send(OscPath.snapLoad(), listOf(OscArgument.IntArg(slot)))
+                Thread.sleep(300)
                 true
             }
         }.getOrDefault(false)
     }
 
-    override suspend fun applyRecordRouting(channelIndices: Iterable<Int>): Boolean =
-        channelIndices.all { writeChannelInput(it, XAirInputSourceCatalog.recordTarget(it)) }
+    private suspend fun writeChannelInputVerified(
+        channelIndex: Int,
+        state: XAirChannelInputState,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val ch = channelIndex + 1
+        if (ch !in 1..XAirInputSourceCatalog.CHANNEL_COUNT) return@withContext false
+        runCatching {
+            clientFactory(host, port).use { client ->
+                Xr18RoutingOsc.writeAndVerify(client, channelIndex, state)
+            }
+        }.getOrDefault(false)
+    }
 
-    override suspend fun applySoundcheckRouting(channelIndices: Iterable<Int>): Boolean =
-        channelIndices.all { writeChannelInput(it, XAirInputSourceCatalog.soundcheckTarget(it)) }
-
-    override suspend fun restoreChannels(
-        baseline: Map<Int, XAirChannelInputState>,
-        channels: Set<Int>,
-    ): Boolean = channels.all { ch ->
-        val state = baseline[ch] ?: return@all true
-        writeChannelInput(ch, state)
+    private suspend fun applyChannelsVerified(
+        channelIndices: Iterable<Int>,
+        targetFor: (Int) -> XAirChannelInputState,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val indices = channelIndices.toList()
+        if (indices.isEmpty()) return@withContext true
+        runCatching {
+            clientFactory(host, port).use { client ->
+                client.send(OscPath.xremote())
+                for (ch in indices.sorted()) {
+                    val target = targetFor(ch)
+                    if (!Xr18RoutingOsc.writeAndVerify(client, ch, target)) {
+                        return@withContext false
+                    }
+                }
+                true
+            }
+        }.getOrDefault(false)
     }
 }

@@ -1,10 +1,14 @@
 package org.openmultitrack.app.routing
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.data.MixerRoutingAutomationConfig
 import org.openmultitrack.app.data.RoutingAutomationLevel
+import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.mixer.MixerProfile
+import org.openmultitrack.mixer.behringer.Xr18RoutingService
 import java.util.concurrent.atomic.AtomicReference
 
 data class RoutingApplyPromptState(
@@ -25,7 +29,6 @@ data class RoutingRestorePromptState(
 class RoutingAutomationHooksImpl(
     private val settings: AppSettingsStore,
     private val coordinator: RoutingOverrideCoordinator,
-    private val profileProvider: () -> MixerProfile?,
     private val onApplyPrompt: (RoutingApplyPromptState) -> Unit,
     private val onRestorePrompt: (RoutingRestorePromptState) -> Unit,
     private val onStartupRestorePrompt: (PendingRoutingRestore) -> Unit,
@@ -49,17 +52,19 @@ class RoutingAutomationHooksImpl(
         restoreDeferred.getAndSet(null)?.complete(false)
     }
 
-    override suspend fun beforeRecordApply(armedChannels: Set<Int>): RoutingHookResult =
-        beforeApply(RoutingOverrideKind.RECORD, armedChannels)
+    override suspend fun beforeRecordApply(profile: MixerProfile, armedChannels: Set<Int>): RoutingHookResult =
+        beforeApply(profile, RoutingOverrideKind.RECORD, armedChannels)
 
-    override suspend fun beforeSoundcheckApply(trackChannels: Set<Int>): RoutingHookResult =
-        beforeApply(RoutingOverrideKind.SOUNDCHECK, trackChannels)
+    override suspend fun beforeSoundcheckApply(
+        profile: MixerProfile,
+        trackChannels: Set<Int>,
+    ): RoutingHookResult = beforeApply(profile, RoutingOverrideKind.SOUNDCHECK, trackChannels)
 
     private suspend fun beforeApply(
+        profile: MixerProfile,
         kind: RoutingOverrideKind,
         channels: Set<Int>,
     ): RoutingHookResult {
-        val profile = profileProvider() ?: return RoutingHookResult.Skipped
         val config = settings.routingAutomationForMixer(profile.id)
         when (val peek = coordinator.peekApply(profile, config, kind, channels)) {
             is RoutingApplyOutcome.Disabled,
@@ -68,13 +73,15 @@ class RoutingAutomationHooksImpl(
             is RoutingApplyOutcome.SkippedEmptyScope,
             -> return RoutingHookResult.Skipped
             is RoutingApplyOutcome.Applied -> return RoutingHookResult.Proceed
-            is RoutingApplyOutcome.Failed -> return RoutingHookResult.Skipped
+            is RoutingApplyOutcome.Failed -> return RoutingHookResult.Failed(peek.message)
             is RoutingApplyOutcome.ReadyToApply -> {
                 val deferred = CompletableDeferred<Boolean>()
                 applyDeferred.set(deferred)
-                onApplyPrompt(
-                    RoutingApplyPromptState(profile.id, kind, peek.channelCount),
-                )
+                withContext(Dispatchers.Main.immediate) {
+                    onApplyPrompt(
+                        RoutingApplyPromptState(profile.id, kind, peek.channelCount),
+                    )
+                }
                 if (!deferred.await()) return RoutingHookResult.Cancelled
             }
         }
@@ -88,7 +95,10 @@ class RoutingAutomationHooksImpl(
             )
         ) {
             is RoutingApplyOutcome.Applied -> RoutingHookResult.Proceed
-            else -> RoutingHookResult.Skipped
+            is RoutingApplyOutcome.Failed -> RoutingHookResult.Failed(
+                "Mixer routing could not be verified — ${kind.name.lowercase()} cancelled",
+            )
+            else -> RoutingHookResult.Failed("Mixer routing apply failed")
         }
     }
 
@@ -101,37 +111,48 @@ class RoutingAutomationHooksImpl(
         if (pending.kind != expectedKind) return
         val config = settings.routingAutomationForMixer(pending.mixerId)
         if (config.level == RoutingAutomationLevel.OFF) return
-        val port = org.openmultitrack.mixer.behringer.Xr18RoutingService(pending.oscHost)
+        val port = Xr18RoutingService(pending.oscHost)
         when (val peek = coordinator.peekRestore(config, pending, port)) {
             RoutingRestoreOutcome.NothingPending,
             RoutingRestoreOutcome.SkippedUnreachable,
             -> return
             RoutingRestoreOutcome.Restored -> return
-            is RoutingRestoreOutcome.Failed -> return
+            is RoutingRestoreOutcome.Failed -> {
+                OmtLog.w("RoutingHooks", "restore failed: ${peek.message}")
+                return
+            }
             is RoutingRestoreOutcome.Conflicts -> {
                 val deferred = CompletableDeferred<Boolean>()
                 restoreDeferred.set(deferred)
-                onRestorePrompt(
-                    RoutingRestorePromptState(
-                        pending.mixerId,
-                        pending.kind,
-                        peek.conflicts,
-                    ),
-                )
+                withContext(Dispatchers.Main.immediate) {
+                    onRestorePrompt(
+                        RoutingRestorePromptState(
+                            pending.mixerId,
+                            pending.kind,
+                            peek.conflicts,
+                        ),
+                    )
+                }
                 if (!deferred.await()) return
             }
             is RoutingRestoreOutcome.ReadyToRestore -> {
                 if (config.level == RoutingAutomationLevel.PROMPT) {
                     val deferred = CompletableDeferred<Boolean>()
                     restoreDeferred.set(deferred)
-                    onRestorePrompt(
-                        RoutingRestorePromptState(pending.mixerId, pending.kind, emptyList()),
-                    )
+                    withContext(Dispatchers.Main.immediate) {
+                        onRestorePrompt(
+                            RoutingRestorePromptState(pending.mixerId, pending.kind, emptyList()),
+                        )
+                    }
                     if (!deferred.await()) return
                 }
             }
         }
-        coordinator.restoreConfirmed(config, pending)
+        when (val outcome = coordinator.restoreConfirmed(config, pending)) {
+            is RoutingRestoreOutcome.Failed ->
+                OmtLog.w("RoutingHooks", "restore confirmed failed: ${outcome.message}")
+            else -> Unit
+        }
     }
 
     override suspend fun onStartupPendingRestore() {
@@ -139,6 +160,8 @@ class RoutingAutomationHooksImpl(
         if (pending.recordingWasActive && settings.activeRecordingMixerId == pending.mixerId) {
             return
         }
-        onStartupRestorePrompt(pending)
+        withContext(Dispatchers.Main.immediate) {
+            onStartupRestorePrompt(pending)
+        }
     }
 }

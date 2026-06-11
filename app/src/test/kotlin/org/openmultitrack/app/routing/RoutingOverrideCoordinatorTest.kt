@@ -1,12 +1,84 @@
 package org.openmultitrack.app.routing
 
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.runBlocking
 import org.junit.Test
+import org.openmultitrack.app.data.MixerRoutingAutomationConfig
+import org.openmultitrack.app.data.RoutingAutomationLevel
 import org.openmultitrack.app.data.RoutingAutomationMethod
+import org.openmultitrack.domain.mixer.MixerProfile
+import org.openmultitrack.mixer.behringer.MixerRoutingPort
 import org.openmultitrack.mixer.behringer.XAirChannelInputState
 import org.openmultitrack.mixer.behringer.XAirInputSourceCatalog
 
 class RoutingOverrideCoordinatorTest {
+    private val xr18Profile = MixerProfile(
+        id = "xr18-test",
+        usbDeviceName = null,
+        vendorId = 0x1397,
+        productId = 0x7508,
+        serialNumber = null,
+        productName = "XR18",
+        displayName = "XR18",
+        oscHost = "192.168.1.100",
+    )
+
+    private class TestRoutingPort(
+        private var reachable: Boolean = true,
+        private var channels: MutableMap<Int, XAirChannelInputState> = mutableMapOf(),
+        var applyShouldSucceed: Boolean = true,
+        var restoreShouldSucceed: Boolean = true,
+    ) : MixerRoutingPort {
+        override suspend fun probe(timeoutMs: Long): Boolean = reachable
+
+        override suspend fun readChannelInput(channelIndex: Int): XAirChannelInputState? =
+            channels[channelIndex]
+
+        override suspend fun readAllChannelInputs(): Map<Int, XAirChannelInputState> =
+            channels.toMap()
+
+        override suspend fun writeChannelInput(channelIndex: Int, state: XAirChannelInputState): Boolean {
+            channels[channelIndex] = state
+            return true
+        }
+
+        override suspend fun applyRecordRouting(channelIndices: Iterable<Int>): Boolean {
+            if (!applyShouldSucceed) return false
+            return channelIndices.all { writeChannelInput(it, XAirInputSourceCatalog.recordTarget(it)) }
+        }
+
+        override suspend fun applySoundcheckRouting(channelIndices: Iterable<Int>): Boolean {
+            if (!applyShouldSucceed) return false
+            return channelIndices.all { writeChannelInput(it, XAirInputSourceCatalog.soundcheckTarget(it)) }
+        }
+
+        override suspend fun restoreChannels(
+            baseline: Map<Int, XAirChannelInputState>,
+            channels: Set<Int>,
+        ): Boolean {
+            if (!restoreShouldSucceed) return false
+            return channels.all { ch ->
+                val st = baseline[ch] ?: return@all true
+                writeChannelInput(ch, st)
+            }
+        }
+
+        override suspend fun loadSnapshot(slot: Int): Boolean = true
+    }
+
+    private class MemoryBaselineStore : RoutingPendingStore {
+        private var pending: PendingRoutingRestore? = null
+
+        override fun save(restore: PendingRoutingRestore) {
+            pending = restore
+        }
+
+        override fun load(): PendingRoutingRestore? = pending
+
+        override fun clear() {
+            pending = null
+        }
+    }
     @Test
     fun detectConflicts_findsEngineerChanges() {
         val pending = PendingRoutingRestore(
@@ -42,6 +114,79 @@ class RoutingOverrideCoordinatorTest {
         )
         val conflicts = RoutingOverrideCoordinator.detectConflicts(pending, mapOf(0 to applied))
         assertThat(conflicts).isEmpty()
+    }
+
+    @Test
+    fun applyConfirmed_clearsPendingWhenApplyFails() = runBlocking {
+        val store = MemoryBaselineStore()
+        val port = TestRoutingPort(
+            channels = mutableMapOf(0 to XAirChannelInputState(0, 0, 1)),
+            applyShouldSucceed = false,
+        )
+        val coordinator = RoutingOverrideCoordinator(store) { port }
+        val config = MixerRoutingAutomationConfig(level = RoutingAutomationLevel.AUTO)
+
+        val outcome = coordinator.applyConfirmed(
+            xr18Profile,
+            config,
+            RoutingOverrideKind.RECORD,
+            setOf(0),
+        )
+
+        assertThat(outcome).isInstanceOf(RoutingApplyOutcome.Failed::class.java)
+        assertThat(store.load()).isNull()
+    }
+
+    @Test
+    fun applyConfirmed_succeedsAndKeepsPendingUntilRestore() = runBlocking {
+        val store = MemoryBaselineStore()
+        val port = TestRoutingPort(
+            channels = mutableMapOf(0 to XAirChannelInputState(0, 0, 1)),
+        )
+        val coordinator = RoutingOverrideCoordinator(store) { port }
+        val config = MixerRoutingAutomationConfig(level = RoutingAutomationLevel.AUTO)
+
+        val outcome = coordinator.applyConfirmed(
+            xr18Profile,
+            config,
+            RoutingOverrideKind.RECORD,
+            setOf(0),
+        )
+
+        assertThat(outcome).isInstanceOf(RoutingApplyOutcome.Applied::class.java)
+        val pending = store.load()
+        assertThat(pending).isNotNull()
+        assertThat(pending!!.affectedChannels).containsExactly(0)
+        assertThat(port.readChannelInput(0)?.usesUsbReturn).isFalse()
+    }
+
+    @Test
+    fun restoreConfirmed_clearsPendingOnSuccess() = runBlocking {
+        val store = MemoryBaselineStore()
+        val port = TestRoutingPort(
+            channels = mutableMapOf(0 to XAirInputSourceCatalog.recordTarget(0)),
+        )
+        val coordinator = RoutingOverrideCoordinator(store) { port }
+        val baseline = XAirChannelInputState(0, 0, 1)
+        val pending = PendingRoutingRestore(
+            transactionId = "t1",
+            mixerId = xr18Profile.id,
+            oscHost = xr18Profile.oscHost!!,
+            kind = RoutingOverrideKind.RECORD,
+            affectedChannels = setOf(0),
+            baselineByChannel = mapOf(0 to baseline),
+            overrideByChannel = mapOf(0 to XAirInputSourceCatalog.recordTarget(0)),
+            method = RoutingAutomationMethod.PER_CHANNEL,
+            capturedAtEpochMs = 0L,
+        )
+        store.save(pending)
+        val config = MixerRoutingAutomationConfig(level = RoutingAutomationLevel.AUTO)
+
+        val outcome = coordinator.restoreConfirmed(config, pending)
+
+        assertThat(outcome).isEqualTo(RoutingRestoreOutcome.Restored)
+        assertThat(store.load()).isNull()
+        assertThat(port.readChannelInput(0)).isEqualTo(baseline)
     }
 
     @Test

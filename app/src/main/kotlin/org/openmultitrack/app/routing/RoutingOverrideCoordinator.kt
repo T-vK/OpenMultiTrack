@@ -35,7 +35,7 @@ sealed class RoutingRestoreOutcome {
  * Owns XR18 routing override transactions. Never throws — failures are outcomes.
  */
 class RoutingOverrideCoordinator(
-    private val baselineStore: RoutingBaselineStore,
+    private val baselineStore: RoutingPendingStore,
     private val routingFactory: (String) -> MixerRoutingPort = { host -> Xr18RoutingService(host) },
 ) {
     suspend fun peekApply(
