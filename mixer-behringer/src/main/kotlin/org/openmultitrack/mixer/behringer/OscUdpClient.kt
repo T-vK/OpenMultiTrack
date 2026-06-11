@@ -31,35 +31,50 @@ class OscUdpClient(
     }
 
     /** Query OSC paths; returns path → argument list for replies received within [timeoutMs]. */
-    suspend fun query(paths: List<String>, timeoutMs: Long = 2500, rounds: Int = 4): Map<String, List<Any>> =
-        withContext(Dispatchers.IO) {
-            val pending = paths.toMutableSet()
-            val replies = LinkedHashMap<String, List<Any>>()
-            socket.soTimeout = 250
-            repeat(rounds) {
-                if (pending.isEmpty()) return@repeat
-                for (path in pending.toList()) {
-                    send(path)
-                }
-                val deadline = System.nanoTime() + timeoutMs * 1_000_000
-                while (pending.isNotEmpty() && System.nanoTime() < deadline) {
-                    try {
-                        val buf = ByteArray(4096)
-                        val packet = DatagramPacket(buf, buf.size)
-                        socket.receive(packet)
-                        for (msg in OscMessageDecoder.decodeAll(buf.copyOf(packet.length))) {
-                            if (msg.path in pending && msg.args.isNotEmpty()) {
-                                replies[msg.path] = msg.args
-                                pending.remove(msg.path)
-                            }
+    suspend fun query(
+        paths: List<String>,
+        timeoutMs: Long = 2500,
+        rounds: Int = 4,
+        label: String? = null,
+    ): Map<String, List<Any>> = withContext(Dispatchers.IO) {
+        val t0 = System.nanoTime()
+        val pending = paths.toMutableSet()
+        val replies = LinkedHashMap<String, List<Any>>()
+        var roundsUsed = 0
+        socket.soTimeout = 80
+        repeat(rounds) { round ->
+            if (pending.isEmpty()) return@repeat
+            roundsUsed = round + 1
+            for (path in pending) {
+                send(path)
+            }
+            val deadline = System.nanoTime() + timeoutMs * 1_000_000
+            while (pending.isNotEmpty() && System.nanoTime() < deadline) {
+                val remainingMs = ((deadline - System.nanoTime()) / 1_000_000).toInt().coerceIn(20, 200)
+                socket.soTimeout = remainingMs
+                try {
+                    val buf = ByteArray(4096)
+                    val packet = DatagramPacket(buf, buf.size)
+                    socket.receive(packet)
+                    for (msg in OscMessageDecoder.decodeAll(buf.copyOf(packet.length))) {
+                        if (msg.path in pending && msg.args.isNotEmpty()) {
+                            replies[msg.path] = msg.args
+                            pending.remove(msg.path)
                         }
-                    } catch (_: java.net.SocketTimeoutException) {
-                        break
                     }
+                } catch (_: java.net.SocketTimeoutException) {
+                    continue
                 }
             }
-            replies
         }
+        val ms = (System.nanoTime() - t0) / 1_000_000
+        val tag = label ?: "query"
+        Xr18RoutingLog.info(
+            "$tag ${paths.size} paths → ${replies.size} replies in ${ms}ms " +
+                "($roundsUsed rounds, ${pending.size} pending)",
+        )
+        replies
+    }
 
     override fun close() {
         socket.close()

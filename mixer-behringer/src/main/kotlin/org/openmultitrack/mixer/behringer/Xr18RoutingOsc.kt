@@ -2,19 +2,23 @@ package org.openmultitrack.mixer.behringer
 
 /** Low-level X-Air routing OSC read/write with verification. */
 internal object Xr18RoutingOsc {
-    private const val SETTLE_MS = 150L
+    private const val SETTLE_MS = 50L
 
     /** Optional diagnostic hook (set from app layer). */
     var onVerifyFailure: ((channelIndex: Int, target: XAirChannelInputState, live: XAirChannelInputState?, replies: Map<String, List<Any>>) -> Unit)? = null
 
     fun parseAllChannels(replies: Map<String, List<Any>>): Map<Int, XAirChannelInputState> =
-        buildMap {
-            for (ch in 1..XAirInputSourceCatalog.CHANNEL_COUNT) {
-                val idx = ch - 1
-                val state = readChannel(replies, idx) ?: continue
-                put(idx, state)
-            }
+        parseChannels(replies, (0 until XAirInputSourceCatalog.CHANNEL_COUNT).toList())
+
+    fun parseChannels(
+        replies: Map<String, List<Any>>,
+        channelIndices: Iterable<Int>,
+    ): Map<Int, XAirChannelInputState> = buildMap {
+        for (idx in channelIndices) {
+            val state = readChannel(replies, idx) ?: continue
+            put(idx, state)
         }
+    }
 
     fun queryPaths(): List<String> = buildList {
         for (ch in 1..XAirInputSourceCatalog.CHANNEL_COUNT) {
@@ -86,6 +90,44 @@ internal object Xr18RoutingOsc {
         Thread.sleep(SETTLE_MS)
     }
 
+    /** Fire phase-1 then phase-2 OSC for all [targets] with only two settle pauses total. */
+    suspend fun sendChannelTargetsBurst(
+        client: OscUdpClient,
+        targets: Map<Int, XAirChannelInputState>,
+    ) {
+        if (targets.isEmpty()) return
+        for ((idx, target) in targets) {
+            val ch = idx + 1
+            if (target.usesUsbReturn) {
+                client.send(
+                    OscPath.channelConfigRtnsrc(ch),
+                    listOf(OscArgument.IntArg(target.rtnsrc)),
+                )
+            } else {
+                client.send(
+                    OscPath.channelPreampRtnSw(ch),
+                    listOf(OscArgument.IntArg(0)),
+                )
+            }
+        }
+        Thread.sleep(SETTLE_MS)
+        for ((idx, target) in targets) {
+            val ch = idx + 1
+            if (target.usesUsbReturn) {
+                client.send(
+                    OscPath.channelPreampRtnSw(ch),
+                    listOf(OscArgument.IntArg(1)),
+                )
+            } else {
+                client.send(
+                    OscPath.channelConfigInsrc(ch),
+                    listOf(OscArgument.IntArg(target.insrc)),
+                )
+            }
+        }
+        Thread.sleep(SETTLE_MS)
+    }
+
     /**
      * Write [target] routing, then **separately query** live values and compare.
      * Retries the write+query loop when the mixer has not caught up yet.
@@ -140,16 +182,30 @@ internal object Xr18RoutingOsc {
             val live = liveByChannel[ch]
             live == null || !live.matchesRouting(target)
         }
-        if (needChange.isEmpty()) return true
+        if (needChange.isEmpty()) {
+            Xr18RoutingLog.info("apply batch skip ${targets.size} targets already match")
+            return true
+        }
 
         val queryPaths = queryPathsForChannels(needChange.keys)
+        Xr18RoutingLog.info(
+            "apply batch ${needChange.size}/${targets.size} channels need change, " +
+                "${queryPaths.size} verify paths",
+        )
         client.send(OscPath.xremote())
         repeat(maxBatchAttempts) { attempt ->
-            for ((ch, target) in needChange) {
-                sendChannelTarget(client, ch, target, sendXremote = false)
+            Xr18RoutingLog.stepSuspend("write burst attempt=${attempt + 1}") {
+                sendChannelTargetsBurst(client, needChange)
             }
-            Thread.sleep(SETTLE_MS * (attempt + 1))
-            val replies = client.query(queryPaths, timeoutMs = 2500, rounds = 3)
+            if (attempt > 0) {
+                Thread.sleep(SETTLE_MS * attempt)
+            }
+            val replies = client.query(
+                queryPaths,
+                timeoutMs = 1500,
+                rounds = 2,
+                label = "verify attempt=${attempt + 1}",
+            )
             val allOk = needChange.keys.all { ch ->
                 val target = needChange[ch]!!
                 val live = readChannel(replies, ch)

@@ -19,6 +19,26 @@ class LanOscRoutingPort(
     override suspend fun readAllChannelInputs(): Map<Int, XAirChannelInputState> =
         OscLanSession.withMulticastLock(context) { delegate.readAllChannelInputs() }
 
+    override suspend fun readChannelInputs(channelIndices: Iterable<Int>): Map<Int, XAirChannelInputState> =
+        OscLanSession.withMulticastLock(context) { delegate.readChannelInputs(channelIndices) }
+
+    override suspend fun captureAndApplyRouting(
+        channelIndices: Iterable<Int>,
+        targets: Map<Int, XAirChannelInputState>,
+        deferApply: Boolean,
+        soundcheck: Boolean,
+        probeTimeoutMs: Long,
+    ): org.openmultitrack.mixer.behringer.RoutingCaptureApplyResult =
+        OscLanSession.withMulticastLock(context) {
+            delegate.captureAndApplyRouting(
+                channelIndices,
+                targets,
+                deferApply,
+                soundcheck,
+                probeTimeoutMs,
+            )
+        }
+
     override suspend fun writeChannelInput(channelIndex: Int, state: XAirChannelInputState): Boolean =
         OscLanSession.withMulticastLock(context) { delegate.writeChannelInput(channelIndex, state) }
 

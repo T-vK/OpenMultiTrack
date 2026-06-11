@@ -9,6 +9,7 @@ import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.mixer.behringer.MixerRoutingPort
 import org.openmultitrack.mixer.behringer.XAirChannelInputState
 import org.openmultitrack.mixer.behringer.XAirInputSourceCatalog
+import org.openmultitrack.mixer.behringer.Xr18RoutingLog
 import org.openmultitrack.mixer.behringer.Xr18RoutingService
 import java.util.UUID
 
@@ -94,7 +95,7 @@ class RoutingOverrideCoordinator(
     ): RoutingRestoreOutcome {
         if (config.level == RoutingAutomationLevel.OFF) return RoutingRestoreOutcome.NothingPending
         if (!port.probe()) return RoutingRestoreOutcome.SkippedUnreachable
-        val live = port.readAllChannelInputs()
+        val live = port.readChannelInputs(pending.affectedChannels)
         val conflicts = detectConflicts(pending, live)
         return when {
             conflicts.isNotEmpty() && shouldAskConflicts(config, conflicts) ->
@@ -111,7 +112,7 @@ class RoutingOverrideCoordinator(
     ): RoutingRestoreOutcome {
         val port = routingFactory(pending.oscHost)
         if (!port.probe()) return RoutingRestoreOutcome.SkippedUnreachable
-        val live = port.readAllChannelInputs()
+        val live = port.readChannelInputs(pending.affectedChannels)
         return restoreInternal(pending, config, port, live)
     }
 
@@ -135,14 +136,22 @@ class RoutingOverrideCoordinator(
     ): RoutingApplyOutcome {
         if (config.level == RoutingAutomationLevel.OFF) return RoutingApplyOutcome.Disabled
         val port = routingFactory(pending.oscHost)
-        if (!port.probe(timeoutMs = 2500)) return RoutingApplyOutcome.SkippedUnreachable
         val channels = XAirInputSourceCatalog.routableIndices(pending.affectedChannels)
         if (channels.isEmpty()) return RoutingApplyOutcome.SkippedEmptyScope
-        val live = port.readAllChannelInputs()
-        val ok = when (pending.kind) {
-            RoutingOverrideKind.RECORD -> port.applyRecordRouting(channels, live)
-            RoutingOverrideKind.SOUNDCHECK -> port.applySoundcheckRouting(channels, live)
-        }
+        val t0 = System.nanoTime()
+        val session = port.captureAndApplyRouting(
+            channelIndices = channels,
+            targets = pending.overrideByChannel,
+            deferApply = false,
+            soundcheck = pending.kind == RoutingOverrideKind.SOUNDCHECK,
+            probeTimeoutMs = 2500,
+        )
+        Xr18RoutingLog.info(
+            "reapply ${pending.kind} ${channels.size} ch reachable=${session.reachable} " +
+                "applied=${session.applied} ${(System.nanoTime() - t0) / 1_000_000}ms",
+        )
+        if (!session.reachable) return RoutingApplyOutcome.SkippedUnreachable
+        val ok = session.applied
         return if (ok) {
             RoutingApplyOutcome.Applied(pending.transactionId)
         } else {
@@ -170,19 +179,60 @@ class RoutingOverrideCoordinator(
         if (routableChannels.isEmpty()) return RoutingApplyOutcome.SkippedEmptyScope
         val host = profile.oscHost ?: return RoutingApplyOutcome.SkippedNoOsc
         val routing = port ?: routingFactory(host)
-        if (!routing.probe(timeoutMs = 2500)) return RoutingApplyOutcome.SkippedUnreachable
-
-        val all = routing.readAllChannelInputs()
-        val baseline = routableChannels.associateWith { ch -> all[ch] }.filterValues { it != null }
-            .mapValues { it.value!! }
-        if (baseline.isEmpty()) return RoutingApplyOutcome.Failed("Could not read mixer routing")
-
         val overrideTargets = routableChannels.associateWith { ch ->
             when (kind) {
                 RoutingOverrideKind.RECORD -> XAirInputSourceCatalog.recordTarget(ch)
                 RoutingOverrideKind.SOUNDCHECK -> XAirInputSourceCatalog.soundcheckTarget(ch)
             }
         }
+
+        val snapshotSlot = when (kind) {
+            RoutingOverrideKind.RECORD -> config.recordSnapshotSlot
+            RoutingOverrideKind.SOUNDCHECK -> config.soundcheckSnapshotSlot
+        }
+        val t0 = System.nanoTime()
+        val (baseline, ok) = when (config.method) {
+            RoutingAutomationMethod.PER_CHANNEL -> {
+                val session = routing.captureAndApplyRouting(
+                    channelIndices = routableChannels,
+                    targets = overrideTargets,
+                    deferApply = deferOscApply,
+                    soundcheck = kind == RoutingOverrideKind.SOUNDCHECK,
+                    probeTimeoutMs = 2500,
+                )
+                if (!session.reachable) {
+                    return RoutingApplyOutcome.SkippedUnreachable
+                }
+                val captured = routableChannels.mapNotNull { ch ->
+                    session.liveByChannel[ch]?.let { ch to it }
+                }.toMap()
+                if (captured.isEmpty()) {
+                    return RoutingApplyOutcome.Failed("Could not read mixer routing")
+                }
+                captured to session.applied
+            }
+            RoutingAutomationMethod.SNAPSHOT_SLOT -> {
+                if (!routing.probe(timeoutMs = 2500)) {
+                    return RoutingApplyOutcome.SkippedUnreachable
+                }
+                val live = routing.readChannelInputs(routableChannels)
+                val captured = routableChannels.mapNotNull { ch ->
+                    live[ch]?.let { ch to it }
+                }.toMap()
+                if (captured.isEmpty()) {
+                    return RoutingApplyOutcome.Failed("Could not read mixer routing")
+                }
+                if (snapshotSlot !in 1..64) {
+                    return RoutingApplyOutcome.Failed("Snapshot slot not configured")
+                }
+                val loaded = if (deferOscApply) true else routing.loadSnapshot(snapshotSlot)
+                captured to loaded
+            }
+        }
+        Xr18RoutingLog.info(
+            "apply $kind ${routableChannels.size} ch deferOsc=$deferOscApply ok=$ok " +
+                "${(System.nanoTime() - t0) / 1_000_000}ms",
+        )
 
         val transactionId = UUID.randomUUID().toString()
         val pending = PendingRoutingRestore(
@@ -194,10 +244,7 @@ class RoutingOverrideCoordinator(
             baselineByChannel = baseline,
             overrideByChannel = overrideTargets,
             method = config.method,
-            snapshotSlot = when (kind) {
-                RoutingOverrideKind.RECORD -> config.recordSnapshotSlot
-                RoutingOverrideKind.SOUNDCHECK -> config.soundcheckSnapshotSlot
-            },
+            snapshotSlot = snapshotSlot,
             capturedAtEpochMs = System.currentTimeMillis(),
             recordingWasActive = recordingActive,
         )
@@ -205,21 +252,6 @@ class RoutingOverrideCoordinator(
 
         if (deferOscApply) {
             return RoutingApplyOutcome.Applied(transactionId)
-        }
-
-        val ok = when (config.method) {
-            RoutingAutomationMethod.PER_CHANNEL -> when (kind) {
-                RoutingOverrideKind.RECORD -> routing.applyRecordRouting(routableChannels, all)
-                RoutingOverrideKind.SOUNDCHECK -> routing.applySoundcheckRouting(routableChannels, all)
-            }
-            RoutingAutomationMethod.SNAPSHOT_SLOT -> {
-                val slot = pending.snapshotSlot
-                if (slot !in 1..64) {
-                    baselineStore.clear()
-                    return RoutingApplyOutcome.Failed("Snapshot slot not configured")
-                }
-                routing.loadSnapshot(slot)
-            }
         }
         if (!ok) {
             baselineStore.clear()

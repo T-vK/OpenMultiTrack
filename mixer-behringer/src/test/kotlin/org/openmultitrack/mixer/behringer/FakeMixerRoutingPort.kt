@@ -19,6 +19,31 @@ class FakeMixerRoutingPort(
     override suspend fun readAllChannelInputs(): Map<Int, XAirChannelInputState> =
         channels.toMap()
 
+    override suspend fun readChannelInputs(channelIndices: Iterable<Int>): Map<Int, XAirChannelInputState> =
+        channelIndices.mapNotNull { ch -> channels[ch]?.let { ch to it } }.toMap()
+
+    override suspend fun captureAndApplyRouting(
+        channelIndices: Iterable<Int>,
+        targets: Map<Int, XAirChannelInputState>,
+        deferApply: Boolean,
+        soundcheck: Boolean,
+        probeTimeoutMs: Long,
+    ): RoutingCaptureApplyResult {
+        if (!reachable) {
+            return RoutingCaptureApplyResult(false, emptyMap(), false)
+        }
+        val live = readChannelInputs(channelIndices)
+        if (deferApply) {
+            return RoutingCaptureApplyResult(true, live, true)
+        }
+        val applied = if (soundcheck) {
+            applySoundcheckRouting(channelIndices, live)
+        } else {
+            applyRecordRouting(channelIndices, live)
+        }
+        return RoutingCaptureApplyResult(true, live, applied)
+    }
+
     override suspend fun writeChannelInput(channelIndex: Int, state: XAirChannelInputState): Boolean {
         writes += channelIndex to state
         channels[channelIndex] = state

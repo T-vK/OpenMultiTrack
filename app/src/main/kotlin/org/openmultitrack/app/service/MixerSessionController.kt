@@ -706,6 +706,7 @@ class MixerSessionController(
 
     /** Stop USB capture/playback so XR18 accepts OSC routing changes (verified on hardware). */
     private suspend fun quiesceUsbBeforeRoutingLocked() {
+        val t0 = System.nanoTime()
         if (player.isPlaying) {
             player.stopAndAwait()
         }
@@ -718,6 +719,9 @@ class MixerSessionController(
         if (captureEngine.isCaptureActive && !_state.value.isRecording) {
             captureEngine.stopCapture()
         }
+        org.openmultitrack.mixer.behringer.Xr18RoutingLog.info(
+            "quiesceUsb ${(System.nanoTime() - t0) / 1_000_000}ms",
+        )
     }
 
     private suspend fun startSoundcheckPlaybackLocked(startFrame: Long, trace: TransportTrace? = null) {
