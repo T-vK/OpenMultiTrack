@@ -9,7 +9,6 @@ import org.openmultitrack.app.MainActivity
 import org.openmultitrack.app.R
 import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.isPlaybackMode
-import kotlin.math.max
 
 object SessionNotificationBuilder {
     fun build(
@@ -18,7 +17,6 @@ object SessionNotificationBuilder {
         mixerName: String?,
         media: SessionMediaNotification,
     ): NotificationCompat.Builder {
-        media.update(session, mixerName)
         val title = mixerName ?: context.getString(R.string.notification_title)
         val subtitle = statusLine(session)
         val openIntent = PendingIntent.getActivity(
@@ -30,11 +28,11 @@ object SessionNotificationBuilder {
         val builder = NotificationCompat.Builder(context, AudioSessionService.CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(subtitle)
-            .setSubText(session?.statusMessage)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(openIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setShowWhen(false)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -47,25 +45,15 @@ object SessionNotificationBuilder {
         return builder
     }
 
+    /** Static mode label — elapsed/position time is rendered by the system from [MediaSessionCompat]. */
     fun statusLine(session: MixerSessionUiState?): String = when {
         session == null -> "Audio session active"
-        session.isRecording -> "Recording · ${formatSec(session.recordElapsedSec)}"
-        session.isPlaying -> {
-            val pos = formatSec(session.playbackPositionSec)
-            val dur = session.playbackDurationSec.takeIf { it > 0f }?.let { formatSec(it) }
-            if (dur != null) "Playing · $pos / $dur" else "Playing · $pos"
-        }
+        session.isRecording -> "Recording"
+        session.isPlaying -> "Playing"
         session.isMonitoring -> "Monitoring"
         session.appMode == AppMode.MULTITRACK_RECORD -> "Ready to record"
         session.appMode.isPlaybackMode -> "Soundcheck"
         else -> "Audio session active"
-    }
-
-    private fun formatSec(sec: Float): String {
-        val total = max(0, sec.toInt())
-        val m = total / 60
-        val s = total % 60
-        return "%d:%02d".format(m, s)
     }
 
     private fun addTransportActions(

@@ -11,7 +11,6 @@ import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
-import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -37,6 +36,7 @@ class AudioSessionService : Service() {
     private lateinit var mediaNotification: SessionMediaNotification
     private val notificationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var notificationRefreshJob: Job? = null
+    private var lastNotificationSignature: Int? = null
 
     @Volatile
     var isInForeground: Boolean = false
@@ -68,7 +68,7 @@ class AudioSessionService : Service() {
         remoteControl.applyRole(settings.remoteRole)
         AudioSessionBridge.mixerManager = mixerManager
         AudioSessionBridge.activeMixerId = { mixerManager.activeMixerId.value }
-        AudioSessionBridge.refreshNotification = { refreshForegroundNotification() }
+        AudioSessionBridge.refreshNotification = { refreshForegroundNotification(forceRebuild = true) }
         mediaNotification = SessionMediaNotification(this)
         createNotificationChannel()
         OmtLog.i("Service", "AudioSessionService created")
@@ -106,9 +106,9 @@ class AudioSessionService : Service() {
     }
 
     fun promoteToForeground(status: String? = null): Boolean {
-        val notification = buildNotification(status ?: "Audio session active").build()
         return try {
             if (!isInForeground) {
+                val notification = buildAndPostNotification()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                         ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
@@ -124,7 +124,7 @@ class AudioSessionService : Service() {
                 isInForeground = true
                 startNotificationRefresh()
             } else {
-                refreshForegroundNotification(status)
+                refreshForegroundNotification(forceRebuild = true)
             }
             true
         } catch (e: Exception) {
@@ -134,26 +134,52 @@ class AudioSessionService : Service() {
     }
 
     fun updateNotification(status: String) {
-        refreshForegroundNotification(status)
+        refreshForegroundNotification(forceRebuild = true)
     }
 
-    fun refreshForegroundNotification(status: String? = null) {
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, buildNotification(status ?: "Audio session active").build())
+    fun refreshForegroundNotification(forceRebuild: Boolean = false) {
+        if (!isInForeground) return
+        val session = activeSession()
+        val mixerName = session?.mixerProfile?.displayName
+        val signature = mediaNotification.layoutSignature(session, mixerName)
+        if (forceRebuild || signature != lastNotificationSignature) {
+            buildAndPostNotification()
+        } else {
+            mediaNotification.updateProgress(session)
+        }
     }
 
     private fun startNotificationRefresh() {
         if (notificationRefreshJob?.isActive == true) return
         notificationRefreshJob = notificationScope.launch {
             while (isActive) {
-                refreshForegroundNotification()
-                delay(500)
+                refreshForegroundNotification(forceRebuild = false)
+                delay(1000)
             }
         }
     }
 
+    private fun activeSession(): MixerSessionUiState? {
+        val activeId = mixerManager.activeMixerId.value ?: return null
+        return mixerManager.getOrCreate(activeId).state.value
+    }
+
+    private fun buildAndPostNotification(): Notification {
+        val session = activeSession()
+        val mixerName = session?.mixerProfile?.displayName
+        mediaNotification.applySession(session, mixerName)
+        lastNotificationSignature = mediaNotification.layoutSignature(session, mixerName)
+        val notification = SessionNotificationBuilder
+            .build(this, session, mixerName, mediaNotification)
+            .build()
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(NOTIFICATION_ID, notification)
+        return notification
+    }
+
     fun stopForegroundAndSelf() {
         notificationRefreshJob?.cancel()
+        lastNotificationSignature = null
         isInForeground = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -162,14 +188,6 @@ class AudioSessionService : Service() {
             stopForeground(true)
         }
         stopSelf()
-    }
-
-    private fun buildNotification(status: String): NotificationCompat.Builder {
-        val activeId = mixerManager.activeMixerId.value
-        val session = activeId?.let { mixerManager.getOrCreate(it).state.value }
-        val mixerName = session?.mixerProfile?.displayName
-        return SessionNotificationBuilder.build(this, session, mixerName, mediaNotification)
-            .setContentText(status)
     }
 
     private fun createNotificationChannel() {
