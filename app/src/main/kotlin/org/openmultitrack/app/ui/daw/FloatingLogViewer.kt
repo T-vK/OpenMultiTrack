@@ -7,13 +7,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,6 +39,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -55,6 +57,22 @@ import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import org.openmultitrack.app.util.AppLogBuffer
+
+private const val MIN_WINDOW_WIDTH_DP = 220f
+private const val MIN_WINDOW_HEIGHT_DP = 160f
+private val RESIZE_HANDLE_THICKNESS = 14.dp
+private val RESIZE_CORNER_SIZE = 22.dp
+
+private enum class ResizeEdge {
+    Top,
+    Bottom,
+    Left,
+    Right,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
 
 private enum class FloatingLogMode {
     Minimized,
@@ -101,6 +119,12 @@ fun FloatingLogViewerOverlay(
                 onMove = { dx, dy ->
                     offsetX = (offsetX + dx).coerceAtLeast(0f)
                     offsetY = (offsetY + dy).coerceAtLeast(0f)
+                },
+                onResize = { newX, newY, newWidthDp, newHeightDp ->
+                    offsetX = newX.coerceAtLeast(0f)
+                    offsetY = newY.coerceAtLeast(0f)
+                    windowWidthDp = newWidthDp.coerceAtLeast(MIN_WINDOW_WIDTH_DP)
+                    windowHeightDp = newHeightDp.coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
                 },
                 onMinimize = { mode = FloatingLogMode.Minimized },
                 onMaximize = { mode = FloatingLogMode.Maximized },
@@ -150,34 +174,212 @@ private fun FloatingLogWindow(
     widthDp: Float,
     heightDp: Float,
     onMove: (dx: Float, dy: Float) -> Unit,
+    onResize: (x: Float, y: Float, widthDp: Float, heightDp: Float) -> Unit,
     onMinimize: () -> Unit,
     onMaximize: () -> Unit,
     onClose: () -> Unit,
 ) {
     val density = LocalDensity.current
-    Surface(
+    Box(
         modifier = Modifier
             .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
-            .widthIn(min = 240.dp)
-            .then(
-                with(density) {
-                    Modifier.size(widthDp.dp, heightDp.dp)
-                },
-            )
-            .shadow(12.dp, RoundedCornerShape(12.dp)),
-        shape = RoundedCornerShape(12.dp),
-        tonalElevation = 6.dp,
+            .size(widthDp.dp, heightDp.dp),
     ) {
-        LogViewerContent(
-            title = "Debug log",
-            onDragTitleBar = onMove,
-            onMinimize = onMinimize,
-            onMaximize = onMaximize,
-            onClose = onClose,
-            maximizeIcon = Icons.Default.Fullscreen,
-            maximizeContentDescription = "Maximize",
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .shadow(12.dp, RoundedCornerShape(12.dp)),
+            shape = RoundedCornerShape(12.dp),
+            tonalElevation = 6.dp,
+        ) {
+            LogViewerContent(
+                title = "Debug log",
+                onDragTitleBar = onMove,
+                onMinimize = onMinimize,
+                onMaximize = onMaximize,
+                onClose = onClose,
+                maximizeIcon = Icons.Default.Fullscreen,
+                maximizeContentDescription = "Maximize",
+            )
+        }
+        ResizeHandle(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .height(RESIZE_HANDLE_THICKNESS),
+            edge = ResizeEdge.Top,
+            offsetX = offsetX,
+            offsetY = offsetY,
+            widthDp = widthDp,
+            heightDp = heightDp,
+            density = density.density,
+            onResize = onResize,
+        )
+        ResizeHandle(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(RESIZE_HANDLE_THICKNESS),
+            edge = ResizeEdge.Bottom,
+            offsetX = offsetX,
+            offsetY = offsetY,
+            widthDp = widthDp,
+            heightDp = heightDp,
+            density = density.density,
+            onResize = onResize,
+        )
+        ResizeHandle(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .fillMaxHeight()
+                .width(RESIZE_HANDLE_THICKNESS),
+            edge = ResizeEdge.Left,
+            offsetX = offsetX,
+            offsetY = offsetY,
+            widthDp = widthDp,
+            heightDp = heightDp,
+            density = density.density,
+            onResize = onResize,
+        )
+        ResizeHandle(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .width(RESIZE_HANDLE_THICKNESS),
+            edge = ResizeEdge.Right,
+            offsetX = offsetX,
+            offsetY = offsetY,
+            widthDp = widthDp,
+            heightDp = heightDp,
+            density = density.density,
+            onResize = onResize,
+        )
+        ResizeHandle(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .size(RESIZE_CORNER_SIZE),
+            edge = ResizeEdge.TopLeft,
+            offsetX = offsetX,
+            offsetY = offsetY,
+            widthDp = widthDp,
+            heightDp = heightDp,
+            density = density.density,
+            onResize = onResize,
+        )
+        ResizeHandle(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .size(RESIZE_CORNER_SIZE),
+            edge = ResizeEdge.TopRight,
+            offsetX = offsetX,
+            offsetY = offsetY,
+            widthDp = widthDp,
+            heightDp = heightDp,
+            density = density.density,
+            onResize = onResize,
+        )
+        ResizeHandle(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .size(RESIZE_CORNER_SIZE),
+            edge = ResizeEdge.BottomLeft,
+            offsetX = offsetX,
+            offsetY = offsetY,
+            widthDp = widthDp,
+            heightDp = heightDp,
+            density = density.density,
+            onResize = onResize,
+        )
+        ResizeHandle(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .size(RESIZE_CORNER_SIZE),
+            edge = ResizeEdge.BottomRight,
+            offsetX = offsetX,
+            offsetY = offsetY,
+            widthDp = widthDp,
+            heightDp = heightDp,
+            density = density.density,
+            onResize = onResize,
         )
     }
+}
+
+@Composable
+private fun ResizeHandle(
+    modifier: Modifier,
+    edge: ResizeEdge,
+    offsetX: Float,
+    offsetY: Float,
+    widthDp: Float,
+    heightDp: Float,
+    density: Float,
+    onResize: (x: Float, y: Float, widthDp: Float, heightDp: Float) -> Unit,
+) {
+    val currentOffsetX by rememberUpdatedState(offsetX)
+    val currentOffsetY by rememberUpdatedState(offsetY)
+    val currentWidthDp by rememberUpdatedState(widthDp)
+    val currentHeightDp by rememberUpdatedState(heightDp)
+    val onResizeState by rememberUpdatedState(onResize)
+
+    Box(
+        modifier = modifier.pointerInput(edge) {
+            detectDragGestures { change, dragAmount ->
+                change.consume()
+                val dxDp = dragAmount.x / density
+                val dyDp = dragAmount.y / density
+                var newX = currentOffsetX
+                var newY = currentOffsetY
+                var newWidth = currentWidthDp
+                var newHeight = currentHeightDp
+                when (edge) {
+                    ResizeEdge.Right -> newWidth = (currentWidthDp + dxDp).coerceAtLeast(MIN_WINDOW_WIDTH_DP)
+                    ResizeEdge.Bottom -> newHeight = (currentHeightDp + dyDp).coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
+                    ResizeEdge.Left -> {
+                        val target = (currentWidthDp - dxDp).coerceAtLeast(MIN_WINDOW_WIDTH_DP)
+                        val appliedDp = currentWidthDp - target
+                        newWidth = target
+                        newX = currentOffsetX + appliedDp * density
+                    }
+                    ResizeEdge.Top -> {
+                        val target = (currentHeightDp - dyDp).coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
+                        val appliedDp = currentHeightDp - target
+                        newHeight = target
+                        newY = currentOffsetY + appliedDp * density
+                    }
+                    ResizeEdge.BottomRight -> {
+                        newWidth = (currentWidthDp + dxDp).coerceAtLeast(MIN_WINDOW_WIDTH_DP)
+                        newHeight = (currentHeightDp + dyDp).coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
+                    }
+                    ResizeEdge.BottomLeft -> {
+                        val target = (currentWidthDp - dxDp).coerceAtLeast(MIN_WINDOW_WIDTH_DP)
+                        val appliedDp = currentWidthDp - target
+                        newWidth = target
+                        newX = currentOffsetX + appliedDp * density
+                        newHeight = (currentHeightDp + dyDp).coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
+                    }
+                    ResizeEdge.TopRight -> {
+                        newWidth = (currentWidthDp + dxDp).coerceAtLeast(MIN_WINDOW_WIDTH_DP)
+                        val target = (currentHeightDp - dyDp).coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
+                        val appliedDp = currentHeightDp - target
+                        newHeight = target
+                        newY = currentOffsetY + appliedDp * density
+                    }
+                    ResizeEdge.TopLeft -> {
+                        val targetW = (currentWidthDp - dxDp).coerceAtLeast(MIN_WINDOW_WIDTH_DP)
+                        val appliedWDp = currentWidthDp - targetW
+                        newWidth = targetW
+                        newX = currentOffsetX + appliedWDp * density
+                        val targetH = (currentHeightDp - dyDp).coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
+                        val appliedHDp = currentHeightDp - targetH
+                        newHeight = targetH
+                        newY = currentOffsetY + appliedHDp * density
+                    }
+                }
+                onResizeState(newX, newY, newWidth, newHeight)
+            }
+        },
+    )
 }
 
 @Composable
