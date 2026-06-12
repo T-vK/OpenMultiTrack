@@ -174,7 +174,16 @@ object AppLogBuffer {
     fun clearCurrentSession(context: Context? = null) {
         lines.clear()
         revision++
-        context?.let { autoPersistFile(it).delete() }
+        context?.let { ctx ->
+            val dir = logDir(ctx)
+            if (dir.isDirectory) {
+                dir.listFiles()?.forEach { file ->
+                    if (file.isFile && file.extension == "txt") {
+                        file.delete()
+                    }
+                }
+            }
+        }
         if (autoPersistEnabled && context != null) scheduleAutoFlush()
     }
 

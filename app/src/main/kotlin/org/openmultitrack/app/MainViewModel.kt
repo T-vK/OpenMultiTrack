@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.openmultitrack.app.BuildConfig
 import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.data.RecordingStorageResolver
 import org.openmultitrack.app.data.StorageVolumeOption
@@ -267,6 +268,7 @@ class MainViewModel(
             minFreeStorageBytes = settings.minFreeStorageBytes,
             batteryOptimizationIgnored = org.openmultitrack.app.data.StorageAccessHelper
                 .isIgnoringBatteryOptimizations(appContext),
+            showLogViewer = BuildConfig.DEBUG && settings.devLogViewerVisible,
         ),
     )
     val uiState: StateFlow<DawUiState> = _uiState.asStateFlow()
@@ -1831,6 +1833,9 @@ class MainViewModel(
     }
 
     fun showLogViewer(show: Boolean) {
+        if (BuildConfig.DEBUG) {
+            settings.devLogViewerVisible = show
+        }
         _uiState.update { it.copy(showLogViewer = show) }
     }
 

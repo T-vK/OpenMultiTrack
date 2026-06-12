@@ -49,7 +49,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -206,6 +205,13 @@ private enum class FloatingLogMode {
     Maximized,
 }
 
+private fun FloatingLogMode.toStoredOrdinal(): Int = ordinal
+
+private fun floatingLogModeFromStored(ordinal: Int): FloatingLogMode =
+    FloatingLogMode.entries.getOrElse(ordinal.coerceIn(0, FloatingLogMode.entries.lastIndex)) {
+        FloatingLogMode.Window
+    }
+
 /**
  * Developer-only floating log overlay. Stays above the DAW while mixing/recording.
  */
@@ -214,15 +220,41 @@ fun FloatingLogViewerOverlay(
     visible: Boolean,
     onDismiss: () -> Unit,
 ) {
-    if (!visible) return
+    val context = LocalContext.current
+    val settings = remember(context) { AppSettingsStore(context) }
 
-    var mode by rememberSaveable { mutableStateOf(FloatingLogMode.Window) }
-    var windowOffsetXDp by rememberSaveable { mutableFloatStateOf(16f) }
-    var windowOffsetYDp by rememberSaveable { mutableFloatStateOf(96f) }
-    var windowWidthDp by rememberSaveable { mutableFloatStateOf(DEFAULT_WINDOW_WIDTH_DP) }
-    var windowHeightDp by rememberSaveable { mutableFloatStateOf(DEFAULT_WINDOW_HEIGHT_DP) }
-    var fabOffsetXDp by rememberSaveable { mutableFloatStateOf(UNSET_FAB_POSITION) }
-    var fabOffsetYDp by rememberSaveable { mutableFloatStateOf(UNSET_FAB_POSITION) }
+    var mode by remember {
+        mutableStateOf(floatingLogModeFromStored(settings.devLogViewerMode))
+    }
+    var windowOffsetXDp by remember { mutableFloatStateOf(settings.devLogWindowXDp) }
+    var windowOffsetYDp by remember { mutableFloatStateOf(settings.devLogWindowYDp) }
+    var windowWidthDp by remember { mutableFloatStateOf(settings.devLogWindowWidthDp) }
+    var windowHeightDp by remember { mutableFloatStateOf(settings.devLogWindowHeightDp) }
+    var fabOffsetXDp by remember { mutableFloatStateOf(settings.devLogFabXDp) }
+    var fabOffsetYDp by remember { mutableFloatStateOf(settings.devLogFabYDp) }
+    var textScale by remember { mutableFloatStateOf(settings.devLogTextScale) }
+
+    LaunchedEffect(
+        mode,
+        windowOffsetXDp,
+        windowOffsetYDp,
+        windowWidthDp,
+        windowHeightDp,
+        fabOffsetXDp,
+        fabOffsetYDp,
+        textScale,
+    ) {
+        settings.devLogViewerMode = mode.toStoredOrdinal()
+        settings.devLogWindowXDp = windowOffsetXDp
+        settings.devLogWindowYDp = windowOffsetYDp
+        settings.devLogWindowWidthDp = windowWidthDp
+        settings.devLogWindowHeightDp = windowHeightDp
+        settings.devLogFabXDp = fabOffsetXDp
+        settings.devLogFabYDp = fabOffsetYDp
+        settings.devLogTextScale = textScale
+    }
+
+    if (!visible) return
 
     val density = LocalDensity.current
 
@@ -270,6 +302,8 @@ fun FloatingLogViewerOverlay(
                 offsetYDp = windowOffsetYDp,
                 widthDp = windowWidthDp,
                 heightDp = windowHeightDp,
+                textScale = textScale,
+                onTextScaleChange = { textScale = it },
                 screenWidthDp = screenWidthDp,
                 screenHeightDp = screenHeightDp,
                 onMove = { dxPx, dyPx ->
@@ -306,6 +340,8 @@ fun FloatingLogViewerOverlay(
                 onClose = onDismiss,
             )
             FloatingLogMode.Maximized -> FloatingLogMaximized(
+                textScale = textScale,
+                onTextScaleChange = { textScale = it },
                 onRestore = { mode = FloatingLogMode.Window },
                 onMinimize = {
                     ensureFabPosition()
@@ -351,6 +387,8 @@ private fun FloatingLogWindow(
     offsetYDp: Float,
     widthDp: Float,
     heightDp: Float,
+    textScale: Float,
+    onTextScaleChange: (Float) -> Unit,
     screenWidthDp: Float,
     screenHeightDp: Float,
     onMove: (dxPx: Float, dyPx: Float) -> Unit,
@@ -401,6 +439,8 @@ private fun FloatingLogWindow(
                 title = "Debug log",
                 onDragTitleBar = onMove,
                 freezeLogUpdates = isResizing,
+                textScale = textScale,
+                onTextScaleChange = onTextScaleChange,
                 onMinimize = onMinimize,
                 onMaximize = onMaximize,
                 onClose = onClose,
@@ -536,6 +576,8 @@ private fun ResizeHandle(
 
 @Composable
 private fun FloatingLogMaximized(
+    textScale: Float,
+    onTextScaleChange: (Float) -> Unit,
     onRestore: () -> Unit,
     onMinimize: () -> Unit,
     onClose: () -> Unit,
@@ -558,6 +600,8 @@ private fun FloatingLogMaximized(
             LogViewerContent(
                 title = "Debug log",
                 onDragTitleBar = null,
+                textScale = textScale,
+                onTextScaleChange = onTextScaleChange,
                 onMinimize = onMinimize,
                 onMaximize = onRestore,
                 onClose = onClose,
@@ -573,6 +617,8 @@ private fun LogViewerContent(
     title: String,
     onDragTitleBar: ((dxPx: Float, dyPx: Float) -> Unit)?,
     freezeLogUpdates: Boolean = false,
+    textScale: Float,
+    onTextScaleChange: (Float) -> Unit,
     onMinimize: () -> Unit,
     onMaximize: () -> Unit,
     onClose: () -> Unit,
@@ -589,8 +635,7 @@ private fun LogViewerContent(
     var levelFilterMask by remember { mutableIntStateOf(settings.devLogLevelFilterMask) }
     var showMenuBar by remember { mutableStateOf(settings.devLogShowMenuBar) }
     var wordWrap by remember { mutableStateOf(settings.devLogWordWrap) }
-    var refreshTick by remember { mutableIntStateOf(0) }
-    var textScale by rememberSaveable { mutableFloatStateOf(1f) }
+    var refreshTick by remember { mutableIntStateOf(AppLogBuffer.revision) }
 
     LaunchedEffect(autoPersist) {
         settings.devLogAutoPersist = autoPersist
@@ -637,7 +682,7 @@ private fun LogViewerContent(
     val horizontalScroll = rememberScrollState()
     val transformState = rememberTransformableState { zoomChange, _, _ ->
         if (zoomChange != 1f) {
-            textScale = (textScale * zoomChange).coerceIn(0.5f, 4f)
+            onTextScaleChange((textScale * zoomChange).coerceIn(0.5f, 4f))
         }
     }
 
@@ -728,7 +773,10 @@ private fun LogViewerContent(
                 coloredLevels = coloredLevels,
                 levelFilterMask = levelFilterMask,
                 onCopy = { clipboard.setText(AnnotatedString(logText)) },
-                onClear = { AppLogBuffer.clearCurrentSession(context) },
+                onClear = {
+                    AppLogBuffer.clearCurrentSession(context)
+                    refreshTick = AppLogBuffer.revision
+                },
                 onAutoPersistChange = { autoPersist = it },
                 onHideTimestampsChange = {
                     hideTimestamps = it

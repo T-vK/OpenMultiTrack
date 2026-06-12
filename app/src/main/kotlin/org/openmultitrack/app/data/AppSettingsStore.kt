@@ -133,6 +133,45 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getInt(KEY_DEV_LOG_LEVEL_FILTER_MASK, org.openmultitrack.app.util.DevLogLevelMask.ALL)
         set(value) = prefs.edit().putInt(KEY_DEV_LOG_LEVEL_FILTER_MASK, value).apply()
 
+    /** Floating debug log viewer was open when the app last exited. */
+    var devLogViewerVisible: Boolean
+        get() = prefs.getBoolean(KEY_DEV_LOG_VIEWER_VISIBLE, false)
+        set(value) = prefs.edit().putBoolean(KEY_DEV_LOG_VIEWER_VISIBLE, value).apply()
+
+    /** 0 = minimized, 1 = window, 2 = maximized — see floating log viewer. */
+    var devLogViewerMode: Int
+        get() = prefs.getInt(KEY_DEV_LOG_VIEWER_MODE, 1).coerceIn(0, 2)
+        set(value) = prefs.edit().putInt(KEY_DEV_LOG_VIEWER_MODE, value.coerceIn(0, 2)).apply()
+
+    var devLogWindowXDp: Float
+        get() = prefs.getFloat(KEY_DEV_LOG_WINDOW_X, 16f)
+        set(value) = prefs.edit().putFloat(KEY_DEV_LOG_WINDOW_X, value).apply()
+
+    var devLogWindowYDp: Float
+        get() = prefs.getFloat(KEY_DEV_LOG_WINDOW_Y, 96f)
+        set(value) = prefs.edit().putFloat(KEY_DEV_LOG_WINDOW_Y, value).apply()
+
+    var devLogWindowWidthDp: Float
+        get() = prefs.getFloat(KEY_DEV_LOG_WINDOW_WIDTH, 340f)
+        set(value) = prefs.edit().putFloat(KEY_DEV_LOG_WINDOW_WIDTH, value).apply()
+
+    var devLogWindowHeightDp: Float
+        get() = prefs.getFloat(KEY_DEV_LOG_WINDOW_HEIGHT, 340f * 9f / 16f)
+        set(value) = prefs.edit().putFloat(KEY_DEV_LOG_WINDOW_HEIGHT, value).apply()
+
+    /** -1 means unset; FAB uses default corner position. */
+    var devLogFabXDp: Float
+        get() = prefs.getFloat(KEY_DEV_LOG_FAB_X, -1f)
+        set(value) = prefs.edit().putFloat(KEY_DEV_LOG_FAB_X, value).apply()
+
+    var devLogFabYDp: Float
+        get() = prefs.getFloat(KEY_DEV_LOG_FAB_Y, -1f)
+        set(value) = prefs.edit().putFloat(KEY_DEV_LOG_FAB_Y, value).apply()
+
+    var devLogTextScale: Float
+        get() = prefs.getFloat(KEY_DEV_LOG_TEXT_SCALE, 1f).coerceIn(0.5f, 4f)
+        set(value) = prefs.edit().putFloat(KEY_DEV_LOG_TEXT_SCALE, value.coerceIn(0.5f, 4f)).apply()
+
     var hideArmButton: Boolean
         get() = prefs.getBoolean(KEY_HIDE_ARM, false)
         set(value) = prefs.edit().putBoolean(KEY_HIDE_ARM, value).apply()
@@ -403,6 +442,15 @@ class AppSettingsStore(context: Context) {
         private const val KEY_DEV_LOG_COLORED_LEVELS = "dev_log_colored_levels"
         private const val KEY_DEV_LOG_WORD_WRAP = "dev_log_word_wrap"
         private const val KEY_DEV_LOG_LEVEL_FILTER_MASK = "dev_log_level_filter_mask"
+        private const val KEY_DEV_LOG_VIEWER_VISIBLE = "dev_log_viewer_visible"
+        private const val KEY_DEV_LOG_VIEWER_MODE = "dev_log_viewer_mode"
+        private const val KEY_DEV_LOG_WINDOW_X = "dev_log_window_x_dp"
+        private const val KEY_DEV_LOG_WINDOW_Y = "dev_log_window_y_dp"
+        private const val KEY_DEV_LOG_WINDOW_WIDTH = "dev_log_window_width_dp"
+        private const val KEY_DEV_LOG_WINDOW_HEIGHT = "dev_log_window_height_dp"
+        private const val KEY_DEV_LOG_FAB_X = "dev_log_fab_x_dp"
+        private const val KEY_DEV_LOG_FAB_Y = "dev_log_fab_y_dp"
+        private const val KEY_DEV_LOG_TEXT_SCALE = "dev_log_text_scale"
         private const val KEY_HIDE_ARM = "hide_arm_button"
         private const val KEY_HIDE_MONITOR = "hide_monitor_button"
         private const val KEY_HIDE_SOLO = "hide_solo_button"

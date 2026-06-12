@@ -49,7 +49,8 @@ fun LogViewerScreen(
     var hideTimestamps by remember { mutableStateOf(settings.devLogHideTimestamps) }
     var coloredLevels by remember { mutableStateOf(settings.devLogColoredLevels) }
     var levelFilterMask by remember { mutableIntStateOf(settings.devLogLevelFilterMask) }
-    val logEntries = remember(autoPersist, levelFilterMask) {
+    var refreshTick by remember { mutableIntStateOf(AppLogBuffer.revision) }
+    val logEntries = remember(refreshTick, autoPersist, levelFilterMask) {
         AppLogBuffer.collectDisplayEntries(
             context = context,
             includePersisted = autoPersist,
@@ -100,7 +101,12 @@ fun LogViewerScreen(
                 ) {
                     Text("Copy")
                 }
-                TextButton(onClick = { AppLogBuffer.clearCurrentSession(context) }) {
+                TextButton(
+                    onClick = {
+                        AppLogBuffer.clearCurrentSession(context)
+                        refreshTick = AppLogBuffer.revision
+                    },
+                ) {
                     Text("Clear")
                 }
             }
