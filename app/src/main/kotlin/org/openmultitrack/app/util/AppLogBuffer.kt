@@ -9,6 +9,36 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
 
+object DevLogLevelMask {
+    const val DEBUG = 1 shl 0
+    const val INFO = 1 shl 1
+    const val WARN = 1 shl 2
+    const val ERROR = 1 shl 3
+    const val ALL = DEBUG or INFO or WARN or ERROR
+
+    fun maskFor(level: Char): Int = when (level.uppercaseChar()) {
+        'D' -> DEBUG
+        'I' -> INFO
+        'W' -> WARN
+        'E' -> ERROR
+        else -> ALL
+    }
+
+    fun isEnabled(mask: Int, level: Char): Boolean = mask and maskFor(level) != 0
+}
+
+data class ParsedLogLine(
+    val timestamp: String,
+    val level: Char,
+    val tag: String,
+    val message: String,
+)
+
+sealed class LogDisplayEntry {
+    data class Section(val text: String) : LogDisplayEntry()
+    data class Line(val parsed: ParsedLogLine) : LogDisplayEntry()
+}
+
 object AppLogBuffer {
     private const val MAX_LINES = 2000
     private const val LOG_DIR = "logs"
@@ -18,6 +48,9 @@ object AppLogBuffer {
     private val fmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
     private val sessionFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
     private val timestampPrefix = Regex("^\\d{2}:\\d{2}:\\d{2}\\.\\d{3} ")
+    private val logLinePattern = Regex(
+        "^(\\d{2}:\\d{2}:\\d{2}\\.\\d{3}) ([DIWE])/([^:]+): (.*)$",
+    )
 
     @Volatile
     var revision: Int = 0
@@ -71,6 +104,70 @@ object AppLogBuffer {
             .forEach { line -> append(level, tag, line) }
     }
 
+    fun parseLogLine(raw: String): ParsedLogLine? {
+        val match = logLinePattern.matchEntire(raw) ?: return null
+        return ParsedLogLine(
+            timestamp = match.groupValues[1],
+            level = match.groupValues[2][0],
+            tag = match.groupValues[3],
+            message = match.groupValues[4],
+        )
+    }
+
+    fun formatPlainLine(
+        parsed: ParsedLogLine,
+        hideTimestamps: Boolean,
+        coloredLevels: Boolean,
+    ): String {
+        val body = if (coloredLevels) {
+            "${parsed.tag}: ${parsed.message}"
+        } else {
+            "${parsed.level}/${parsed.tag}: ${parsed.message}"
+        }
+        return if (hideTimestamps) body else "${parsed.timestamp} $body"
+    }
+
+    fun collectDisplayEntries(
+        context: Context,
+        includePersisted: Boolean,
+        levelMask: Int = DevLogLevelMask.ALL,
+    ): List<LogDisplayEntry> {
+        val rawLines = rawDisplayLines(context, includePersisted)
+        if (rawLines.isEmpty()) return emptyList()
+        return rawLines.mapNotNull { raw ->
+            when {
+                raw.isBlank() -> null
+                else -> {
+                    val parsed = parseLogLine(raw)
+                    if (parsed != null && DevLogLevelMask.isEnabled(levelMask, parsed.level)) {
+                        LogDisplayEntry.Line(parsed)
+                    } else if (parsed != null) {
+                        null
+                    } else {
+                        LogDisplayEntry.Section(raw)
+                    }
+                }
+            }
+        }
+    }
+
+    fun displayPlainText(
+        context: Context,
+        includePersisted: Boolean,
+        hideTimestamps: Boolean = false,
+        coloredLevels: Boolean = false,
+        levelMask: Int = DevLogLevelMask.ALL,
+    ): String {
+        val entries = collectDisplayEntries(context, includePersisted, levelMask)
+        if (entries.isEmpty()) return "(empty)"
+        return entries.joinToString("\n") { entry ->
+            when (entry) {
+                is LogDisplayEntry.Section -> entry.text
+                is LogDisplayEntry.Line -> formatPlainLine(entry.parsed, hideTimestamps, coloredLevels)
+            }
+        }
+    }
+
     fun currentSessionText(hideTimestamps: Boolean = false): String =
         formatLines(lines, hideTimestamps)
 
@@ -115,19 +212,11 @@ object AppLogBuffer {
         context: Context,
         includePersisted: Boolean,
         hideTimestamps: Boolean = false,
-    ): String {
-        val current = currentSessionText(hideTimestamps)
-        if (!includePersisted) {
-            return current.ifBlank { "(empty)" }
-        }
-        val persisted = persistedSessionsText(context, hideTimestamps)
-        return when {
-            persisted.isBlank() && current.isBlank() -> "(empty)"
-            persisted.isBlank() -> current
-            current.isBlank() -> persisted
-            else -> "$persisted\n\n──── current session ────\n\n$current"
-        }
-    }
+    ): String = displayPlainText(
+        context = context,
+        includePersisted = includePersisted,
+        hideTimestamps = hideTimestamps,
+    )
 
     fun flushAutoPersist(context: Context) {
         if (!autoPersistEnabled) return
@@ -139,6 +228,37 @@ object AppLogBuffer {
             file.delete()
         } else {
             file.writeText(snapshot)
+        }
+    }
+
+    private fun rawDisplayLines(context: Context, includePersisted: Boolean): List<String> {
+        val current = lines.toList()
+        if (!includePersisted) return current
+        val persisted = persistedSessionRawLines(context)
+        return when {
+            persisted.isEmpty() -> current
+            current.isEmpty() -> persisted
+            else -> persisted + listOf("", "──── current session ────", "") + current
+        }
+    }
+
+    private fun persistedSessionRawLines(context: Context): List<String> {
+        val dir = logDir(context)
+        if (!dir.isDirectory) return emptyList()
+        val files = dir.listFiles()
+            ?.filter { file ->
+                file.isFile && file.extension == "txt" && file.name != AUTO_PERSIST_FILE
+            }
+            ?.sortedByDescending { it.lastModified() }
+            .orEmpty()
+        if (files.isEmpty()) return emptyList()
+        return files.flatMapIndexed { index, file ->
+            val header = listOf(
+                "Saved ${sessionFmt.format(Date(file.lastModified()))} (${file.name})",
+            )
+            val body = file.readLines()
+            val separator = if (index == 0) emptyList() else listOf("", "──── previous session ────", "")
+            separator + header + body
         }
     }
 

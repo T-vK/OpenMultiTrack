@@ -120,6 +120,15 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_DEV_LOG_SHOW_MENU_BAR, true)
         set(value) = prefs.edit().putBoolean(KEY_DEV_LOG_SHOW_MENU_BAR, value).apply()
 
+    var devLogColoredLevels: Boolean
+        get() = prefs.getBoolean(KEY_DEV_LOG_COLORED_LEVELS, false)
+        set(value) = prefs.edit().putBoolean(KEY_DEV_LOG_COLORED_LEVELS, value).apply()
+
+    /** Bitmask of enabled levels — see [org.openmultitrack.app.util.DevLogLevelMask]. */
+    var devLogLevelFilterMask: Int
+        get() = prefs.getInt(KEY_DEV_LOG_LEVEL_FILTER_MASK, org.openmultitrack.app.util.DevLogLevelMask.ALL)
+        set(value) = prefs.edit().putInt(KEY_DEV_LOG_LEVEL_FILTER_MASK, value).apply()
+
     var hideArmButton: Boolean
         get() = prefs.getBoolean(KEY_HIDE_ARM, false)
         set(value) = prefs.edit().putBoolean(KEY_HIDE_ARM, value).apply()
@@ -387,6 +396,8 @@ class AppSettingsStore(context: Context) {
         private const val KEY_DEV_LOG_AUTO_PERSIST = "dev_log_auto_persist"
         private const val KEY_DEV_LOG_HIDE_TIMESTAMPS = "dev_log_hide_timestamps"
         private const val KEY_DEV_LOG_SHOW_MENU_BAR = "dev_log_show_menu_bar"
+        private const val KEY_DEV_LOG_COLORED_LEVELS = "dev_log_colored_levels"
+        private const val KEY_DEV_LOG_LEVEL_FILTER_MASK = "dev_log_level_filter_mask"
         private const val KEY_HIDE_ARM = "hide_arm_button"
         private const val KEY_HIDE_MONITOR = "hide_monitor_button"
         private const val KEY_HIDE_SOLO = "hide_solo_button"

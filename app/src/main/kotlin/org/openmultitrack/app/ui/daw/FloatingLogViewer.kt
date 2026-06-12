@@ -5,6 +5,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Minimize
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -64,6 +66,8 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.util.AppLogBuffer
+import org.openmultitrack.app.util.DevLogLevelMask
+import org.openmultitrack.app.util.LogDisplayEntry
 
 private const val MIN_WINDOW_WIDTH_DP = 220f
 private const val MIN_WINDOW_HEIGHT_DP = 160f
@@ -434,6 +438,8 @@ private fun LogViewerContent(
 
     var autoPersist by remember { mutableStateOf(settings.devLogAutoPersist) }
     var hideTimestamps by remember { mutableStateOf(settings.devLogHideTimestamps) }
+    var coloredLevels by remember { mutableStateOf(settings.devLogColoredLevels) }
+    var levelFilterMask by remember { mutableIntStateOf(settings.devLogLevelFilterMask) }
     var showMenuBar by remember { mutableStateOf(settings.devLogShowMenuBar) }
     var refreshTick by remember { mutableIntStateOf(0) }
     var textScale by rememberSaveable { mutableFloatStateOf(1f) }
@@ -443,12 +449,36 @@ private fun LogViewerContent(
         AppLogBuffer.setAutoPersist(context, autoPersist)
     }
 
-    val logText = remember(refreshTick, autoPersist, hideTimestamps) {
-        AppLogBuffer.displayText(
+    val logEntries = remember(refreshTick, autoPersist, levelFilterMask) {
+        AppLogBuffer.collectDisplayEntries(
             context = context,
             includePersisted = autoPersist,
-            hideTimestamps = hideTimestamps,
+            levelMask = levelFilterMask,
         )
+    }
+    val logText = remember(logEntries, hideTimestamps, coloredLevels) {
+        if (logEntries.isEmpty()) {
+            "(empty)"
+        } else {
+            logEntries.joinToString("\n") { entry ->
+                when (entry) {
+                    is LogDisplayEntry.Section -> entry.text
+                    is LogDisplayEntry.Line -> AppLogBuffer.formatPlainLine(
+                        parsed = entry.parsed,
+                        hideTimestamps = hideTimestamps,
+                        coloredLevels = coloredLevels,
+                    )
+                }
+            }
+        }
+    }
+    val logDisplayText = rememberLogDisplayText(
+        entries = logEntries,
+        hideTimestamps = hideTimestamps,
+        coloredLevels = coloredLevels,
+    )
+    val visibleLogLineCount = remember(logEntries) {
+        logEntries.count { it is LogDisplayEntry.Line }
     }
     val verticalScroll = rememberScrollState()
     val horizontalScroll = rememberScrollState()
@@ -465,7 +495,7 @@ private fun LogViewerContent(
         }
     }
 
-    LaunchedEffect(logText) {
+    LaunchedEffect(logEntries.size, logDisplayText) {
         if (verticalScroll.maxValue > 0) {
             verticalScroll.animateScrollTo(verticalScroll.maxValue)
         }
@@ -528,15 +558,26 @@ private fun LogViewerContent(
         if (showMenuBar) {
             HorizontalDivider()
             LogViewerMenuBar(
-                lineCount = AppLogBuffer.lineCount(),
+                visibleLineCount = visibleLogLineCount,
+                totalLineCount = AppLogBuffer.lineCount(),
                 autoPersist = autoPersist,
                 hideTimestamps = hideTimestamps,
+                coloredLevels = coloredLevels,
+                levelFilterMask = levelFilterMask,
                 onCopy = { clipboard.setText(AnnotatedString(logText)) },
                 onClear = { AppLogBuffer.clearCurrentSession(context) },
                 onAutoPersistChange = { autoPersist = it },
                 onHideTimestampsChange = {
                     hideTimestamps = it
                     settings.devLogHideTimestamps = it
+                },
+                onColoredLevelsChange = {
+                    coloredLevels = it
+                    settings.devLogColoredLevels = it
+                },
+                onLevelFilterMaskChange = {
+                    levelFilterMask = it
+                    settings.devLogLevelFilterMask = it
                 },
             )
             HorizontalDivider()
@@ -553,7 +594,7 @@ private fun LogViewerContent(
                 ),
         ) {
             Text(
-                logText,
+                logDisplayText,
                 style = MaterialTheme.typography.bodySmall.copy(
                     fontFamily = FontFamily.Monospace,
                     fontSize = (baseFontSize.value * textScale).sp,
@@ -570,22 +611,35 @@ private fun LogViewerContent(
 
 @Composable
 private fun LogViewerMenuBar(
-    lineCount: Int,
+    visibleLineCount: Int,
+    totalLineCount: Int,
     autoPersist: Boolean,
     hideTimestamps: Boolean,
+    coloredLevels: Boolean,
+    levelFilterMask: Int,
     onCopy: () -> Unit,
     onClear: () -> Unit,
     onAutoPersistChange: (Boolean) -> Unit,
     onHideTimestampsChange: (Boolean) -> Unit,
+    onColoredLevelsChange: (Boolean) -> Unit,
+    onLevelFilterMaskChange: (Int) -> Unit,
 ) {
     val menuLabelStyle = MaterialTheme.typography.labelSmall
     val menuItemPadding = Modifier.padding(horizontal = 2.dp)
+    var filterMenuExpanded by remember { mutableStateOf(false) }
+    val filterActive = levelFilterMask != DevLogLevelMask.ALL
+    val lineCountLabel = if (filterActive && visibleLineCount != totalLineCount) {
+        "$visibleLineCount/$totalLineCount lines"
+    } else {
+        "$totalLineCount lines"
+    }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(MENU_BAR_HEIGHT)
             .background(MaterialTheme.colorScheme.surface)
+            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -628,13 +682,95 @@ private fun LogViewerMenuBar(
             )
             Text("Hide timestamps", style = menuLabelStyle)
         }
-        Box(modifier = Modifier.weight(1f))
+        MenuBarDivider()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = coloredLevels,
+                onCheckedChange = onColoredLevelsChange,
+                modifier = Modifier.size(20.dp),
+            )
+            Text("Colors", style = menuLabelStyle)
+        }
+        MenuBarDivider()
+        Box {
+            TextButton(
+                onClick = { filterMenuExpanded = true },
+                modifier = menuItemPadding.height(MENU_BAR_HEIGHT),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+            ) {
+                Text(
+                    if (filterActive) "Filter*" else "Filter",
+                    style = menuLabelStyle,
+                    color = if (filterActive) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                )
+            }
+            DropdownMenu(
+                expanded = filterMenuExpanded,
+                onDismissRequest = { filterMenuExpanded = false },
+            ) {
+                LogLevelFilterRow('D', "Debug", DevLogLevelMask.DEBUG, levelFilterMask, onLevelFilterMaskChange)
+                LogLevelFilterRow('I', "Info", DevLogLevelMask.INFO, levelFilterMask, onLevelFilterMaskChange)
+                LogLevelFilterRow('W', "Warn", DevLogLevelMask.WARN, levelFilterMask, onLevelFilterMaskChange)
+                LogLevelFilterRow('E', "Error", DevLogLevelMask.ERROR, levelFilterMask, onLevelFilterMaskChange)
+            }
+        }
         Text(
-            "$lineCount lines",
+            lineCountLabel,
             style = menuLabelStyle,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(end = 6.dp),
         )
+    }
+}
+
+@Composable
+private fun LogLevelFilterRow(
+    level: Char,
+    label: String,
+    bit: Int,
+    levelFilterMask: Int,
+    onLevelFilterMaskChange: (Int) -> Unit,
+) {
+    val checked = levelFilterMask and bit != 0
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                val updated = if (checked) levelFilterMask and bit.inv() else levelFilterMask or bit
+                onLevelFilterMaskChange(updated)
+            }
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(
+            checked = checked,
+            onCheckedChange = { enabled ->
+                val updated = if (enabled) levelFilterMask or bit else levelFilterMask and bit.inv()
+                onLevelFilterMaskChange(updated)
+            },
+            modifier = Modifier.size(20.dp),
+        )
+        Text(
+            "$level  $label",
+            style = MaterialTheme.typography.labelMedium,
+            color = logLevelColor(level),
+        )
+    }
+}
+
+@Composable
+private fun logLevelColor(level: Char): androidx.compose.ui.graphics.Color {
+    val scheme = MaterialTheme.colorScheme
+    return when (level.uppercaseChar()) {
+        'D' -> androidx.compose.ui.graphics.Color(0xFF9E9E9E)
+        'I' -> androidx.compose.ui.graphics.Color(0xFF66BB6A)
+        'W' -> androidx.compose.ui.graphics.Color(0xFFFFA726)
+        'E' -> scheme.error
+        else -> scheme.onSurface
     }
 }
 
