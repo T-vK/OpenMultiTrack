@@ -2,6 +2,7 @@ package org.openmultitrack.app.ui.daw
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
@@ -74,9 +75,14 @@ import org.openmultitrack.app.util.LogDisplayEntry
 
 private const val MIN_WINDOW_WIDTH_DP = 220f
 private const val MIN_WINDOW_HEIGHT_DP = 160f
-private const val TERMINAL_SCREEN_MARGIN_DP = 4f
-private val RESIZE_HANDLE_THICKNESS = 10.dp
-private val RESIZE_CORNER_SIZE = 36.dp
+private const val TERMINAL_SCREEN_MARGIN_DP = 2.5f
+private const val FAB_SIZE_DP = 48f
+private const val UNSET_FAB_POSITION = -1f
+private val LOG_CONTENT_PADDING_H = 3.dp
+private val LOG_CONTENT_PADDING_V = 2.dp
+private val RESIZE_HANDLE_THICKNESS = 12.dp
+private val RESIZE_HIT_OUTSET = 18.dp
+private val RESIZE_CORNER_SIZE = 40.dp
 private val TITLE_BAR_HEIGHT = 36.dp
 private val TITLE_BAR_BUTTON_SIZE = 28.dp
 private val MENU_BAR_HEIGHT = 28.dp
@@ -113,16 +119,72 @@ private fun clampWindowBounds(
     return WindowBounds(clampedX, clampedY, width, height)
 }
 
-private fun terminalDockBounds(
-    screenWidthDp: Float,
-    screenHeightDp: Float,
-    heightFraction: Float = 0.32f,
-): WindowBounds {
+private fun defaultFabPosition(screenHeightDp: Float): WindowBounds {
     val margin = TERMINAL_SCREEN_MARGIN_DP
-    val width = screenWidthDp - 2f * margin
-    val height = (screenHeightDp * heightFraction).coerceIn(MIN_WINDOW_HEIGHT_DP, screenHeightDp - margin)
-    val y = screenHeightDp - height - margin
-    return WindowBounds(margin, y, width, height)
+    return WindowBounds(
+        x = margin,
+        y = screenHeightDp - FAB_SIZE_DP - margin,
+        widthDp = FAB_SIZE_DP,
+        heightDp = FAB_SIZE_DP,
+    )
+}
+
+private fun applyResizeDelta(
+    start: WindowBounds,
+    edge: ResizeEdge,
+    dxDp: Float,
+    dyDp: Float,
+    density: Float,
+): WindowBounds {
+    var newX = start.x
+    var newY = start.y
+    var newWidth = start.widthDp
+    var newHeight = start.heightDp
+    when (edge) {
+        ResizeEdge.Right -> newWidth = (start.widthDp + dxDp).coerceAtLeast(MIN_WINDOW_WIDTH_DP)
+        ResizeEdge.Bottom -> newHeight = (start.heightDp + dyDp).coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
+        ResizeEdge.Left -> {
+            val target = (start.widthDp - dxDp).coerceAtLeast(MIN_WINDOW_WIDTH_DP)
+            val appliedDp = start.widthDp - target
+            newWidth = target
+            newX = start.x + appliedDp * density
+        }
+        ResizeEdge.Top -> {
+            val target = (start.heightDp - dyDp).coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
+            val appliedDp = start.heightDp - target
+            newHeight = target
+            newY = start.y + appliedDp * density
+        }
+        ResizeEdge.BottomRight -> {
+            newWidth = (start.widthDp + dxDp).coerceAtLeast(MIN_WINDOW_WIDTH_DP)
+            newHeight = (start.heightDp + dyDp).coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
+        }
+        ResizeEdge.BottomLeft -> {
+            val target = (start.widthDp - dxDp).coerceAtLeast(MIN_WINDOW_WIDTH_DP)
+            val appliedDp = start.widthDp - target
+            newWidth = target
+            newX = start.x + appliedDp * density
+            newHeight = (start.heightDp + dyDp).coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
+        }
+        ResizeEdge.TopRight -> {
+            newWidth = (start.widthDp + dxDp).coerceAtLeast(MIN_WINDOW_WIDTH_DP)
+            val target = (start.heightDp - dyDp).coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
+            val appliedDp = start.heightDp - target
+            newHeight = target
+            newY = start.y + appliedDp * density
+        }
+        ResizeEdge.TopLeft -> {
+            val targetW = (start.widthDp - dxDp).coerceAtLeast(MIN_WINDOW_WIDTH_DP)
+            val appliedWDp = start.widthDp - targetW
+            newWidth = targetW
+            newX = start.x + appliedWDp * density
+            val targetH = (start.heightDp - dyDp).coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
+            val appliedHDp = start.heightDp - targetH
+            newHeight = targetH
+            newY = start.y + appliedHDp * density
+        }
+    }
+    return WindowBounds(newX, newY, newWidth, newHeight)
 }
 
 private enum class ResizeEdge {
@@ -153,11 +215,12 @@ fun FloatingLogViewerOverlay(
     if (!visible) return
 
     var mode by rememberSaveable { mutableStateOf(FloatingLogMode.Window) }
-    var offsetX by rememberSaveable { mutableFloatStateOf(TERMINAL_SCREEN_MARGIN_DP) }
-    var offsetY by rememberSaveable { mutableFloatStateOf(0f) }
+    var windowOffsetX by rememberSaveable { mutableFloatStateOf(16f) }
+    var windowOffsetY by rememberSaveable { mutableFloatStateOf(96f) }
     var windowWidthDp by rememberSaveable { mutableFloatStateOf(340f) }
     var windowHeightDp by rememberSaveable { mutableFloatStateOf(260f) }
-    var terminalLayoutReady by rememberSaveable { mutableStateOf(false) }
+    var fabOffsetX by rememberSaveable { mutableFloatStateOf(UNSET_FAB_POSITION) }
+    var fabOffsetY by rememberSaveable { mutableFloatStateOf(UNSET_FAB_POSITION) }
 
     BoxWithConstraints(
         modifier = Modifier
@@ -167,71 +230,71 @@ fun FloatingLogViewerOverlay(
         val screenWidthDp = maxWidth.value
         val screenHeightDp = maxHeight.value
 
-        LaunchedEffect(screenWidthDp, screenHeightDp, visible) {
-            if (!visible || terminalLayoutReady || screenWidthDp <= 0f || screenHeightDp <= 0f) return@LaunchedEffect
-            val docked = terminalDockBounds(screenWidthDp, screenHeightDp)
-            offsetX = docked.x
-            offsetY = docked.y
-            windowWidthDp = docked.widthDp
-            windowHeightDp = docked.heightDp
-            terminalLayoutReady = true
+        fun clampFab(x: Float, y: Float): Pair<Float, Float> {
+            val margin = TERMINAL_SCREEN_MARGIN_DP
+            val maxX = (screenWidthDp - FAB_SIZE_DP - margin).coerceAtLeast(margin)
+            val maxY = (screenHeightDp - FAB_SIZE_DP - margin).coerceAtLeast(margin)
+            return x.coerceIn(margin, maxX) to y.coerceIn(margin, maxY)
         }
 
-        fun applyBounds(bounds: WindowBounds) {
-            offsetX = bounds.x
-            offsetY = bounds.y
-            windowWidthDp = bounds.widthDp
-            windowHeightDp = bounds.heightDp
+        fun ensureFabPosition() {
+            if (fabOffsetX != UNSET_FAB_POSITION && fabOffsetY != UNSET_FAB_POSITION) return
+            val defaultFab = defaultFabPosition(screenHeightDp)
+            fabOffsetX = defaultFab.x
+            fabOffsetY = defaultFab.y
         }
 
         when (mode) {
-            FloatingLogMode.Minimized -> MinimizedLogFab(
-                offsetX = offsetX,
-                offsetY = offsetY,
-                onMove = { dx, dy ->
-                    val moved = clampWindowBounds(
-                        x = offsetX + dx,
-                        y = offsetY + dy,
-                        widthDp = windowWidthDp,
-                        heightDp = windowHeightDp,
-                        screenWidthDp = screenWidthDp,
-                        screenHeightDp = screenHeightDp,
-                    )
-                    offsetX = moved.x
-                    offsetY = moved.y
-                },
-                onRestore = { mode = FloatingLogMode.Window },
-            )
+            FloatingLogMode.Minimized -> {
+                ensureFabPosition()
+                MinimizedLogFab(
+                    offsetX = fabOffsetX,
+                    offsetY = fabOffsetY,
+                    onMove = { dx, dy ->
+                        val (x, y) = clampFab(fabOffsetX + dx, fabOffsetY + dy)
+                        fabOffsetX = x
+                        fabOffsetY = y
+                    },
+                    onRestore = { mode = FloatingLogMode.Window },
+                )
+            }
             FloatingLogMode.Window -> FloatingLogWindow(
-                offsetX = offsetX,
-                offsetY = offsetY,
+                offsetX = windowOffsetX,
+                offsetY = windowOffsetY,
                 widthDp = windowWidthDp,
                 heightDp = windowHeightDp,
+                screenWidthDp = screenWidthDp,
+                screenHeightDp = screenHeightDp,
                 onMove = { dx, dy ->
                     val moved = clampWindowBounds(
-                        x = offsetX + dx,
-                        y = offsetY + dy,
+                        x = windowOffsetX + dx,
+                        y = windowOffsetY + dy,
                         widthDp = windowWidthDp,
                         heightDp = windowHeightDp,
                         screenWidthDp = screenWidthDp,
                         screenHeightDp = screenHeightDp,
                     )
-                    offsetX = moved.x
-                    offsetY = moved.y
+                    windowOffsetX = moved.x
+                    windowOffsetY = moved.y
                 },
-                onResize = { newX, newY, newWidthDp, newHeightDp ->
-                    applyBounds(
-                        clampWindowBounds(
-                            x = newX,
-                            y = newY,
-                            widthDp = newWidthDp,
-                            heightDp = newHeightDp,
-                            screenWidthDp = screenWidthDp,
-                            screenHeightDp = screenHeightDp,
-                        ),
+                onResizeCommitted = { bounds ->
+                    val clamped = clampWindowBounds(
+                        x = bounds.x,
+                        y = bounds.y,
+                        widthDp = bounds.widthDp,
+                        heightDp = bounds.heightDp,
+                        screenWidthDp = screenWidthDp,
+                        screenHeightDp = screenHeightDp,
                     )
+                    windowOffsetX = clamped.x
+                    windowOffsetY = clamped.y
+                    windowWidthDp = clamped.widthDp
+                    windowHeightDp = clamped.heightDp
                 },
-                onMinimize = { mode = FloatingLogMode.Minimized },
+                onMinimize = {
+                    ensureFabPosition()
+                    mode = FloatingLogMode.Minimized
+                },
                 onMaximize = { mode = FloatingLogMode.Maximized },
                 onClose = onDismiss,
             )
@@ -278,17 +341,42 @@ private fun FloatingLogWindow(
     offsetY: Float,
     widthDp: Float,
     heightDp: Float,
+    screenWidthDp: Float,
+    screenHeightDp: Float,
     onMove: (dx: Float, dy: Float) -> Unit,
-    onResize: (x: Float, y: Float, widthDp: Float, heightDp: Float) -> Unit,
+    onResizeCommitted: (WindowBounds) -> Unit,
     onMinimize: () -> Unit,
     onMaximize: () -> Unit,
     onClose: () -> Unit,
 ) {
     val density = LocalDensity.current
+    var isResizing by remember { mutableStateOf(false) }
+    var displayBounds by remember { mutableStateOf(WindowBounds(offsetX, offsetY, widthDp, heightDp)) }
+    var resizeStartBounds by remember { mutableStateOf<WindowBounds?>(null) }
+    var resizeAccumDxDp by remember { mutableFloatStateOf(0f) }
+    var resizeAccumDyDp by remember { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(offsetX, offsetY, widthDp, heightDp) {
+        if (!isResizing) {
+            displayBounds = WindowBounds(offsetX, offsetY, widthDp, heightDp)
+        }
+    }
+
+    fun clampLocal(bounds: WindowBounds): WindowBounds =
+        clampWindowBounds(
+            x = bounds.x,
+            y = bounds.y,
+            widthDp = bounds.widthDp,
+            heightDp = bounds.heightDp,
+            screenWidthDp = screenWidthDp,
+            screenHeightDp = screenHeightDp,
+        )
+
+    val bounds = displayBounds
     Box(
         modifier = Modifier
-            .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
-            .size(widthDp.dp, heightDp.dp),
+            .offset { IntOffset(bounds.x.roundToInt(), bounds.y.roundToInt()) }
+            .size(bounds.widthDp.dp, bounds.heightDp.dp),
     ) {
         Surface(
             modifier = Modifier
@@ -300,6 +388,7 @@ private fun FloatingLogWindow(
             LogViewerContent(
                 title = "Debug log",
                 onDragTitleBar = onMove,
+                suppressLogRender = isResizing,
                 onMinimize = onMinimize,
                 onMaximize = onMaximize,
                 onClose = onClose,
@@ -307,72 +396,115 @@ private fun FloatingLogWindow(
                 maximizeContentDescription = "Maximize",
             )
         }
+        val resizeCallbacks = object {
+            fun onStart() {
+                isResizing = true
+                resizeStartBounds = displayBounds
+                resizeAccumDxDp = 0f
+                resizeAccumDyDp = 0f
+            }
+
+            fun onDelta(edge: ResizeEdge, dxDp: Float, dyDp: Float) {
+                val start = resizeStartBounds ?: return
+                resizeAccumDxDp += dxDp
+                resizeAccumDyDp += dyDp
+                displayBounds = clampLocal(
+                    applyResizeDelta(start, edge, resizeAccumDxDp, resizeAccumDyDp, density.density),
+                )
+            }
+
+            fun onEnd() {
+                if (!isResizing) return
+                isResizing = false
+                resizeStartBounds = null
+                onResizeCommitted(displayBounds)
+            }
+        }
         ResizeHandle(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .height(RESIZE_HANDLE_THICKNESS),
+                .height(RESIZE_HANDLE_THICKNESS + RESIZE_HIT_OUTSET)
+                .offset(y = RESIZE_HIT_OUTSET / 2),
             edge = ResizeEdge.Bottom,
-            offsetX = offsetX,
-            offsetY = offsetY,
-            widthDp = widthDp,
-            heightDp = heightDp,
             density = density.density,
-            onResize = onResize,
+            onResizeStart = resizeCallbacks::onStart,
+            onResizeDelta = resizeCallbacks::onDelta,
+            onResizeEnd = resizeCallbacks::onEnd,
         )
         ResizeHandle(
             modifier = Modifier
                 .align(Alignment.CenterStart)
                 .fillMaxHeight()
-                .width(RESIZE_HANDLE_THICKNESS)
-                .padding(top = TITLE_BAR_HEIGHT),
+                .width(RESIZE_HANDLE_THICKNESS + RESIZE_HIT_OUTSET)
+                .padding(top = TITLE_BAR_HEIGHT)
+                .offset(x = -RESIZE_HIT_OUTSET / 2),
             edge = ResizeEdge.Left,
-            offsetX = offsetX,
-            offsetY = offsetY,
-            widthDp = widthDp,
-            heightDp = heightDp,
             density = density.density,
-            onResize = onResize,
+            onResizeStart = resizeCallbacks::onStart,
+            onResizeDelta = resizeCallbacks::onDelta,
+            onResizeEnd = resizeCallbacks::onEnd,
         )
         ResizeHandle(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight()
-                .width(RESIZE_HANDLE_THICKNESS)
-                .padding(top = TITLE_BAR_HEIGHT),
+                .width(RESIZE_HANDLE_THICKNESS + RESIZE_HIT_OUTSET)
+                .padding(top = TITLE_BAR_HEIGHT)
+                .offset(x = RESIZE_HIT_OUTSET / 2),
             edge = ResizeEdge.Right,
-            offsetX = offsetX,
-            offsetY = offsetY,
-            widthDp = widthDp,
-            heightDp = heightDp,
             density = density.density,
-            onResize = onResize,
+            onResizeStart = resizeCallbacks::onStart,
+            onResizeDelta = resizeCallbacks::onDelta,
+            onResizeEnd = resizeCallbacks::onEnd,
         )
         ResizeHandle(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .size(RESIZE_CORNER_SIZE)
+                .size(RESIZE_CORNER_SIZE + RESIZE_HIT_OUTSET)
+                .offset(x = -RESIZE_HIT_OUTSET / 2, y = RESIZE_HIT_OUTSET / 2)
                 .zIndex(3f),
             edge = ResizeEdge.BottomLeft,
-            offsetX = offsetX,
-            offsetY = offsetY,
-            widthDp = widthDp,
-            heightDp = heightDp,
             density = density.density,
-            onResize = onResize,
+            onResizeStart = resizeCallbacks::onStart,
+            onResizeDelta = resizeCallbacks::onDelta,
+            onResizeEnd = resizeCallbacks::onEnd,
         )
         ResizeHandle(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .size(RESIZE_CORNER_SIZE)
+                .size(RESIZE_CORNER_SIZE + RESIZE_HIT_OUTSET)
+                .offset(x = RESIZE_HIT_OUTSET / 2, y = RESIZE_HIT_OUTSET / 2)
                 .zIndex(3f),
             edge = ResizeEdge.BottomRight,
-            offsetX = offsetX,
-            offsetY = offsetY,
-            widthDp = widthDp,
-            heightDp = heightDp,
             density = density.density,
-            onResize = onResize,
+            onResizeStart = resizeCallbacks::onStart,
+            onResizeDelta = resizeCallbacks::onDelta,
+            onResizeEnd = resizeCallbacks::onEnd,
+        )
+        ResizeHandle(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .size(RESIZE_CORNER_SIZE + RESIZE_HIT_OUTSET)
+                .offset(x = -RESIZE_HIT_OUTSET / 2, y = -RESIZE_HIT_OUTSET / 2)
+                .zIndex(3f),
+            edge = ResizeEdge.TopLeft,
+            density = density.density,
+            onResizeStart = resizeCallbacks::onStart,
+            onResizeDelta = resizeCallbacks::onDelta,
+            onResizeEnd = resizeCallbacks::onEnd,
+        )
+        ResizeHandle(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .size(RESIZE_CORNER_SIZE + RESIZE_HIT_OUTSET)
+                .offset(x = RESIZE_HIT_OUTSET / 2, y = -RESIZE_HIT_OUTSET / 2)
+                .zIndex(3f),
+            edge = ResizeEdge.TopRight,
+            density = density.density,
+            onResizeStart = resizeCallbacks::onStart,
+            onResizeDelta = resizeCallbacks::onDelta,
+            onResizeEnd = resizeCallbacks::onEnd,
         )
     }
 }
@@ -381,75 +513,36 @@ private fun FloatingLogWindow(
 private fun ResizeHandle(
     modifier: Modifier,
     edge: ResizeEdge,
-    offsetX: Float,
-    offsetY: Float,
-    widthDp: Float,
-    heightDp: Float,
     density: Float,
-    onResize: (x: Float, y: Float, widthDp: Float, heightDp: Float) -> Unit,
+    onResizeStart: () -> Unit,
+    onResizeDelta: (ResizeEdge, Float, Float) -> Unit,
+    onResizeEnd: () -> Unit,
 ) {
-    val currentOffsetX by rememberUpdatedState(offsetX)
-    val currentOffsetY by rememberUpdatedState(offsetY)
-    val currentWidthDp by rememberUpdatedState(widthDp)
-    val currentHeightDp by rememberUpdatedState(heightDp)
-    val onResizeState by rememberUpdatedState(onResize)
+    val onResizeStartState by rememberUpdatedState(onResizeStart)
+    val onResizeDeltaState by rememberUpdatedState(onResizeDelta)
+    val onResizeEndState by rememberUpdatedState(onResizeEnd)
 
     Box(
         modifier = modifier.pointerInput(edge) {
-            detectDragGestures { change, dragAmount ->
-                change.consume()
-                val dxDp = dragAmount.x / density
-                val dyDp = dragAmount.y / density
-                var newX = currentOffsetX
-                var newY = currentOffsetY
-                var newWidth = currentWidthDp
-                var newHeight = currentHeightDp
-                when (edge) {
-                    ResizeEdge.Right -> newWidth = (currentWidthDp + dxDp).coerceAtLeast(MIN_WINDOW_WIDTH_DP)
-                    ResizeEdge.Bottom -> newHeight = (currentHeightDp + dyDp).coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
-                    ResizeEdge.Left -> {
-                        val target = (currentWidthDp - dxDp).coerceAtLeast(MIN_WINDOW_WIDTH_DP)
-                        val appliedDp = currentWidthDp - target
-                        newWidth = target
-                        newX = currentOffsetX + appliedDp * density
-                    }
-                    ResizeEdge.Top -> {
-                        val target = (currentHeightDp - dyDp).coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
-                        val appliedDp = currentHeightDp - target
-                        newHeight = target
-                        newY = currentOffsetY + appliedDp * density
-                    }
-                    ResizeEdge.BottomRight -> {
-                        newWidth = (currentWidthDp + dxDp).coerceAtLeast(MIN_WINDOW_WIDTH_DP)
-                        newHeight = (currentHeightDp + dyDp).coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
-                    }
-                    ResizeEdge.BottomLeft -> {
-                        val target = (currentWidthDp - dxDp).coerceAtLeast(MIN_WINDOW_WIDTH_DP)
-                        val appliedDp = currentWidthDp - target
-                        newWidth = target
-                        newX = currentOffsetX + appliedDp * density
-                        newHeight = (currentHeightDp + dyDp).coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
-                    }
-                    ResizeEdge.TopRight -> {
-                        newWidth = (currentWidthDp + dxDp).coerceAtLeast(MIN_WINDOW_WIDTH_DP)
-                        val target = (currentHeightDp - dyDp).coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
-                        val appliedDp = currentHeightDp - target
-                        newHeight = target
-                        newY = currentOffsetY + appliedDp * density
-                    }
-                    ResizeEdge.TopLeft -> {
-                        val targetW = (currentWidthDp - dxDp).coerceAtLeast(MIN_WINDOW_WIDTH_DP)
-                        val appliedWDp = currentWidthDp - targetW
-                        newWidth = targetW
-                        newX = currentOffsetX + appliedWDp * density
-                        val targetH = (currentHeightDp - dyDp).coerceAtLeast(MIN_WINDOW_HEIGHT_DP)
-                        val appliedHDp = currentHeightDp - targetH
-                        newHeight = targetH
-                        newY = currentOffsetY + appliedHDp * density
-                    }
-                }
-                onResizeState(newX, newY, newWidth, newHeight)
-            }
+            detectDragGesturesAfterLongPress(
+                onDragStart = {
+                    onResizeStartState()
+                },
+                onDragEnd = {
+                    onResizeEndState()
+                },
+                onDragCancel = {
+                    onResizeEndState()
+                },
+                onDrag = { change, dragAmount ->
+                    change.consume()
+                    onResizeDeltaState(
+                        edge,
+                        dragAmount.x / density,
+                        dragAmount.y / density,
+                    )
+                },
+            )
         },
     )
 }
@@ -492,6 +585,7 @@ private fun FloatingLogMaximized(
 private fun LogViewerContent(
     title: String,
     onDragTitleBar: ((dx: Float, dy: Float) -> Unit)?,
+    suppressLogRender: Boolean = false,
     onMinimize: () -> Unit,
     onMaximize: () -> Unit,
     onClose: () -> Unit,
@@ -555,10 +649,13 @@ private fun LogViewerContent(
         }
     }
 
+    val suppressLogRenderState by rememberUpdatedState(suppressLogRender)
     LaunchedEffect(Unit) {
         while (true) {
             delay(300)
-            refreshTick = AppLogBuffer.revision
+            if (!suppressLogRenderState) {
+                refreshTick = AppLogBuffer.revision
+            }
         }
     }
 
@@ -681,22 +778,33 @@ private fun LogViewerContent(
                     lockRotationOnZoomPan = true,
                 ),
         ) {
-            Text(
-                logDisplayText,
-                style = logTextStyle,
-                softWrap = wordWrap,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(verticalScroll)
-                    .then(
-                        if (wordWrap) {
-                            Modifier
-                        } else {
-                            Modifier.horizontalScroll(horizontalScroll)
-                        },
-                    )
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
-            )
+            if (suppressLogRender) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surface),
+                )
+            } else {
+                Text(
+                    logDisplayText,
+                    style = logTextStyle,
+                    softWrap = wordWrap,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(verticalScroll)
+                        .then(
+                            if (wordWrap) {
+                                Modifier
+                            } else {
+                                Modifier.horizontalScroll(horizontalScroll)
+                            },
+                        )
+                        .padding(
+                            horizontal = LOG_CONTENT_PADDING_H,
+                            vertical = LOG_CONTENT_PADDING_V,
+                        ),
+                )
+            }
         }
     }
 }
