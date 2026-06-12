@@ -494,7 +494,7 @@ class MixerSessionController(
     fun stopSoundcheck(resetPosition: Boolean = true, restoreRouting: Boolean = true) {
         finishPlaybackTransport(
             resetPosition = resetPosition,
-            releaseNative = false,
+            releaseNative = isFlow8Active(),
             restoreRouting = restoreRouting,
         )
     }
@@ -737,6 +737,19 @@ class MixerSessionController(
         }
     }
 
+    /** Release FLOW 8 UAC2 playback and close the USB stream so the next play reopens cleanly. */
+    private suspend fun teardownFlow8UsbPlaybackLocked(trace: TransportTrace? = null) {
+        withContext(Dispatchers.IO) {
+            AudioEngineRouter.stopPlayback()
+            AudioEngineRouter.stopAllRecording()
+            usbStream?.close()
+            usbStream = null
+            delay(Flow8UsbPlaybackProfile.POST_PLAYBACK_STOP_DELAY_MS)
+        }
+        trace?.mark("FLOW 8 USB playback torn down (stream closed)")
+        OmtLog.i("MixerSession", "FLOW 8 USB playback torn down for $mixerId")
+    }
+
     /** FLOW 8 needs capture fully released and a short settle delay before UAC2 playback. */
     private suspend fun prepareFlow8UsbForPlaybackLocked() {
         if (_state.value.isMonitoring) {
@@ -803,7 +816,11 @@ class MixerSessionController(
         }
         val clampedStart = startFrame.coerceIn(0L, (durationFrames - 1).coerceAtLeast(0L))
         withContext(Dispatchers.IO) {
-            if (_state.value.isMonitoring ||
+            if (isFlow8Active()) {
+                trace?.mark("preparing FLOW 8 USB for playback")
+                prepareFlow8UsbForPlaybackLocked()
+            } else if (
+                _state.value.isMonitoring ||
                 _state.value.isVuMetering ||
                 (captureEngine.isCaptureActive && !_state.value.isRecording)
             ) {
@@ -812,8 +829,12 @@ class MixerSessionController(
                 trace?.mark("USB prepared for playback")
             }
             if (player.isPlaying) {
-                trace?.mark("player still playing, suspending first")
-                player.suspendAndAwait()
+                trace?.mark("player still playing, stopping first")
+                if (isFlow8Active()) {
+                    player.stopAndAwait()
+                } else {
+                    player.suspendAndAwait()
+                }
             }
             trace?.mark("soundcheck routing before playback USB route")
             when (val routing = routingBeforeSoundcheckLocked(dir, metadata)) {
@@ -896,7 +917,9 @@ class MixerSessionController(
         restoreRouting: Boolean = true,
         trace: TransportTrace? = null,
     ) {
-        trace?.mark("stopSoundcheckLocked releaseNative=$releaseNative")
+        val flow8 = isFlow8Active()
+        val hardStop = releaseNative || flow8
+        trace?.mark("stopSoundcheckLocked releaseNative=$hardStop flow8=$flow8")
         val sampleRate = _state.value.soundcheckSampleRate.takeIf { it > 0 } ?: 48_000
         val posSec = if (sampleRate > 0 && player.isPlaying) {
             player.status.positionFrames.toFloat() / sampleRate
@@ -906,20 +929,15 @@ class MixerSessionController(
         if (!skipStateUpdate) {
             stopPlaybackStatusUpdates()
         }
-        if (releaseNative) {
+        if (hardStop) {
             player.stopAndAwait()
             trace?.mark("hard stop complete")
         } else {
             player.suspendAndAwait()
             trace?.mark("suspend complete (native engine kept warm)")
         }
-        if (isFlow8Active()) {
-            withContext(Dispatchers.IO) {
-                AudioEngineRouter.stopPlayback()
-                AudioEngineRouter.stopAllRecording()
-                delay(Flow8UsbPlaybackProfile.POST_PLAYBACK_STOP_DELAY_MS)
-            }
-            trace?.mark("FLOW 8 playback teardown delay complete")
+        if (flow8) {
+            teardownFlow8UsbPlaybackLocked(trace)
         }
         if (restoreRouting) {
             quiesceUsbBeforeRoutingLocked()
@@ -1548,6 +1566,9 @@ class MixerSessionController(
                     player.suspendAndAwait()
                     trace.mark("suspend complete (native engine kept warm)")
                 }
+                if (isFlow8Active()) {
+                    teardownFlow8UsbPlaybackLocked(trace)
+                }
                 if (restoreRouting) {
                     quiesceUsbBeforeRoutingLocked()
                     RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
@@ -1638,8 +1659,18 @@ class MixerSessionController(
                     loopEnabled = loopEnabled,
                 )
                 if (reachedEnd) {
-                    finishPlaybackTransport(resetPosition = true, cancelStatusJob = false, releaseNative = false)
-                    trace?.mark("playback reached end, suspended for fast replay")
+                    finishPlaybackTransport(
+                        resetPosition = true,
+                        cancelStatusJob = false,
+                        releaseNative = isFlow8Active(),
+                    )
+                    trace?.mark(
+                        if (isFlow8Active()) {
+                            "playback reached end, FLOW 8 hard stop"
+                        } else {
+                            "playback reached end, suspended for fast replay"
+                        },
+                    )
                     break
                 }
                 if (posSec > lastPosSec + 0.02f) {
@@ -1656,11 +1687,20 @@ class MixerSessionController(
                     System.currentTimeMillis() - lastAdvanceMs > 2_500L
                 ) {
                     OmtLog.w("MixerSession", "playback stalled at ${posSec}s — stopping")
+                    org.openmultitrack.app.util.AppLogBuffer.append(
+                        "W",
+                        "Transport",
+                        "Playback stalled at ${"%.2f".format(posSec)}s — recycling USB audio",
+                    )
                     captureMutex.withLock {
-                        stopSoundcheckLocked()
+                        stopSoundcheckLocked(releaseNative = true, restoreRouting = false)
                         _state.update {
                             it.copy(
-                                warningMessage = "Playback stalled — USB audio may be busy. Try again.",
+                                warningMessage = if (isFlow8Active()) {
+                                    "Playback stalled — tap Play again (USB audio was reset)."
+                                } else {
+                                    "Playback stalled — USB audio may be busy. Try again."
+                                },
                             )
                         }
                     }

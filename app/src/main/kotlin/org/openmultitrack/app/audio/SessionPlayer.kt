@@ -203,7 +203,11 @@ class SessionPlayer {
         seekReader = seek
         trace.mark("preparing backend=$backend warm=$nativePlaybackWarm activeBackend=$activeBackend label=$label")
 
-        val engineStatus = if (nativePlaybackWarm && activeBackend == backend) {
+        // UAC2 (FLOW 8) must cold-start after any stop — warm reuse leaves a dead libusb engine.
+        val canReuseWarm = nativePlaybackWarm &&
+            activeBackend == backend &&
+            backend == org.openmultitrack.usb.AudioBackend.OBOE
+        val engineStatus = if (canReuseWarm) {
             trace.mark("reusing warm native engine backend=$backend")
             NativeEngineStatus(
                 active = true,
