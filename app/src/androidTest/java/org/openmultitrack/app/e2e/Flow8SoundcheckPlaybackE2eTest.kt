@@ -47,7 +47,8 @@ class Flow8SoundcheckPlaybackE2eTest {
         val ctrl = h.bindAndRegisterFlow8()
         h.syncUiWithHarnessMixer(h.mixerId, AppMode.MULTITRACK_RECORD)
 
-        val sessionDir = h.recordShortSession(ctrl, seconds = E2eConfig.RECORD_SECONDS)
+        // Need >6s of audio so the sustain window does not outlive the session.
+        val sessionDir = h.recordShortSession(ctrl, seconds = 10)
         Log.i(TAG, "recorded session: ${sessionDir.absolutePath}")
 
         h.prepareSoundcheck(ctrl, sessionDir)
