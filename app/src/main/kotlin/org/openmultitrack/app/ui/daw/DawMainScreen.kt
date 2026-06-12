@@ -1066,14 +1066,8 @@ private fun ChannelStripList(
                     recordViewWindowSec = displayViewWindow,
                     recordElapsedSec = recordElapsedSec,
                     captureMeterLevel = if (showVuMeters) {
-                        val showLiveVu = isMonitoring || isRecording || isVuMetering ||
-                            captureMeterLevels.isNotEmpty()
-                        if (showLiveVu) {
-                            val usbIndex = routing.inputSource(strip.index)
-                            captureMeterLevels[usbIndex] ?: 0f
-                        } else {
-                            null
-                        }
+                        val usbIndex = routing.inputSource(strip.index)
+                        captureMeterLevels[usbIndex] ?: 0f
                     } else {
                         null
                     },

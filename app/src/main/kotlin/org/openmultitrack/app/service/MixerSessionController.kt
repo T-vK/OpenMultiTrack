@@ -2048,15 +2048,19 @@ class MixerSessionController(
                             refreshStorageEstimate()
                         }
                         val levels = captureEngine.captureMeterLevels()
+                        val rawPeaks = captureEngine.debugRawMeterPeaks()
                         val nowNs = System.nanoTime()
                         if (nowNs - lastVuLogNs >= 2_000_000_000L) {
                             lastVuLogNs = nowNs
                             val ch1 = levels[0] ?: 0f
                             val ch2 = levels[1] ?: 0f
+                            val raw1 = rawPeaks.getOrElse(0) { 0f }
+                            val raw2 = rawPeaks.getOrElse(1) { 0f }
                             if (levels.isNotEmpty()) {
                                 OmtLog.i(
                                     "VuMeter",
-                                    "ch1=${"%.3f".format(ch1)} ch2=${"%.3f".format(ch2)} " +
+                                    "ch1 vu=${"%.3f".format(ch1)} raw=${"%.4f".format(raw1)} " +
+                                        "ch2 vu=${"%.3f".format(ch2)} raw=${"%.4f".format(raw2)} " +
                                         "vuOnly=${_state.value.isVuMetering} " +
                                         "monitoring=${_state.value.isMonitoring}",
                                 )

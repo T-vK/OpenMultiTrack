@@ -7,8 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Checkbox
@@ -21,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -33,9 +33,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.util.AppLogBuffer
 import org.openmultitrack.app.util.DevLogLevelMask
+import org.openmultitrack.app.util.LogDisplayEntry
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,20 +60,28 @@ fun LogViewerScreen(
         )
     }
     val logText = remember(logEntries, hideTimestamps, coloredLevels) {
-        AppLogBuffer.displayPlainText(
-            context = context,
-            includePersisted = autoPersist,
-            hideTimestamps = hideTimestamps,
-            coloredLevels = coloredLevels,
-            levelMask = levelFilterMask,
-        )
+        if (logEntries.isEmpty()) {
+            "(empty)"
+        } else {
+            logEntries.joinToString("\n") { entry ->
+                when (entry) {
+                    is LogDisplayEntry.Section -> entry.text
+                    is LogDisplayEntry.Line -> AppLogBuffer.formatPlainLine(
+                        parsed = entry.parsed,
+                        hideTimestamps = hideTimestamps,
+                        coloredLevels = coloredLevels,
+                    )
+                }
+            }
+        }
     }
-    val logDisplayText = rememberLogDisplayText(
-        entries = logEntries,
-        hideTimestamps = hideTimestamps,
-        coloredLevels = coloredLevels,
-    )
-    val scrollState = rememberScrollState()
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(500)
+            refreshTick = AppLogBuffer.revision
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -148,14 +158,21 @@ fun LogViewerScreen(
                     settings.devLogLevelFilterMask = it
                 },
             )
-            Text(
-                logDisplayText,
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            SelectionContainer(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(scrollState)
                     .padding(bottom = 16.dp),
-            )
+            ) {
+                LogViewerLazyList(
+                    entries = logEntries,
+                    hideTimestamps = hideTimestamps,
+                    coloredLevels = coloredLevels,
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    wordWrap = true,
+                    freezeUpdates = false,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
     }
 }

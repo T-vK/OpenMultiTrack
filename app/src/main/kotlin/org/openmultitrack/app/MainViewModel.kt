@@ -1768,7 +1768,6 @@ class MainViewModel(
         if (!overlaysBlockHeavySessionUpdates()) return session
         return session.copy(
             waveformPeaks = emptyMap(),
-            captureMeterLevels = emptyMap(),
         )
     }
 

@@ -40,7 +40,15 @@ sealed class LogDisplayEntry {
 }
 
 object AppLogBuffer {
-    private const val MAX_LINES = 2000
+    /** In-memory ring buffer cap. */
+    const val MAX_BUFFER_LINES = 1_500
+
+    /** Maximum lines rendered in the log viewer UI (tail only). */
+    const val MAX_DISPLAY_LINES = 600
+
+    /** Maximum lines loaded from each persisted session file for display. */
+    private const val MAX_PERSISTED_DISPLAY_LINES = 400
+
     private const val LOG_DIR = "logs"
     private const val AUTO_PERSIST_FILE = "auto-current.txt"
     private const val AUTO_FLUSH_MS = 2_000L
@@ -91,7 +99,7 @@ object AppLogBuffer {
     fun append(level: String, tag: String, message: String) {
         val line = "${fmt.format(Date())} $level/$tag: $message"
         lines.add(line)
-        while (lines.size > MAX_LINES) lines.removeAt(0)
+        while (lines.size > MAX_BUFFER_LINES) lines.removeAt(0)
         revision++
         if (autoPersistEnabled) scheduleAutoFlush()
     }
@@ -131,10 +139,11 @@ object AppLogBuffer {
         context: Context,
         includePersisted: Boolean,
         levelMask: Int = DevLogLevelMask.ALL,
+        maxDisplayLines: Int = MAX_DISPLAY_LINES,
     ): List<LogDisplayEntry> {
         val rawLines = rawDisplayLines(context, includePersisted)
         if (rawLines.isEmpty()) return emptyList()
-        return rawLines.mapNotNull { raw ->
+        val entries = rawLines.mapNotNull { raw ->
             when {
                 raw.isBlank() -> null
                 else -> {
@@ -149,6 +158,17 @@ object AppLogBuffer {
                 }
             }
         }
+        return tailDisplayEntries(entries, maxDisplayLines)
+    }
+
+    fun tailDisplayEntries(
+        entries: List<LogDisplayEntry>,
+        maxDisplayLines: Int = MAX_DISPLAY_LINES,
+    ): List<LogDisplayEntry> {
+        if (entries.size <= maxDisplayLines) return entries
+        val hidden = entries.size - maxDisplayLines
+        return listOf(LogDisplayEntry.Section("… $hidden earlier lines hidden …")) +
+            entries.takeLast(maxDisplayLines)
     }
 
     fun displayPlainText(
@@ -254,21 +274,27 @@ object AppLogBuffer {
     private fun persistedSessionRawLines(context: Context): List<String> {
         val dir = logDir(context)
         if (!dir.isDirectory) return emptyList()
-        val files = dir.listFiles()
+        val file = dir.listFiles()
             ?.filter { file ->
                 file.isFile && file.extension == "txt" && file.name != AUTO_PERSIST_FILE
             }
-            ?.sortedByDescending { it.lastModified() }
-            .orEmpty()
-        if (files.isEmpty()) return emptyList()
-        return files.flatMapIndexed { index, file ->
-            val header = listOf(
-                "Saved ${sessionFmt.format(Date(file.lastModified()))} (${file.name})",
-            )
-            val body = file.readLines()
-            val separator = if (index == 0) emptyList() else listOf("", "──── previous session ────", "")
-            separator + header + body
+            ?.maxByOrNull { it.lastModified() }
+            ?: return emptyList()
+        val body = file.readLines()
+        val tail = if (body.size > MAX_PERSISTED_DISPLAY_LINES) {
+            body.takeLast(MAX_PERSISTED_DISPLAY_LINES)
+        } else {
+            body
         }
+        val header = listOf(
+            "Saved ${sessionFmt.format(Date(file.lastModified()))} (${file.name})",
+        )
+        val hiddenNote = if (body.size > tail.size) {
+            listOf("… ${body.size - tail.size} earlier persisted lines hidden …")
+        } else {
+            emptyList()
+        }
+        return listOf("", "──── previous session ────", "") + header + hiddenNote + tail
     }
 
     private fun formatLines(source: List<String>, hideTimestamps: Boolean): String {

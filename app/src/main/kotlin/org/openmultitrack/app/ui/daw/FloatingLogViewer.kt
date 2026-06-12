@@ -24,7 +24,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Close
@@ -665,21 +664,9 @@ private fun LogViewerContent(
             }
         }
     }
-    val liveLogDisplayText = rememberLogDisplayText(
-        entries = logEntries,
-        hideTimestamps = hideTimestamps,
-        coloredLevels = coloredLevels,
-    )
-    var frozenLogDisplayText by remember { mutableStateOf(liveLogDisplayText) }
-    if (!freezeLogUpdates) {
-        frozenLogDisplayText = liveLogDisplayText
-    }
-    val logDisplayText = frozenLogDisplayText
     val visibleLogLineCount = remember(logEntries) {
         logEntries.count { it is LogDisplayEntry.Line }
     }
-    val verticalScroll = rememberScrollState()
-    val horizontalScroll = rememberScrollState()
     val transformState = rememberTransformableState { zoomChange, _, _ ->
         if (zoomChange != 1f) {
             onTextScaleChange((textScale * zoomChange).coerceIn(0.5f, 4f))
@@ -689,16 +676,10 @@ private fun LogViewerContent(
     val freezeLogUpdatesState by rememberUpdatedState(freezeLogUpdates)
     LaunchedEffect(Unit) {
         while (true) {
-            delay(300)
+            delay(500)
             if (!freezeLogUpdatesState) {
                 refreshTick = AppLogBuffer.revision
             }
-        }
-    }
-
-    LaunchedEffect(logEntries.size, liveLogDisplayText, freezeLogUpdates) {
-        if (!freezeLogUpdates && verticalScroll.maxValue > 0) {
-            verticalScroll.animateScrollTo(verticalScroll.maxValue)
         }
     }
 
@@ -822,24 +803,19 @@ private fun LogViewerContent(
             SelectionContainer(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(verticalScroll)
-                    .then(
-                        if (wordWrap) {
-                            Modifier
-                        } else {
-                            Modifier.horizontalScroll(horizontalScroll)
-                        },
-                    )
                     .padding(
                         horizontal = LOG_CONTENT_PADDING_H,
                         vertical = LOG_CONTENT_PADDING_V,
                     ),
             ) {
-                Text(
-                    logDisplayText,
-                    style = logTextStyle,
-                    softWrap = wordWrap,
-                    modifier = Modifier.fillMaxWidth(),
+                LogViewerLazyList(
+                    entries = logEntries,
+                    hideTimestamps = hideTimestamps,
+                    coloredLevels = coloredLevels,
+                    textStyle = logTextStyle,
+                    wordWrap = wordWrap,
+                    freezeUpdates = freezeLogUpdates,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
         }
