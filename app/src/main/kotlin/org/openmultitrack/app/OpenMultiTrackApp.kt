@@ -21,7 +21,13 @@ class OpenMultiTrackApp : Application() {
             OmtLog.i("Xr18Routing", message)
             TransportTraceHub.markActive("osc $message")
         }
+        if (BuildConfig.DEBUG) {
+            OmtLog.lineListener = { level, tag, message ->
+                AppLogBuffer.append(level, tag, message)
+            }
+        }
         OmtLog.i("App", "OpenMultiTrack ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) starting")
+        AppLogBuffer.append("I", "App", "In-app debug log ready (menu → Log viewer)")
     }
 
     private fun installCrashLogger() {

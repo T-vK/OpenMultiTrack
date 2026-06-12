@@ -271,11 +271,6 @@ fun DawMainScreen(
         wasRecording = isRecording
     }
 
-    if (state.showLogViewer) {
-        LogViewerScreen(onDismiss = onCloseLog)
-        return
-    }
-
     if (state.showSettings) {
         SettingsScreen(
             state = SettingsUiState(

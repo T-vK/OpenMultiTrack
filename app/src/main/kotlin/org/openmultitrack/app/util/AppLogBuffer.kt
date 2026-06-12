@@ -14,10 +14,17 @@ object AppLogBuffer {
     private val fmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
     private val sessionFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
 
+    @Volatile
+    var revision: Int = 0
+        private set
+
+    fun lineCount(): Int = lines.size
+
     fun append(level: String, tag: String, message: String) {
         val line = "${fmt.format(Date())} $level/$tag: $message"
         lines.add(line)
         while (lines.size > MAX_LINES) lines.removeAt(0)
+        revision++
     }
 
     fun appendThrowable(level: String, tag: String, throwable: Throwable, maxStackLines: Int = 80) {

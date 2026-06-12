@@ -471,6 +471,34 @@ private fun PlaybackTransportCluster(
     val hostReady = session?.probe != null ||
         (isRemoteClient && session?.captureChannelCount?.let { it > 0 } == true)
     val hasSession = session?.selectedSoundcheckDir != null && hostReady
+    LaunchedEffect(session?.selectedSoundcheckDir, hostReady, session?.probing) {
+        when {
+            session?.selectedSoundcheckDir == null ->
+                org.openmultitrack.app.util.AppLogBuffer.append(
+                    "D",
+                    "Transport",
+                    "Play disabled — no soundcheck session loaded",
+                )
+            session.probing == true ->
+                org.openmultitrack.app.util.AppLogBuffer.append(
+                    "D",
+                    "Transport",
+                    "Play disabled — USB probe in progress",
+                )
+            !hostReady ->
+                org.openmultitrack.app.util.AppLogBuffer.append(
+                    "W",
+                    "Transport",
+                    "Play disabled — mixer not probed (reconnect USB or wait for probe)",
+                )
+            else ->
+                org.openmultitrack.app.util.AppLogBuffer.append(
+                    "I",
+                    "Transport",
+                    "Play ready — session loaded, probe OK",
+                )
+        }
+    }
     val canStop = hasSession && (isPlaying || (session?.playbackPositionSec ?: 0f) > 0.05f)
     val hasTrackmarks = chaptersEnabled && session?.trackmarks?.isNotEmpty() == true
     TransportActionRow {
@@ -1037,14 +1065,16 @@ internal fun DawNavigationDrawer(
                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
             )
         }
-        HorizontalDivider(modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp))
-        NavigationDrawerItem(
-            icon = { Icon(Icons.Default.Article, contentDescription = null) },
-            label = { Text("Log viewer") },
-            selected = false,
-            onClick = { closeAnd(onOpenLog) },
-            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
-        )
+        if (org.openmultitrack.app.BuildConfig.DEBUG) {
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp))
+            NavigationDrawerItem(
+                icon = { Icon(Icons.Default.Article, contentDescription = null) },
+                label = { Text("Log viewer") },
+                selected = false,
+                onClick = { closeAnd(onOpenLog) },
+                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+            )
+        }
     }
 }
 

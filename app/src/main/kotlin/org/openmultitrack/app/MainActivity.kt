@@ -21,6 +21,7 @@ import androidx.activity.viewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -37,6 +38,7 @@ import com.journeyapps.barcodescanner.ScanOptions
 import org.openmultitrack.app.device.PrerequisiteKind
 import org.openmultitrack.app.service.SessionTransportActions
 import org.openmultitrack.app.ui.daw.DawMainScreen
+import org.openmultitrack.app.ui.daw.FloatingLogViewerOverlay
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 import kotlinx.coroutines.launch
@@ -142,6 +144,7 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val state = viewModel.uiState.collectAsStateWithLifecycle()
+                    Box(Modifier.fillMaxSize()) {
                     DawMainScreen(
                         state = state.value,
                         monitorGain = state.value.monitorGainLinear,
@@ -276,6 +279,13 @@ class MainActivity : ComponentActivity() {
                         onNextTrackmark = viewModel::seekToNextTrackmark,
                         onAddTrackmark = viewModel::addTrackmark,
                     )
+                    if (BuildConfig.DEBUG) {
+                        FloatingLogViewerOverlay(
+                            visible = state.value.showLogViewer,
+                            onDismiss = { viewModel.showLogViewer(false) },
+                        )
+                    }
+                    }
                 }
             }
         }
