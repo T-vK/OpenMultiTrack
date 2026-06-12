@@ -5,8 +5,6 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -20,7 +18,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -31,15 +28,12 @@ import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Minimize
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -634,18 +628,31 @@ private fun LogViewerContent(
     var levelFilterMask by remember { mutableIntStateOf(settings.devLogLevelFilterMask) }
     var showMenuBar by remember { mutableStateOf(settings.devLogShowMenuBar) }
     var wordWrap by remember { mutableStateOf(settings.devLogWordWrap) }
+    var disabledTags by remember { mutableStateOf(settings.devLogDisabledTags) }
+    var customFilters by remember { mutableStateOf(settings.devLogCustomFilters) }
     var refreshTick by remember { mutableIntStateOf(AppLogBuffer.revision) }
 
     LaunchedEffect(autoPersist) {
         settings.devLogAutoPersist = autoPersist
         AppLogBuffer.setAutoPersist(context, autoPersist)
     }
+    LaunchedEffect(disabledTags) {
+        settings.devLogDisabledTags = disabledTags
+    }
+    LaunchedEffect(customFilters) {
+        settings.devLogCustomFilters = customFilters
+    }
 
-    val logEntries = remember(refreshTick, autoPersist, levelFilterMask) {
+    val allTags = remember(refreshTick, autoPersist) {
+        AppLogBuffer.discoverTags(context, autoPersist)
+    }
+    val logEntries = remember(refreshTick, autoPersist, levelFilterMask, disabledTags, customFilters) {
         AppLogBuffer.collectDisplayEntries(
             context = context,
             includePersisted = autoPersist,
             levelMask = levelFilterMask,
+            disabledTags = disabledTags,
+            customFilters = customFilters,
         )
     }
     val logText = remember(logEntries, hideTimestamps, coloredLevels) {
@@ -746,13 +753,20 @@ private fun LogViewerContent(
 
         if (showMenuBar) {
             HorizontalDivider()
-            LogViewerMenuBar(
+            LogViewerToolbar(
                 visibleLineCount = visibleLogLineCount,
                 totalLineCount = AppLogBuffer.lineCount(),
+                filterActive = levelFilterMask != DevLogLevelMask.ALL ||
+                    disabledTags.isNotEmpty() ||
+                    customFilters.any { it.enabled },
                 autoPersist = autoPersist,
                 hideTimestamps = hideTimestamps,
                 coloredLevels = coloredLevels,
+                wordWrap = wordWrap,
                 levelFilterMask = levelFilterMask,
+                disabledTags = disabledTags,
+                allTags = allTags,
+                customFilters = customFilters,
                 onCopy = { clipboard.setText(AnnotatedString(logText)) },
                 onClear = {
                     AppLogBuffer.clearCurrentSession(context)
@@ -767,15 +781,17 @@ private fun LogViewerContent(
                     coloredLevels = it
                     settings.devLogColoredLevels = it
                 },
-                onLevelFilterMaskChange = {
-                    levelFilterMask = it
-                    settings.devLogLevelFilterMask = it
-                },
-                wordWrap = wordWrap,
                 onWordWrapChange = {
                     wordWrap = it
                     settings.devLogWordWrap = it
                 },
+                onLevelFilterMaskChange = {
+                    levelFilterMask = it
+                    settings.devLogLevelFilterMask = it
+                },
+                onDisabledTagsChange = { disabledTags = it },
+                onCustomFiltersChange = { customFilters = it },
+                compact = true,
             )
             HorizontalDivider()
         }
@@ -815,195 +831,10 @@ private fun LogViewerContent(
                     textStyle = logTextStyle,
                     wordWrap = wordWrap,
                     freezeUpdates = freezeLogUpdates,
+                    revision = refreshTick,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
         }
     }
-}
-
-@Composable
-private fun LogViewerMenuBar(
-    visibleLineCount: Int,
-    totalLineCount: Int,
-    autoPersist: Boolean,
-    hideTimestamps: Boolean,
-    coloredLevels: Boolean,
-    levelFilterMask: Int,
-    onCopy: () -> Unit,
-    onClear: () -> Unit,
-    onAutoPersistChange: (Boolean) -> Unit,
-    onHideTimestampsChange: (Boolean) -> Unit,
-    onColoredLevelsChange: (Boolean) -> Unit,
-    onLevelFilterMaskChange: (Int) -> Unit,
-    wordWrap: Boolean,
-    onWordWrapChange: (Boolean) -> Unit,
-) {
-    val menuLabelStyle = MaterialTheme.typography.labelSmall
-    val menuItemPadding = Modifier.padding(horizontal = 2.dp)
-    var filterMenuExpanded by remember { mutableStateOf(false) }
-    val filterActive = levelFilterMask != DevLogLevelMask.ALL
-    val lineCountLabel = if (filterActive && visibleLineCount != totalLineCount) {
-        "$visibleLineCount/$totalLineCount lines"
-    } else {
-        "$totalLineCount lines"
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(MENU_BAR_HEIGHT)
-            .background(MaterialTheme.colorScheme.surface)
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        TextButton(
-            onClick = onCopy,
-            modifier = menuItemPadding.height(MENU_BAR_HEIGHT),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
-        ) {
-            Text("Copy", style = menuLabelStyle)
-        }
-        MenuBarDivider()
-        TextButton(
-            onClick = onClear,
-            modifier = menuItemPadding.height(MENU_BAR_HEIGHT),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
-        ) {
-            Text("Clear", style = menuLabelStyle)
-        }
-        MenuBarDivider()
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 2.dp),
-        ) {
-            Checkbox(
-                checked = autoPersist,
-                onCheckedChange = onAutoPersistChange,
-                modifier = Modifier.size(20.dp),
-            )
-            Text("Persist logs", style = menuLabelStyle)
-        }
-        MenuBarDivider()
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Checkbox(
-                checked = hideTimestamps,
-                onCheckedChange = onHideTimestampsChange,
-                modifier = Modifier.size(20.dp),
-            )
-            Text("Hide timestamps", style = menuLabelStyle)
-        }
-        MenuBarDivider()
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(
-                checked = coloredLevels,
-                onCheckedChange = onColoredLevelsChange,
-                modifier = Modifier.size(20.dp),
-            )
-            Text("Colors", style = menuLabelStyle)
-        }
-        MenuBarDivider()
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(
-                checked = wordWrap,
-                onCheckedChange = onWordWrapChange,
-                modifier = Modifier.size(20.dp),
-            )
-            Text("Word wrap", style = menuLabelStyle)
-        }
-        MenuBarDivider()
-        Box {
-            TextButton(
-                onClick = { filterMenuExpanded = true },
-                modifier = menuItemPadding.height(MENU_BAR_HEIGHT),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
-            ) {
-                Text(
-                    if (filterActive) "Filter*" else "Filter",
-                    style = menuLabelStyle,
-                    color = if (filterActive) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                )
-            }
-            DropdownMenu(
-                expanded = filterMenuExpanded,
-                onDismissRequest = { filterMenuExpanded = false },
-            ) {
-                LogLevelFilterRow('D', "Debug", DevLogLevelMask.DEBUG, levelFilterMask, onLevelFilterMaskChange)
-                LogLevelFilterRow('I', "Info", DevLogLevelMask.INFO, levelFilterMask, onLevelFilterMaskChange)
-                LogLevelFilterRow('W', "Warn", DevLogLevelMask.WARN, levelFilterMask, onLevelFilterMaskChange)
-                LogLevelFilterRow('E', "Error", DevLogLevelMask.ERROR, levelFilterMask, onLevelFilterMaskChange)
-            }
-        }
-        Text(
-            lineCountLabel,
-            style = menuLabelStyle,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(end = 6.dp),
-        )
-    }
-}
-
-@Composable
-private fun LogLevelFilterRow(
-    level: Char,
-    label: String,
-    bit: Int,
-    levelFilterMask: Int,
-    onLevelFilterMaskChange: (Int) -> Unit,
-) {
-    val checked = levelFilterMask and bit != 0
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable {
-                val updated = if (checked) levelFilterMask and bit.inv() else levelFilterMask or bit
-                onLevelFilterMaskChange(updated)
-            }
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Checkbox(
-            checked = checked,
-            onCheckedChange = { enabled ->
-                val updated = if (enabled) levelFilterMask or bit else levelFilterMask and bit.inv()
-                onLevelFilterMaskChange(updated)
-            },
-            modifier = Modifier.size(20.dp),
-        )
-        Text(
-            "$level  $label",
-            style = MaterialTheme.typography.labelMedium,
-            color = logLevelColor(level),
-        )
-    }
-}
-
-@Composable
-private fun logLevelColor(level: Char): androidx.compose.ui.graphics.Color {
-    val scheme = MaterialTheme.colorScheme
-    return when (level.uppercaseChar()) {
-        'D' -> androidx.compose.ui.graphics.Color(0xFF9E9E9E)
-        'I' -> androidx.compose.ui.graphics.Color(0xFF66BB6A)
-        'W' -> androidx.compose.ui.graphics.Color(0xFFFFA726)
-        'E' -> scheme.error
-        else -> scheme.onSurface
-    }
-}
-
-@Composable
-private fun MenuBarDivider() {
-    Box(
-        modifier = Modifier
-            .width(1.dp)
-            .height(18.dp)
-            .background(MaterialTheme.colorScheme.outlineVariant),
-    )
 }

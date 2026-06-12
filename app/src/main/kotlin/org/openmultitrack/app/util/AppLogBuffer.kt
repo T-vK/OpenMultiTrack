@@ -139,17 +139,25 @@ object AppLogBuffer {
         context: Context,
         includePersisted: Boolean,
         levelMask: Int = DevLogLevelMask.ALL,
+        disabledTags: Set<String> = emptySet(),
+        customFilters: List<LogCustomFilter> = emptyList(),
         maxDisplayLines: Int = MAX_DISPLAY_LINES,
     ): List<LogDisplayEntry> {
         val rawLines = rawDisplayLines(context, includePersisted)
         if (rawLines.isEmpty()) return emptyList()
+        val activeOnlyShow = customFilters.filter { it.enabled && it.mode == LogCustomFilterMode.ONLY_SHOW }
+        val activeHide = customFilters.filter { it.enabled && it.mode == LogCustomFilterMode.HIDE }
         val entries = rawLines.mapNotNull { raw ->
             when {
                 raw.isBlank() -> null
                 else -> {
                     val parsed = parseLogLine(raw)
                     if (parsed != null && DevLogLevelMask.isEnabled(levelMask, parsed.level)) {
-                        LogDisplayEntry.Line(parsed)
+                        if (!matchesLogFilters(parsed, disabledTags, activeOnlyShow, activeHide)) {
+                            null
+                        } else {
+                            LogDisplayEntry.Line(parsed)
+                        }
                     } else if (parsed != null) {
                         null
                     } else {
@@ -159,6 +167,23 @@ object AppLogBuffer {
             }
         }
         return tailDisplayEntries(entries, maxDisplayLines)
+    }
+
+    fun discoverTags(context: Context, includePersisted: Boolean): List<String> =
+        LogTagCatalog.allTags(rawDisplayLines(context, includePersisted))
+
+    private fun matchesLogFilters(
+        parsed: ParsedLogLine,
+        disabledTags: Set<String>,
+        activeOnlyShow: List<LogCustomFilter>,
+        activeHide: List<LogCustomFilter>,
+    ): Boolean {
+        if (parsed.tag in disabledTags) return false
+        if (activeHide.any { it.matchesTag(parsed.tag) }) return false
+        if (activeOnlyShow.isNotEmpty() && !activeOnlyShow.any { it.matchesTag(parsed.tag) }) {
+            return false
+        }
+        return true
     }
 
     fun tailDisplayEntries(

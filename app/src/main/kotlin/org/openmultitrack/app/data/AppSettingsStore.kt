@@ -7,6 +7,9 @@ import org.openmultitrack.domain.remote.RemotePairedHost
 import org.openmultitrack.domain.remote.RemotePairing
 import org.openmultitrack.domain.remote.RemoteRole
 import org.openmultitrack.domain.session.AppMode
+import org.openmultitrack.app.util.LogCustomFilter
+import org.openmultitrack.app.util.LogCustomFilterCodec
+import org.openmultitrack.app.util.LogTagFilterCodec
 
 class AppSettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -171,6 +174,19 @@ class AppSettingsStore(context: Context) {
     var devLogTextScale: Float
         get() = prefs.getFloat(KEY_DEV_LOG_TEXT_SCALE, 1f).coerceIn(0.5f, 4f)
         set(value) = prefs.edit().putFloat(KEY_DEV_LOG_TEXT_SCALE, value.coerceIn(0.5f, 4f)).apply()
+
+    /** Log tags hidden in the debug log viewer (empty = all known tags visible). */
+    var devLogDisabledTags: Set<String>
+        get() = LogTagFilterCodec.decode(prefs.getString(KEY_DEV_LOG_DISABLED_TAGS, null))
+        set(value) = prefs.edit()
+            .putString(KEY_DEV_LOG_DISABLED_TAGS, LogTagFilterCodec.encodeDisabledTags(value))
+            .apply()
+
+    var devLogCustomFilters: List<LogCustomFilter>
+        get() = LogCustomFilterCodec.decode(prefs.getString(KEY_DEV_LOG_CUSTOM_FILTERS, null))
+        set(value) = prefs.edit()
+            .putString(KEY_DEV_LOG_CUSTOM_FILTERS, LogCustomFilterCodec.encode(value))
+            .apply()
 
     var hideArmButton: Boolean
         get() = prefs.getBoolean(KEY_HIDE_ARM, false)
@@ -451,6 +467,8 @@ class AppSettingsStore(context: Context) {
         private const val KEY_DEV_LOG_FAB_X = "dev_log_fab_x_dp"
         private const val KEY_DEV_LOG_FAB_Y = "dev_log_fab_y_dp"
         private const val KEY_DEV_LOG_TEXT_SCALE = "dev_log_text_scale"
+        private const val KEY_DEV_LOG_DISABLED_TAGS = "dev_log_disabled_tags"
+        private const val KEY_DEV_LOG_CUSTOM_FILTERS = "dev_log_custom_filters"
         private const val KEY_HIDE_ARM = "hide_arm_button"
         private const val KEY_HIDE_MONITOR = "hide_monitor_button"
         private const val KEY_HIDE_SOLO = "hide_solo_button"

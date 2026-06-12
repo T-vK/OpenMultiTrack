@@ -1,23 +1,18 @@
 package org.openmultitrack.app.ui.daw
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -26,7 +21,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -51,12 +45,32 @@ fun LogViewerScreen(
     var hideTimestamps by remember { mutableStateOf(settings.devLogHideTimestamps) }
     var coloredLevels by remember { mutableStateOf(settings.devLogColoredLevels) }
     var levelFilterMask by remember { mutableIntStateOf(settings.devLogLevelFilterMask) }
+    var wordWrap by remember { mutableStateOf(settings.devLogWordWrap) }
+    var disabledTags by remember { mutableStateOf(settings.devLogDisabledTags) }
+    var customFilters by remember { mutableStateOf(settings.devLogCustomFilters) }
     var refreshTick by remember { mutableIntStateOf(AppLogBuffer.revision) }
-    val logEntries = remember(refreshTick, autoPersist, levelFilterMask) {
+
+    LaunchedEffect(autoPersist) {
+        settings.devLogAutoPersist = autoPersist
+        AppLogBuffer.setAutoPersist(context, autoPersist)
+    }
+    LaunchedEffect(disabledTags) {
+        settings.devLogDisabledTags = disabledTags
+    }
+    LaunchedEffect(customFilters) {
+        settings.devLogCustomFilters = customFilters
+    }
+
+    val allTags = remember(refreshTick, autoPersist) {
+        AppLogBuffer.discoverTags(context, autoPersist)
+    }
+    val logEntries = remember(refreshTick, autoPersist, levelFilterMask, disabledTags, customFilters) {
         AppLogBuffer.collectDisplayEntries(
             context = context,
             includePersisted = autoPersist,
             levelMask = levelFilterMask,
+            disabledTags = disabledTags,
+            customFilters = customFilters,
         )
     }
     val logText = remember(logEntries, hideTimestamps, coloredLevels) {
@@ -74,6 +88,9 @@ fun LogViewerScreen(
                 }
             }
         }
+    }
+    val visibleLogLineCount = remember(logEntries) {
+        logEntries.count { it is LogDisplayEntry.Line }
     }
 
     LaunchedEffect(Unit) {
@@ -98,108 +115,64 @@ fun LogViewerScreen(
         Column(
             Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp),
+                .padding(padding),
         ) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(
-                    onClick = { clipboard.setText(AnnotatedString(logText)) },
-                ) {
-                    Text("Copy")
-                }
-                TextButton(
-                    onClick = {
-                        AppLogBuffer.clearCurrentSession(context)
-                        refreshTick = AppLogBuffer.revision
-                    },
-                ) {
-                    Text("Clear")
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = autoPersist,
-                    onCheckedChange = {
-                        autoPersist = it
-                        settings.devLogAutoPersist = it
-                        AppLogBuffer.setAutoPersist(context, it)
-                    },
-                )
-                Text("Persist logs", style = MaterialTheme.typography.bodyMedium)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = hideTimestamps,
-                    onCheckedChange = {
-                        hideTimestamps = it
-                        settings.devLogHideTimestamps = it
-                    },
-                )
-                Text("Hide timestamps", style = MaterialTheme.typography.bodyMedium)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = coloredLevels,
-                    onCheckedChange = {
-                        coloredLevels = it
-                        settings.devLogColoredLevels = it
-                    },
-                )
-                Text("Colors", style = MaterialTheme.typography.bodyMedium)
-            }
-            LogLevelFilterControls(
+            LogViewerToolbar(
+                visibleLineCount = visibleLogLineCount,
+                totalLineCount = AppLogBuffer.lineCount(),
+                filterActive = levelFilterMask != DevLogLevelMask.ALL ||
+                    disabledTags.isNotEmpty() ||
+                    customFilters.any { it.enabled },
+                autoPersist = autoPersist,
+                hideTimestamps = hideTimestamps,
+                coloredLevels = coloredLevels,
+                wordWrap = wordWrap,
                 levelFilterMask = levelFilterMask,
+                disabledTags = disabledTags,
+                allTags = allTags,
+                customFilters = customFilters,
+                onCopy = { clipboard.setText(AnnotatedString(logText)) },
+                onClear = {
+                    AppLogBuffer.clearCurrentSession(context)
+                    refreshTick = AppLogBuffer.revision
+                },
+                onAutoPersistChange = { autoPersist = it },
+                onHideTimestampsChange = {
+                    hideTimestamps = it
+                    settings.devLogHideTimestamps = it
+                },
+                onColoredLevelsChange = {
+                    coloredLevels = it
+                    settings.devLogColoredLevels = it
+                },
+                onWordWrapChange = {
+                    wordWrap = it
+                    settings.devLogWordWrap = it
+                },
                 onLevelFilterMaskChange = {
                     levelFilterMask = it
                     settings.devLogLevelFilterMask = it
                 },
+                onDisabledTagsChange = { disabledTags = it },
+                onCustomFiltersChange = { customFilters = it },
             )
+            HorizontalDivider()
             SelectionContainer(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(bottom = 16.dp),
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
             ) {
                 LogViewerLazyList(
                     entries = logEntries,
                     hideTimestamps = hideTimestamps,
                     coloredLevels = coloredLevels,
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    wordWrap = true,
+                    wordWrap = wordWrap,
                     freezeUpdates = false,
+                    revision = refreshTick,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun LogLevelFilterControls(
-    levelFilterMask: Int,
-    onLevelFilterMaskChange: (Int) -> Unit,
-) {
-    Text("Level filter", style = MaterialTheme.typography.labelMedium)
-    listOf(
-        Triple('D', "Debug", DevLogLevelMask.DEBUG),
-        Triple('I', "Info", DevLogLevelMask.INFO),
-        Triple('W', "Warn", DevLogLevelMask.WARN),
-        Triple('E', "Error", DevLogLevelMask.ERROR),
-    ).forEach { (level, label, bit) ->
-        val checked = levelFilterMask and bit != 0
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(
-                checked = checked,
-                onCheckedChange = { enabled ->
-                    val updated = if (enabled) levelFilterMask or bit else levelFilterMask and bit.inv()
-                    onLevelFilterMaskChange(updated)
-                },
-                modifier = Modifier.size(20.dp),
-            )
-            Text("$level  $label", style = MaterialTheme.typography.bodyMedium)
         }
     }
 }

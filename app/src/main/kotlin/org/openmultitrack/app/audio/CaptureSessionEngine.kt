@@ -5,6 +5,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -53,8 +54,24 @@ class CaptureSessionEngine(
         val customTitle: String? = null,
     )
 
+    private sealed interface RecordingWriteRequest {
+        data class Frames(val samples: FloatArray, val frameCount: Int, val channelCount: Int) :
+            RecordingWriteRequest
+
+        data class Silence(val frameCount: Int) : RecordingWriteRequest
+    }
+
+    private data class ActiveRecordingWriters(
+        val resilient: ResilientSessionWriter?,
+        val perChannel: PerChannelWavWriter?,
+    )
+
     private val lifecycleMutex = Mutex()
+    private var captureScope: CoroutineScope? = null
     private var fanoutJob: Job? = null
+    private var recordingWriteJob: Job? = null
+    private var recordingWriteChannel: Channel<RecordingWriteRequest>? = null
+    private var activeRecordingWriters: ActiveRecordingWriters? = null
     private var activeRoute: CaptureRoute? = null
     private var activeBackend: AudioBackend? = null
     private var syntheticGenerator: SyntheticCaptureGenerator? = null
@@ -132,8 +149,13 @@ class CaptureSessionEngine(
 
     fun recordingStartedAtEpochMs(): Long? = recordingStartedAtEpochMs
 
-    fun recordElapsedSec(): Float =
-        if (sampleRate > 0) framesWritten.toFloat() / sampleRate else 0f
+    fun recordElapsedSec(): Float {
+        val frameSec = if (sampleRate > 0) framesWritten.toFloat() / sampleRate else 0f
+        val started = recordingStartedAtEpochMs ?: return frameSec
+        if (!isRecording) return frameSec
+        val wallSec = (System.currentTimeMillis() - started).coerceAtLeast(0) / 1000f
+        return maxOf(frameSec, wallSec)
+    }
 
     fun updateVuMetering(enabled: Boolean) {
         vuMeteringEnabled.set(enabled)
@@ -286,6 +308,7 @@ class CaptureSessionEngine(
         }
 
         buildSessionMetadata(config, sampleRate, framesWritten).writeTo(dir)
+        startRecordingWriteLoop()
 
         val armedCount = config.channelStrips.count { it.armed }
         Result.success(
@@ -331,6 +354,7 @@ class CaptureSessionEngine(
             allocateWaveformRings()
         }
         hydrateWaveformsAfterResume(sessionDir, meta, preInterruptionFrames)
+        startRecordingWriteLoop()
         catchUpTimelineToTarget(maxFramesPerPass = Int.MAX_VALUE / 2)
         maybePersistTimeline()
 
@@ -355,14 +379,15 @@ class CaptureSessionEngine(
 
     private suspend fun closeRecordingWritersLocked(markComplete: Boolean): RecordingSession? {
         val dir = sessionDir
-        val config = recordingConfig
         val resilient = sessionWriter
+        val writer = perChannelWriter
+        val legacy = legacyWavWriter
+        stopRecordingWriteLoop()
+        val recordedFrames = framesWritten
         sessionWriter = null
         resilient?.close()
-        val writer = perChannelWriter
         perChannelWriter = null
         writer?.close()
-        val legacy = legacyWavWriter
         legacyWavWriter = null
         legacy?.close()
         recordingConfig = null
@@ -389,12 +414,13 @@ class CaptureSessionEngine(
                 filePath = it.absolutePath,
                 channelCount = channelCount,
                 sampleRate = sampleRate,
-                framesRecorded = framesWritten,
+                framesRecorded = recordedFrames,
             )
         }
     }
 
     suspend fun stopCapture() = lifecycleMutex.withLock {
+        stopRecordingWriteLoop()
         val resilient = sessionWriter
         sessionWriter = null
         resilient?.close()
@@ -553,6 +579,7 @@ class CaptureSessionEngine(
     }
 
     private fun startFanoutLoop(scope: CoroutineScope, backend: AudioBackend?) {
+        captureScope = scope
         val framesPerChunk = SessionRecorder.chunkFramesForChannels(channelCount)
         val scratch = FloatArray(framesPerChunk * channelCount)
         val monitorScratch = FloatArray(framesPerChunk * 2)
@@ -641,7 +668,57 @@ class CaptureSessionEngine(
         }
     }
 
-    private fun writeRecordingFrames(scratch: FloatArray, frames: Int, channels: Int) {
+    private fun startRecordingWriteLoop() {
+        val scope = captureScope ?: return
+        if (recordingWriteJob?.isActive == true) return
+        val writers = ActiveRecordingWriters(
+            resilient = sessionWriter,
+            perChannel = perChannelWriter,
+        )
+        if (writers.resilient == null && writers.perChannel == null) return
+        activeRecordingWriters = writers
+        val channel = Channel<RecordingWriteRequest>(capacity = 48)
+        recordingWriteChannel = channel
+        recordingWriteJob = scope.launch(Dispatchers.IO) {
+            try {
+                for (request in channel) {
+                    val active = activeRecordingWriters ?: break
+                    when (request) {
+                        is RecordingWriteRequest.Frames -> {
+                            val samples = request.samples
+                            val frames = request.frameCount
+                            val channels = request.channelCount
+                            if (active.resilient != null) {
+                                active.resilient.writeInterleavedMultiChannel(samples, frames, channels)
+                            } else {
+                                active.perChannel?.writeInterleavedMultiChannel(samples, frames, channels)
+                            }
+                        }
+                        is RecordingWriteRequest.Silence -> {
+                            val frames = request.frameCount
+                            if (active.resilient != null) {
+                                active.resilient.writeSilence(frames)
+                            } else {
+                                active.perChannel?.writeSilence(frames)
+                            }
+                        }
+                    }
+                }
+            } catch (_: IllegalStateException) {
+                // writer closed during stop
+            }
+        }
+    }
+
+    private suspend fun stopRecordingWriteLoop() {
+        recordingWriteChannel?.close()
+        recordingWriteJob?.join()
+        recordingWriteChannel = null
+        recordingWriteJob = null
+        activeRecordingWriters = null
+    }
+
+    private suspend fun writeRecordingFrames(scratch: FloatArray, frames: Int, channels: Int) {
         if (!isRecording) return
         val toWrite = if (usbDegraded) {
             val maxFrames = (sessionTargetFrames() - framesWritten).coerceAtLeast(0)
@@ -650,11 +727,27 @@ class CaptureSessionEngine(
             frames
         }
         if (toWrite <= 0) return
+        val channel = recordingWriteChannel
+        if (channel != null) {
+            val copy = FloatArray(toWrite * channels)
+            System.arraycopy(scratch, 0, copy, 0, copy.size)
+            try {
+                channel.send(RecordingWriteRequest.Frames(copy, toWrite, channels))
+                framesWritten += toWrite
+            } catch (_: Exception) {
+                // channel closed while stopping
+            }
+            return
+        }
+        writeRecordingFramesSync(scratch, toWrite, channels)
+        framesWritten += toWrite
+    }
+
+    private fun writeRecordingFramesSync(scratch: FloatArray, toWrite: Int, channels: Int) {
         val writer = sessionWriter
         if (writer != null) {
             try {
                 writer.writeInterleavedMultiChannel(scratch, toWrite, channels)
-                framesWritten += toWrite
             } catch (_: IllegalStateException) {
             }
             return
@@ -662,7 +755,30 @@ class CaptureSessionEngine(
         val legacyWriter = perChannelWriter ?: return
         try {
             legacyWriter.writeInterleavedMultiChannel(scratch, toWrite, channels)
-            framesWritten += toWrite
+        } catch (_: IllegalStateException) {
+        }
+    }
+
+    private suspend fun enqueueSilenceFrames(frames: Int) {
+        if (frames <= 0) return
+        val channel = recordingWriteChannel
+        if (channel != null) {
+            try {
+                channel.send(RecordingWriteRequest.Silence(frames))
+                framesWritten += frames
+            } catch (_: Exception) {
+            }
+            return
+        }
+        val resilient = sessionWriter
+        val legacyWriter = perChannelWriter
+        try {
+            if (resilient != null) {
+                resilient.writeSilence(frames)
+            } else {
+                legacyWriter?.writeSilence(frames)
+            }
+            framesWritten += frames
         } catch (_: IllegalStateException) {
         }
     }
@@ -674,7 +790,7 @@ class CaptureSessionEngine(
     }
 
     /** Inserts silence so [framesWritten] matches wall clock when USB input is degraded. */
-    private fun catchUpTimelineToTarget(maxFramesPerPass: Int): Int {
+    private suspend fun catchUpTimelineToTarget(maxFramesPerPass: Int): Int {
         if (!usbDegraded) return 0
         val resilient = sessionWriter
         val legacyWriter = perChannelWriter
@@ -685,12 +801,7 @@ class CaptureSessionEngine(
             var gap = sessionTargetFrames() - framesWritten
             while (gap > 0 && written < maxFramesPerPass) {
                 val chunk = minOf(gap, (maxFramesPerPass - written).toLong(), 8_192L).toInt()
-                if (resilient != null) {
-                    resilient.writeSilence(chunk)
-                } else {
-                    legacyWriter?.writeSilence(chunk)
-                }
-                framesWritten += chunk
+                enqueueSilenceFrames(chunk)
                 written += chunk
                 gap -= chunk
             }
