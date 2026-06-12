@@ -2,7 +2,7 @@ package org.openmultitrack.app.ui.daw
 
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -149,10 +149,10 @@ fun LogViewerLazyList(
         state = listState,
         modifier = modifier.fillMaxWidth(),
     ) {
-        items(
+        itemsIndexed(
             items = entries,
-            key = { entry -> logEntryStableKey(entry) },
-        ) { entry ->
+            key = { index, entry -> "$index:${logEntryStableKey(entry)}" },
+        ) { _, entry ->
             val line = remember(
                 entry,
                 hideTimestamps,
