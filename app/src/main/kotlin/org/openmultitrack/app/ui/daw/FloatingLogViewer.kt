@@ -79,7 +79,6 @@ private val RESIZE_HIT_OUTSET = 18.dp
 private val RESIZE_CORNER_SIZE = 40.dp
 private val TITLE_BAR_HEIGHT = 36.dp
 private val TITLE_BAR_BUTTON_SIZE = 28.dp
-private val MENU_BAR_HEIGHT = 28.dp
 private val TerminalWindowShape = RoundedCornerShape(
     topStart = 4.dp,
     topEnd = 4.dp,
