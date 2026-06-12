@@ -916,12 +916,8 @@ class MixerSessionController(
             if (isFlow8Active()) {
                 trace?.mark("preparing FLOW 8 USB for playback")
                 prepareFlow8UsbForPlaybackLocked()
-            } else if (
-                _state.value.isMonitoring ||
-                _state.value.isVuMetering ||
-                (captureEngine.isCaptureActive && !_state.value.isRecording)
-            ) {
-                trace?.mark("preparing USB (stopping monitor/VU/capture)")
+            } else {
+                trace?.mark("preparing USB for playback")
                 prepareUsbForPlaybackLocked()
                 trace?.mark("USB prepared for playback")
             }

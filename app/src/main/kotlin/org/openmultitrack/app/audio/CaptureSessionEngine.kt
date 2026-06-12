@@ -90,6 +90,10 @@ class CaptureSessionEngine(
     @Volatile
     private var framesWritten: Long = 0
 
+    /** Frames received from USB/synthetic capture (timeline source of truth). */
+    @Volatile
+    private var framesCaptured: Long = 0
+
     @Volatile
     private var droppedFrames: Long = 0
 
@@ -149,13 +153,8 @@ class CaptureSessionEngine(
 
     fun recordingStartedAtEpochMs(): Long? = recordingStartedAtEpochMs
 
-    fun recordElapsedSec(): Float {
-        val frameSec = if (sampleRate > 0) framesWritten.toFloat() / sampleRate else 0f
-        val started = recordingStartedAtEpochMs ?: return frameSec
-        if (!isRecording) return frameSec
-        val wallSec = (System.currentTimeMillis() - started).coerceAtLeast(0) / 1000f
-        return maxOf(frameSec, wallSec)
-    }
+    fun recordElapsedSec(): Float =
+        if (sampleRate > 0) framesCaptured.toFloat() / sampleRate else 0f
 
     fun updateVuMetering(enabled: Boolean) {
         vuMeteringEnabled.set(enabled)
@@ -287,6 +286,7 @@ class CaptureSessionEngine(
         sessionDir = dir
         recordingConfig = config
         framesWritten = 0
+        framesCaptured = 0
         resetLiveWaveformBuffers()
         recordingStartedAtEpochMs = System.currentTimeMillis()
         lastMetadataPersistFrames = 0
@@ -338,6 +338,7 @@ class CaptureSessionEngine(
         perChannelWriter = writer
         this.sessionDir = sessionDir
         framesWritten = writer.totalFramesWritten()
+        framesCaptured = framesWritten
         recordingStartedAtEpochMs = meta.startedAtEpochMs
         lastMetadataPersistFrames = framesWritten
         sampleRate = meta.sampleRate
@@ -379,11 +380,17 @@ class CaptureSessionEngine(
 
     private suspend fun closeRecordingWritersLocked(markComplete: Boolean): RecordingSession? {
         val dir = sessionDir
+        val config = recordingConfig
+        val rate = sampleRate
         val resilient = sessionWriter
         val writer = perChannelWriter
         val legacy = legacyWavWriter
         stopRecordingWriteLoop()
-        val recordedFrames = framesWritten
+        val recordedFrames = when {
+            resilient != null -> resilient.totalFramesWritten()
+            writer != null -> writer.totalFramesWritten()
+            else -> framesCaptured.coerceAtLeast(framesWritten)
+        }
         sessionWriter = null
         resilient?.close()
         perChannelWriter = null
@@ -395,9 +402,11 @@ class CaptureSessionEngine(
         recordingStartedAtEpochMs = null
         lastMetadataPersistFrames = 0
         framesWritten = 0
+        framesCaptured = 0
         resetLiveWaveformBuffers()
 
-        if (dir != null) {
+        if (dir != null && config != null) {
+            buildSessionMetadata(config, rate, recordedFrames).writeTo(dir)
             if (markComplete) {
                 SessionMetadata.read(dir)?.markComplete(dir)
             } else {
@@ -413,7 +422,7 @@ class CaptureSessionEngine(
             RecordingSession(
                 filePath = it.absolutePath,
                 channelCount = channelCount,
-                sampleRate = sampleRate,
+                sampleRate = rate,
                 framesRecorded = recordedFrames,
             )
         }
@@ -611,6 +620,7 @@ class CaptureSessionEngine(
                         }
                         consecutiveEmptyReads = 0
                         lastFrameReceivedNs = System.nanoTime()
+                        framesCaptured += frames
                         if (backend != null) {
                             droppedFrames = AudioEngineRouter.recordingDroppedFrames(backend)
                         }
@@ -677,7 +687,7 @@ class CaptureSessionEngine(
         )
         if (writers.resilient == null && writers.perChannel == null) return
         activeRecordingWriters = writers
-        val channel = Channel<RecordingWriteRequest>(capacity = 48)
+        val channel = Channel<RecordingWriteRequest>(Channel.UNLIMITED)
         recordingWriteChannel = channel
         recordingWriteJob = scope.launch(Dispatchers.IO) {
             try {
@@ -798,10 +808,11 @@ class CaptureSessionEngine(
         if (!isRecording) return 0
         var written = 0
         try {
-            var gap = sessionTargetFrames() - framesWritten
+            var gap = sessionTargetFrames() - framesCaptured
             while (gap > 0 && written < maxFramesPerPass) {
                 val chunk = minOf(gap, (maxFramesPerPass - written).toLong(), 8_192L).toInt()
                 enqueueSilenceFrames(chunk)
+                framesCaptured += chunk
                 written += chunk
                 gap -= chunk
             }
@@ -894,9 +905,12 @@ class CaptureSessionEngine(
     private fun maybePersistTimeline() {
         val dir = sessionDir ?: return
         val config = recordingConfig ?: return
-        if (framesWritten - lastMetadataPersistFrames < sampleRate / 2) return
-        lastMetadataPersistFrames = framesWritten
-        buildSessionMetadata(config, sampleRate, framesWritten).writeTo(dir)
+        if (framesCaptured - lastMetadataPersistFrames < sampleRate / 2) return
+        lastMetadataPersistFrames = framesCaptured
+        val timelineFrames = sessionWriter?.totalFramesWritten()
+            ?: perChannelWriter?.totalFramesWritten()
+            ?: framesCaptured
+        buildSessionMetadata(config, sampleRate, timelineFrames).writeTo(dir)
     }
 
     private fun decayMeterHoldForElapsed() {
