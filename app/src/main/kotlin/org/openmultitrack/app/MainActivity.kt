@@ -42,6 +42,7 @@ import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 import kotlinx.coroutines.launch
 import org.openmultitrack.usb.BehringerUsbIdentifiers
 import org.openmultitrack.usb.UsbAudioEnumerator
+import org.openmultitrack.usb.UsbPermissionCoordinator
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels {
@@ -100,8 +101,11 @@ class MainActivity : ComponentActivity() {
                         @Suppress("DEPRECATION")
                         intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
                     }
-                    if (granted && device != null) {
-                        viewModel.onUsbPermissionGranted(device.deviceName)
+                    if (device != null) {
+                        UsbPermissionCoordinator.markRequestFinished(device, granted)
+                        if (granted) {
+                            viewModel.onUsbPermissionGranted(device.deviceName)
+                        }
                     }
                 }
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
@@ -475,7 +479,14 @@ class MainActivity : ComponentActivity() {
         val usbManager = getSystemService(USB_SERVICE) as UsbManager
         usbManager.deviceList.values
             .filter { viewModel.isSavedMixerUsbDevice(it) }
-            .forEach { requestUsbPermission(it) }
+            .distinctBy { UsbPermissionCoordinator.stableKey(it) }
+            .forEach { device ->
+                if (usbManager.hasPermission(device)) {
+                    UsbPermissionCoordinator.markGranted(usbManager, device)
+                } else {
+                    requestUsbPermission(device)
+                }
+            }
     }
 
     private fun requestStorageAccessForPath(path: String) {
@@ -494,7 +505,14 @@ class MainActivity : ComponentActivity() {
     private fun requestUsbPermission(device: UsbDevice) {
         val usbManager = getSystemService(USB_SERVICE) as UsbManager
         if (usbManager.hasPermission(device)) {
+            UsbPermissionCoordinator.markGranted(usbManager, device)
             viewModel.onUsbPermissionGranted(device.deviceName)
+            return
+        }
+        if (!UsbPermissionCoordinator.shouldRequest(usbManager, device)) {
+            return
+        }
+        if (!UsbPermissionCoordinator.markRequestStarted(device)) {
             return
         }
         val permissionIntent = Intent(usbPermissionAction).setPackage(packageName)
@@ -504,8 +522,14 @@ class MainActivity : ComponentActivity() {
             } else {
                 0
             }
-        val pi = PendingIntent.getBroadcast(this, device.deviceId, permissionIntent, flags)
-        usbManager.requestPermission(device, pi)
+        val requestCode = UsbPermissionCoordinator.stableKey(device).hashCode()
+        val pi = PendingIntent.getBroadcast(this, requestCode, permissionIntent, flags)
+        runCatching {
+            usbManager.requestPermission(device, pi)
+        }.onFailure { error ->
+            UsbPermissionCoordinator.markRequestFinished(device, granted = false)
+            OmtLog.w("Activity", "USB permission request failed for ${device.deviceName}", error)
+        }
     }
 
     private companion object {

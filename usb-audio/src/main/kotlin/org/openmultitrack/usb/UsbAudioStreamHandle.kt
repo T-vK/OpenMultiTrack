@@ -62,12 +62,17 @@ class UsbAudioStreamHandle private constructor(
     companion object {
         fun open(context: Context, usbManager: UsbManager, device: UsbDevice): UsbAudioStreamHandle? {
             val t0 = SystemClock.elapsedRealtime()
-            UsbPermissionHelper.ensurePermission(context, usbManager, device)
-            val hasPermission = usbManager.hasPermission(device)
+            if (!usbManager.hasPermission(device)) {
+                OmtLog.w(
+                    "UsbStream",
+                    "open blocked — no USB permission for ${device.deviceName}; " +
+                        "request from MainActivity only",
+                )
+                return null
+            }
             OmtLog.d(
                 "UsbStream",
-                "open ${device.deviceName} vid=${device.vendorId} pid=${device.productId} " +
-                    "hasPermission=$hasPermission",
+                "open ${device.deviceName} vid=${device.vendorId} pid=${device.productId}",
             )
 
             val nodePath = device.deviceName.takeIf { it.startsWith("/dev/bus/usb/") }

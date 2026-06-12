@@ -91,6 +91,12 @@ class UsbAudioEnumerator(
         return usbManager.hasPermission(device)
     }
 
+    /** True if any connected node matching [profile] already has USB permission. */
+    fun hasUsbPermissionForProfile(profile: MixerProfile): Boolean =
+        usbManager.deviceList.values.any { device ->
+            profileMatchesDevice(profile, device) && usbManager.hasPermission(device)
+        }
+
     /** Lists only USB nodes that match saved mixer profiles (avoids touching unrelated USB gadgets). */
     fun listDevicesForProfiles(profiles: List<MixerProfile>): List<UsbAudioDeviceDescriptor> {
         if (profiles.isEmpty()) return emptyList()

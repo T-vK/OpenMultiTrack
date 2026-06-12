@@ -1402,7 +1402,12 @@ class MainViewModel(
                     delay(2_000)
                     continue
                 }
-                if (!enumerator.hasUsbPermission(usb.deviceName)) {
+                if (!enumerator.hasUsbPermissionForProfile(profile)) {
+                    val usbDevice = enumerator.getUsbDevice(usb.deviceName)
+                    if (usbDevice != null && org.openmultitrack.usb.UsbPermissionCoordinator.isInFlight(usbDevice)) {
+                        delay(2_000)
+                        continue
+                    }
                     updateInterruptedRecoveryStatus(
                         mixerId,
                         "Recording was interrupted. Allow USB access when prompted.",
@@ -1479,6 +1484,11 @@ class MainViewModel(
     fun onUsbPermissionGranted(deviceName: String) {
         OmtLog.i("ViewModel", "USB permission granted for $deviceName")
         val usbDevice = enumerator.getUsbDevice(deviceName)
+        if (usbDevice != null) {
+            val usbManager = appContext.getSystemService(android.content.Context.USB_SERVICE)
+                as android.hardware.usb.UsbManager
+            org.openmultitrack.usb.UsbPermissionCoordinator.markGranted(usbManager, usbDevice)
+        }
         sessionClient.withManager { mgr ->
             val usb = enumerator.listUsbDevices()
             mixerStore.listMixers()
@@ -2128,7 +2138,12 @@ class MainViewModel(
         } else {
             profile
         }
-        if (!enumerator.hasUsbPermission(usb.deviceName)) {
+        if (!enumerator.hasUsbPermissionForProfile(resolvedProfile)) {
+            val usbDevice = enumerator.getUsbDevice(usb.deviceName)
+            if (usbDevice != null && org.openmultitrack.usb.UsbPermissionCoordinator.isInFlight(usbDevice)) {
+                refreshInterruptedRecording(profile.id, manager)
+                return
+            }
             OmtLog.w("ViewModel", "USB permission needed for ${resolvedProfile.displayName} (${usb.deviceName})")
             _usbPermissionRequests.tryEmit(usb.deviceName)
             showStatus("Allow USB access when prompted.", resolvedProfile.id)
