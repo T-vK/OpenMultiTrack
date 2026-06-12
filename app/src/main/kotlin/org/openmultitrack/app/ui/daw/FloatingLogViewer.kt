@@ -629,6 +629,9 @@ private fun LogViewerContent(
     var wordWrap by remember { mutableStateOf(settings.devLogWordWrap) }
     var disabledTags by remember { mutableStateOf(settings.devLogDisabledTags) }
     var customFilters by remember { mutableStateOf(settings.devLogCustomFilters) }
+    var maxDisplayLines by remember { mutableIntStateOf(settings.devLogMaxDisplayLines) }
+    var searchQuery by remember { mutableStateOf("") }
+    var searchMatchIndex by remember { mutableIntStateOf(0) }
     var refreshTick by remember { mutableIntStateOf(AppLogBuffer.revision) }
 
     LaunchedEffect(autoPersist) {
@@ -641,19 +644,31 @@ private fun LogViewerContent(
     LaunchedEffect(customFilters) {
         settings.devLogCustomFilters = customFilters
     }
+    LaunchedEffect(maxDisplayLines) {
+        settings.devLogMaxDisplayLines = maxDisplayLines
+    }
 
     val allTags = remember(refreshTick, autoPersist) {
         AppLogBuffer.discoverTags(context, autoPersist)
     }
-    val logEntries = remember(refreshTick, autoPersist, levelFilterMask, disabledTags, customFilters) {
+    val logEntries = remember(refreshTick, autoPersist, levelFilterMask, disabledTags, customFilters, maxDisplayLines) {
         AppLogBuffer.collectDisplayEntries(
             context = context,
             includePersisted = autoPersist,
             levelMask = levelFilterMask,
             disabledTags = disabledTags,
             customFilters = customFilters,
+            maxDisplayLines = maxDisplayLines,
         )
     }
+    val searchMatches = remember(logEntries, searchQuery) {
+        logSearchMatchIndices(logEntries, searchQuery)
+    }
+    val searchMatchCount = searchMatches.size
+  LaunchedEffect(searchQuery, searchMatches) {
+        searchMatchIndex = if (searchMatches.isEmpty()) 0 else searchMatchIndex.coerceIn(0, searchMatches.lastIndex)
+    }
+    val scrollToSearchIndex = searchMatches.getOrNull(searchMatchIndex)
     val logText = remember(logEntries, hideTimestamps, coloredLevels) {
         if (logEntries.isEmpty()) {
             "(empty)"
@@ -669,9 +684,6 @@ private fun LogViewerContent(
                 }
             }
         }
-    }
-    val visibleLogLineCount = remember(logEntries) {
-        logEntries.count { it is LogDisplayEntry.Line }
     }
     val transformState = rememberTransformableState { zoomChange, _, _ ->
         if (zoomChange != 1f) {
@@ -753,11 +765,6 @@ private fun LogViewerContent(
         if (showMenuBar) {
             HorizontalDivider()
             LogViewerMenuBar(
-                visibleLineCount = visibleLogLineCount,
-                totalLineCount = AppLogBuffer.lineCount(),
-                filterActive = levelFilterMask != DevLogLevelMask.ALL ||
-                    disabledTags.isNotEmpty() ||
-                    customFilters.any { it.enabled },
                 autoPersist = autoPersist,
                 hideTimestamps = hideTimestamps,
                 coloredLevels = coloredLevels,
@@ -766,6 +773,10 @@ private fun LogViewerContent(
                 disabledTags = disabledTags,
                 allTags = allTags,
                 customFilters = customFilters,
+                maxDisplayLines = maxDisplayLines,
+                searchQuery = searchQuery,
+                searchMatchIndex = searchMatchIndex,
+                searchMatchCount = searchMatchCount,
                 onCopy = { clipboard.setText(AnnotatedString(logText)) },
                 onClear = {
                     AppLogBuffer.clearCurrentSession(context)
@@ -790,6 +801,22 @@ private fun LogViewerContent(
                 },
                 onDisabledTagsChange = { disabledTags = it },
                 onCustomFiltersChange = { customFilters = it },
+                onMaxDisplayLinesChange = { maxDisplayLines = it },
+                onSearchQueryChange = { searchQuery = it },
+                onSearchNext = {
+                    if (searchMatches.isNotEmpty()) {
+                        searchMatchIndex = (searchMatchIndex + 1) % searchMatches.size
+                    }
+                },
+                onSearchPrevious = {
+                    if (searchMatches.isNotEmpty()) {
+                        searchMatchIndex = if (searchMatchIndex <= 0) {
+                            searchMatches.lastIndex
+                        } else {
+                            searchMatchIndex - 1
+                        }
+                    }
+                },
             )
             HorizontalDivider()
         }
@@ -830,6 +857,7 @@ private fun LogViewerContent(
                     wordWrap = wordWrap,
                     freezeUpdates = freezeLogUpdates,
                     revision = refreshTick,
+                    scrollToIndex = scrollToSearchIndex,
                     modifier = Modifier.fillMaxSize(),
                 )
             }

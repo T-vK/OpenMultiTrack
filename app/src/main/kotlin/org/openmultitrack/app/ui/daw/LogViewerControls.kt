@@ -2,42 +2,48 @@ package org.openmultitrack.app.ui.daw
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.TableRows
 import androidx.compose.material.icons.filled.WrapText
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -49,21 +55,26 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.util.UUID
+import org.openmultitrack.app.util.AppLogBuffer
 import org.openmultitrack.app.util.DevLogLevelMask
 import org.openmultitrack.app.util.LogCustomFilter
 import org.openmultitrack.app.util.LogCustomFilterMode
 
 private val barHeight = 40.dp
-private val iconBtnSize = 32.dp
+private val chipHeight = 28.dp
+private val chipIconSize = 16.dp
+private val chipWithLabelWidth = 76.dp
+private val chipIconOnlyWidth = 34.dp
+private val searchExpandedMinWidth = 140.dp
+
+private val maxLineOptions = listOf(200, 400, 600, 1000, 1_500)
 
 @Composable
 fun LogViewerMenuBar(
-    visibleLineCount: Int,
-    totalLineCount: Int,
-    filterActive: Boolean,
     autoPersist: Boolean,
     hideTimestamps: Boolean,
     coloredLevels: Boolean,
@@ -72,6 +83,10 @@ fun LogViewerMenuBar(
     disabledTags: Set<String>,
     allTags: List<String>,
     customFilters: List<LogCustomFilter>,
+    maxDisplayLines: Int,
+    searchQuery: String,
+    searchMatchIndex: Int,
+    searchMatchCount: Int,
     onCopy: () -> Unit,
     onClear: () -> Unit,
     onAutoPersistChange: (Boolean) -> Unit,
@@ -81,15 +96,17 @@ fun LogViewerMenuBar(
     onLevelFilterMaskChange: (Int) -> Unit,
     onDisabledTagsChange: (Set<String>) -> Unit,
     onCustomFiltersChange: (List<LogCustomFilter>) -> Unit,
+    onMaxDisplayLinesChange: (Int) -> Unit,
+    onSearchQueryChange: (String) -> Unit,
+    onSearchNext: () -> Unit,
+    onSearchPrevious: () -> Unit,
 ) {
     var levelMenuOpen by remember { mutableStateOf(false) }
     var tagDialogOpen by remember { mutableStateOf(false) }
     var regexDialogOpen by remember { mutableStateOf(false) }
-    val lineCountLabel = if (filterActive && visibleLineCount != totalLineCount) {
-        "$visibleLineCount/$totalLineCount"
-    } else {
-        "$totalLineCount"
-    }
+    var maxLinesMenuOpen by remember { mutableStateOf(false) }
+    var searchExpanded by remember { mutableStateOf(searchQuery.isNotBlank()) }
+
     val levelFilterActive = levelFilterMask != DevLogLevelMask.ALL
     val tagFilterActive = disabledTags.isNotEmpty()
     val regexFilterActive = customFilters.any { it.enabled }
@@ -98,76 +115,194 @@ fun LogViewerMenuBar(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 0.dp,
     ) {
-        Row(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(barHeight)
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                .height(barHeight),
         ) {
-            LogActionChip(label = "Copy", onClick = onCopy)
-            LogActionChip(label = "Clear", onClick = onClear)
-            MenuBarDivider()
-            LogIconToggleButton(
-                checked = autoPersist,
-                onCheckedChange = onAutoPersistChange,
-                icon = Icons.Default.Save,
-                contentDescription = "Persist logs",
-            )
-            LogIconToggleButton(
-                checked = hideTimestamps,
-                onCheckedChange = onHideTimestampsChange,
-                icon = Icons.Default.Schedule,
-                contentDescription = "Hide timestamps",
-            )
-            LogIconToggleButton(
-                checked = coloredLevels,
-                onCheckedChange = onColoredLevelsChange,
-                icon = Icons.Default.Palette,
-                contentDescription = "Colored levels",
-            )
-            LogIconToggleButton(
-                checked = wordWrap,
-                onCheckedChange = onWordWrapChange,
-                icon = Icons.Default.WrapText,
-                contentDescription = "Word wrap",
-            )
-            MenuBarDivider()
-            Box {
-                LogFilterChip(
-                    label = "Levels",
-                    active = levelFilterActive,
-                    icon = Icons.Default.FilterList,
-                    onClick = { levelMenuOpen = true },
+            val toolbarItems = remember(
+                maxWidth,
+                searchExpanded,
+                searchQuery,
+                autoPersist,
+                hideTimestamps,
+                coloredLevels,
+                wordWrap,
+                levelFilterActive,
+                tagFilterActive,
+                regexFilterActive,
+                maxDisplayLines,
+            ) {
+                buildToolbarItems(
+                    searchExpanded = searchExpanded,
+                    searchQuery = searchQuery,
+                    autoPersist = autoPersist,
+                    hideTimestamps = hideTimestamps,
+                    coloredLevels = coloredLevels,
+                    wordWrap = wordWrap,
+                    levelFilterActive = levelFilterActive,
+                    tagFilterActive = tagFilterActive,
+                    regexFilterActive = regexFilterActive,
+                    maxDisplayLines = maxDisplayLines,
                 )
-                DropdownMenu(expanded = levelMenuOpen, onDismissRequest = { levelMenuOpen = false }) {
-                    LogLevelMenuItem('D', "Debug", DevLogLevelMask.DEBUG, levelFilterMask, onLevelFilterMaskChange)
-                    LogLevelMenuItem('I', "Info", DevLogLevelMask.INFO, levelFilterMask, onLevelFilterMaskChange)
-                    LogLevelMenuItem('W', "Warn", DevLogLevelMask.WARN, levelFilterMask, onLevelFilterMaskChange)
-                    LogLevelMenuItem('E', "Error", DevLogLevelMask.ERROR, levelFilterMask, onLevelFilterMaskChange)
+            }
+            val labelBudget = (maxWidth - 12.dp) / chipWithLabelWidth
+            val labelsToHide = (toolbarItems.size - labelBudget.toInt()).coerceAtLeast(0)
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                toolbarItems.forEachIndexed { index, item ->
+                    val showLabel = index < toolbarItems.size - labelsToHide
+                    when (item) {
+                        ToolbarItem.Copy -> LogToolbarChip(
+                            label = "Copy",
+                            icon = Icons.Default.ContentCopy,
+                            selected = false,
+                            showLabel = showLabel,
+                            onClick = onCopy,
+                        )
+                        ToolbarItem.Clear -> LogToolbarChip(
+                            label = "Clear",
+                            icon = Icons.Default.Clear,
+                            selected = false,
+                            showLabel = showLabel,
+                            onClick = onClear,
+                        )
+                        ToolbarItem.Divider -> MenuBarDivider()
+                        ToolbarItem.Persist -> LogToolbarChip(
+                            label = "Save",
+                            icon = Icons.Default.Save,
+                            selected = autoPersist,
+                            showLabel = showLabel,
+                            onClick = { onAutoPersistChange(!autoPersist) },
+                        )
+                        ToolbarItem.Time -> LogToolbarChip(
+                            label = "Time",
+                            icon = Icons.Default.Schedule,
+                            selected = !hideTimestamps,
+                            showLabel = showLabel,
+                            onClick = { onHideTimestampsChange(!hideTimestamps) },
+                        )
+                        ToolbarItem.Color -> LogToolbarChip(
+                            label = "Color",
+                            icon = Icons.Default.Palette,
+                            selected = coloredLevels,
+                            showLabel = showLabel,
+                            onClick = { onColoredLevelsChange(!coloredLevels) },
+                        )
+                        ToolbarItem.Wrap -> LogToolbarChip(
+                            label = "Wrap",
+                            icon = Icons.Default.WrapText,
+                            selected = wordWrap,
+                            showLabel = showLabel,
+                            onClick = { onWordWrapChange(!wordWrap) },
+                        )
+                        ToolbarItem.Levels -> Box {
+                            LogToolbarChip(
+                                label = "Levels",
+                                icon = Icons.Default.FilterList,
+                                selected = levelFilterActive,
+                                showLabel = showLabel,
+                                showDropdownArrow = true,
+                                onClick = { levelMenuOpen = true },
+                            )
+                            DropdownMenu(
+                                expanded = levelMenuOpen,
+                                onDismissRequest = { levelMenuOpen = false },
+                            ) {
+                                LogLevelMenuItem('D', "Debug", DevLogLevelMask.DEBUG, levelFilterMask, onLevelFilterMaskChange)
+                                LogLevelMenuItem('I', "Info", DevLogLevelMask.INFO, levelFilterMask, onLevelFilterMaskChange)
+                                LogLevelMenuItem('W', "Warn", DevLogLevelMask.WARN, levelFilterMask, onLevelFilterMaskChange)
+                                LogLevelMenuItem('E', "Error", DevLogLevelMask.ERROR, levelFilterMask, onLevelFilterMaskChange)
+                            }
+                        }
+                        ToolbarItem.Tags -> LogToolbarChip(
+                            label = "Tags",
+                            icon = Icons.Default.Label,
+                            selected = tagFilterActive,
+                            showLabel = showLabel,
+                            showDropdownArrow = true,
+                            onClick = { tagDialogOpen = true },
+                        )
+                        ToolbarItem.Regex -> LogToolbarChip(
+                            label = "Regex",
+                            icon = Icons.Default.FilterList,
+                            selected = regexFilterActive,
+                            showLabel = showLabel,
+                            showDropdownArrow = true,
+                            onClick = { regexDialogOpen = true },
+                        )
+                        ToolbarItem.Search -> {
+                            if (searchExpanded) {
+                                LogSearchBar(
+                                    query = searchQuery,
+                                    matchIndex = searchMatchIndex,
+                                    matchCount = searchMatchCount,
+                                    showLabel = showLabel,
+                                    onQueryChange = {
+                                        onSearchQueryChange(it)
+                                        if (it.isBlank()) searchExpanded = false
+                                    },
+                                    onCollapse = {
+                                        searchExpanded = false
+                                        onSearchQueryChange("")
+                                    },
+                                    onNext = onSearchNext,
+                                    onPrevious = onSearchPrevious,
+                                )
+                            } else {
+                                LogToolbarChip(
+                                    label = "Search",
+                                    icon = Icons.Default.Search,
+                                    selected = searchQuery.isNotBlank(),
+                                    showLabel = showLabel,
+                                    onClick = { searchExpanded = true },
+                                )
+                            }
+                        }
+                        ToolbarItem.MaxLines -> Box {
+                            LogToolbarChip(
+                                label = maxDisplayLines.toString(),
+                                icon = Icons.Default.TableRows,
+                                selected = maxDisplayLines != AppLogBuffer.MAX_DISPLAY_LINES,
+                                showLabel = showLabel,
+                                showDropdownArrow = true,
+                                onClick = { maxLinesMenuOpen = true },
+                            )
+                            DropdownMenu(
+                                expanded = maxLinesMenuOpen,
+                                onDismissRequest = { maxLinesMenuOpen = false },
+                            ) {
+                                maxLineOptions.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text("$option lines") },
+                                        leadingIcon = if (option == maxDisplayLines) {
+                                            {
+                                                Icon(
+                                                    Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(18.dp),
+                                                )
+                                            }
+                                        } else {
+                                            null
+                                        },
+                                        onClick = {
+                                            onMaxDisplayLinesChange(option)
+                                            maxLinesMenuOpen = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
-            LogFilterChip(
-                label = "Tags",
-                active = tagFilterActive,
-                icon = Icons.Default.Label,
-                onClick = { tagDialogOpen = true },
-            )
-            LogFilterChip(
-                label = "Regex",
-                active = regexFilterActive,
-                icon = Icons.Default.FilterList,
-                onClick = { regexDialogOpen = true },
-            )
-            Spacer(Modifier.width(4.dp))
-            Text(
-                "$lineCountLabel lines",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
         }
     }
 
@@ -188,69 +323,178 @@ fun LogViewerMenuBar(
     }
 }
 
+private sealed interface ToolbarItem {
+    data object Copy : ToolbarItem
+    data object Clear : ToolbarItem
+    data object Divider : ToolbarItem
+    data object Persist : ToolbarItem
+    data object Time : ToolbarItem
+    data object Color : ToolbarItem
+    data object Wrap : ToolbarItem
+    data object Levels : ToolbarItem
+    data object Tags : ToolbarItem
+    data object Regex : ToolbarItem
+    data object Search : ToolbarItem
+    data object MaxLines : ToolbarItem
+}
+
+private fun buildToolbarItems(
+    searchExpanded: Boolean,
+    searchQuery: String,
+    autoPersist: Boolean,
+    hideTimestamps: Boolean,
+    coloredLevels: Boolean,
+    wordWrap: Boolean,
+    levelFilterActive: Boolean,
+    tagFilterActive: Boolean,
+    regexFilterActive: Boolean,
+    maxDisplayLines: Int,
+): List<ToolbarItem> = listOf(
+    ToolbarItem.Copy,
+    ToolbarItem.Clear,
+    ToolbarItem.Divider,
+    ToolbarItem.Persist,
+    ToolbarItem.Time,
+    ToolbarItem.Color,
+    ToolbarItem.Wrap,
+    ToolbarItem.Divider,
+    ToolbarItem.Levels,
+    ToolbarItem.Tags,
+    ToolbarItem.Regex,
+    ToolbarItem.Search,
+    ToolbarItem.MaxLines,
+)
+
 @Composable
-private fun LogActionChip(label: String, onClick: () -> Unit) {
+private fun LogToolbarChip(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    showLabel: Boolean,
+    showDropdownArrow: Boolean = false,
+    onClick: () -> Unit,
+) {
     FilterChip(
-        selected = false,
+        selected = selected,
         onClick = onClick,
         label = {
-            Text(label, style = MaterialTheme.typography.labelSmall)
+            if (showLabel) {
+                Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+            }
         },
-        modifier = Modifier.height(28.dp),
+        leadingIcon = {
+            Icon(icon, contentDescription = label, modifier = Modifier.size(chipIconSize))
+        },
+        trailingIcon = if (showDropdownArrow) {
+            {
+                Icon(
+                    Icons.Default.ArrowDropDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(chipIconSize),
+                )
+            }
+        } else {
+            null
+        },
+        modifier = Modifier
+            .height(chipHeight)
+            .then(
+                if (showLabel) {
+                    Modifier.widthIn(min = chipWithLabelWidth - 8.dp)
+                } else {
+                    Modifier.width(chipIconOnlyWidth)
+                },
+            ),
         border = FilterChipDefaults.filterChipBorder(
             enabled = true,
-            selected = false,
+            selected = selected,
         ),
     )
 }
 
 @Composable
-private fun LogFilterChip(
-    label: String,
-    active: Boolean,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onClick: () -> Unit,
+private fun LogSearchBar(
+    query: String,
+    matchIndex: Int,
+    matchCount: Int,
+    showLabel: Boolean,
+    onQueryChange: (String) -> Unit,
+    onCollapse: () -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit,
 ) {
-    FilterChip(
-        selected = active,
-        onClick = onClick,
-        label = {
-            Text(label, style = MaterialTheme.typography.labelSmall)
-        },
-        leadingIcon = {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
-        },
-        modifier = Modifier.height(28.dp),
-    )
-}
-
-@Composable
-private fun LogIconToggleButton(
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    contentDescription: String,
-) {
-    if (checked) {
-        FilledTonalIconButton(
-            onClick = { onCheckedChange(false) },
-            modifier = Modifier.size(iconBtnSize),
-            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            ),
-        ) {
-            Icon(icon, contentDescription = contentDescription, modifier = Modifier.size(18.dp))
-        }
+    val matchLabel = if (matchCount > 0) {
+        "${matchIndex + 1}/$matchCount"
+    } else if (query.isNotBlank()) {
+        "0/0"
     } else {
-        IconButton(
-            onClick = { onCheckedChange(true) },
-            modifier = Modifier.size(iconBtnSize),
-            colors = IconButtonDefaults.iconButtonColors(
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            ),
+        ""
+    }
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        modifier = Modifier
+            .height(chipHeight)
+            .widthIn(min = searchExpandedMinWidth, max = 220.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 4.dp, end = 2.dp),
         ) {
-            Icon(icon, contentDescription = contentDescription, modifier = Modifier.size(18.dp))
+            Icon(
+                Icons.Default.Search,
+                contentDescription = "Search",
+                modifier = Modifier.size(chipIconSize),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.labelSmall.copy(
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 4.dp),
+                decorationBox = { inner ->
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (query.isEmpty() && showLabel) {
+                            Text(
+                                "Search",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        inner()
+                    }
+                },
+            )
+            if (matchLabel.isNotBlank()) {
+                Text(
+                    matchLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 2.dp),
+                )
+            }
+            IconButton(onClick = onPrevious, modifier = Modifier.size(24.dp), enabled = matchCount > 0) {
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                    contentDescription = "Previous match",
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            IconButton(onClick = onNext, modifier = Modifier.size(24.dp), enabled = matchCount > 0) {
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = "Next match",
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            IconButton(onClick = onCollapse, modifier = Modifier.size(24.dp)) {
+                Icon(Icons.Default.Clear, contentDescription = "Close search", modifier = Modifier.size(16.dp))
+            }
         }
     }
 }
@@ -456,11 +700,12 @@ private fun LogCustomFilterRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        LogIconToggleButton(
-            checked = filter.enabled,
-            onCheckedChange = { onChange(filter.copy(enabled = it)) },
+        LogToolbarChip(
+            label = "Filter",
             icon = Icons.Default.FilterList,
-            contentDescription = "Enable filter",
+            selected = filter.enabled,
+            showLabel = false,
+            onClick = { onChange(filter.copy(enabled = !filter.enabled)) },
         )
         Text(
             filter.pattern,
@@ -493,9 +738,9 @@ private fun LogCustomFilterRow(
                     style = MaterialTheme.typography.labelSmall,
                 )
             },
-            modifier = Modifier.height(28.dp),
+            modifier = Modifier.height(chipHeight),
         )
-        IconButton(onClick = onDelete, modifier = Modifier.size(iconBtnSize)) {
+        IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
             Icon(Icons.Default.Delete, contentDescription = "Delete filter")
         }
     }
@@ -568,4 +813,23 @@ fun MenuBarDivider() {
             .height(22.dp)
             .background(MaterialTheme.colorScheme.outlineVariant),
     )
+}
+
+fun logSearchMatchIndices(
+    entries: List<org.openmultitrack.app.util.LogDisplayEntry>,
+    query: String,
+): List<Int> {
+    val trimmed = query.trim()
+    if (trimmed.isEmpty()) return emptyList()
+    return entries.mapIndexedNotNull { index, entry ->
+        when (entry) {
+            is org.openmultitrack.app.util.LogDisplayEntry.Line -> {
+                val haystack = "${entry.parsed.tag}: ${entry.parsed.message}"
+                if (haystack.contains(trimmed, ignoreCase = true)) index else null
+            }
+            is org.openmultitrack.app.util.LogDisplayEntry.Section -> {
+                if (entry.text.contains(trimmed, ignoreCase = true)) index else null
+            }
+        }
+    }
 }

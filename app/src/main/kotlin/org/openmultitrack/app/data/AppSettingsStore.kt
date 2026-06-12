@@ -188,6 +188,16 @@ class AppSettingsStore(context: Context) {
             .putString(KEY_DEV_LOG_CUSTOM_FILTERS, LogCustomFilterCodec.encode(value))
             .apply()
 
+    var devLogMaxDisplayLines: Int
+        get() = prefs.getInt(KEY_DEV_LOG_MAX_DISPLAY_LINES, org.openmultitrack.app.util.AppLogBuffer.MAX_DISPLAY_LINES)
+            .coerceIn(100, org.openmultitrack.app.util.AppLogBuffer.MAX_BUFFER_LINES)
+        set(value) = prefs.edit()
+            .putInt(
+                KEY_DEV_LOG_MAX_DISPLAY_LINES,
+                value.coerceIn(100, org.openmultitrack.app.util.AppLogBuffer.MAX_BUFFER_LINES),
+            )
+            .apply()
+
     var hideArmButton: Boolean
         get() = prefs.getBoolean(KEY_HIDE_ARM, false)
         set(value) = prefs.edit().putBoolean(KEY_HIDE_ARM, value).apply()
@@ -469,6 +479,7 @@ class AppSettingsStore(context: Context) {
         private const val KEY_DEV_LOG_TEXT_SCALE = "dev_log_text_scale"
         private const val KEY_DEV_LOG_DISABLED_TAGS = "dev_log_disabled_tags"
         private const val KEY_DEV_LOG_CUSTOM_FILTERS = "dev_log_custom_filters"
+        private const val KEY_DEV_LOG_MAX_DISPLAY_LINES = "dev_log_max_display_lines"
         private const val KEY_HIDE_ARM = "hide_arm_button"
         private const val KEY_HIDE_MONITOR = "hide_monitor_button"
         private const val KEY_HIDE_SOLO = "hide_solo_button"

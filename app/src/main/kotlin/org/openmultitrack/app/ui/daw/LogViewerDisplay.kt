@@ -92,6 +92,7 @@ fun LogViewerLazyList(
     freezeUpdates: Boolean,
     revision: Int,
     modifier: Modifier = Modifier,
+    scrollToIndex: Int? = null,
 ) {
     val defaultColor = MaterialTheme.colorScheme.onSurface
     val sectionColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -141,6 +142,14 @@ fun LogViewerLazyList(
     LaunchedEffect(revision, stickToBottom, freezeUpdatesState) {
         if (freezeUpdatesState || !stickToBottom) return@LaunchedEffect
         scrollToTailIfNeeded()
+    }
+
+    LaunchedEffect(scrollToIndex) {
+        val target = scrollToIndex ?: return@LaunchedEffect
+        if (target in entries.indices) {
+            ignoreUserScrollUntilNs = System.nanoTime() + programmaticScrollGraceNs
+            listState.animateScrollToItem(target)
+        }
     }
 
     LaunchedEffect(listState, stickToBottom, freezeUpdatesState, nearBottomThresholdPx) {
