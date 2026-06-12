@@ -30,6 +30,44 @@ class E2eMixerHarness(
     lateinit var mixerId: String
         private set
 
+    suspend fun bindAndRegisterFlow8(preserveActiveRecording: Boolean = false): MixerSessionController {
+        val ready = CompletableDeferred<MultiMixerSessionManager>()
+        client.whenReady { ready.complete(it) }
+        client.bind()
+        manager = withTimeout(20_000) { ready.await() }
+        client.promoteForeground("FLOW 8 E2E test")
+
+        releaseGlobalUsbCapture(manager, preserveActiveRecording)
+
+        val (id, descriptor, probe) = appHost.runOnActivity { activity ->
+            val enumerator = UsbAudioEnumerator(activity)
+            val flow8 = enumerator.listUsbDevices().first {
+                it.vendorId == E2eConfig.FLOW8_VENDOR_ID &&
+                    it.productId == E2eConfig.FLOW8_PRODUCT_ID
+            }
+            val usbManager = activity.getSystemService(UsbManager::class.java)
+            val device = usbManager.deviceList[flow8.deviceName]
+                ?: error("FLOW 8 not in UsbManager device list")
+            val granted = UsbInstrumentedPermission.ensure(activity, usbManager, device)
+            assertThat(granted).isTrue()
+            val profile = MixerDeviceStore(activity).addMixer(flow8)
+            val probeResult = UsbAudioProbeService(enumerator).probe(flow8)
+            Triple(profile.id, flow8, probeResult)
+        }
+
+        mixerId = id
+        val profile = MixerDeviceStore(context).listMixers().first { it.id == mixerId }
+        manager.registerMixer(profile)
+        manager.onProbeComplete(mixerId, descriptor, probe)
+        manager.setActiveMixer(mixerId)
+        releaseGlobalUsbCapture(manager, preserveActiveRecording)
+
+        val ctrl = manager.getOrCreate(mixerId)
+        E2eWait.untilMixerState(ctrl, 60_000) { it.probe != null && !it.probing }
+        syncUiWithHarnessMixer(mixerId)
+        return ctrl
+    }
+
     suspend fun bindAndRegisterXr18(preserveActiveRecording: Boolean = false): MixerSessionController {
         val ready = CompletableDeferred<MultiMixerSessionManager>()
         client.whenReady { ready.complete(it) }

@@ -12,6 +12,11 @@ object E2eConfig {
     const val ZOOM_RECORD_SECONDS = 40
     const val XR18_VENDOR_ID = 0x1397
     const val XR18_PRODUCT_ID = 0x00d4
+    const val FLOW8_VENDOR_ID = 0x1397
+    const val FLOW8_PRODUCT_ID = 0x050c
+    /** Minimum playhead advance to prove FLOW 8 UAC2 playback is not stalled. */
+    const val FLOW8_PLAYBACK_MIN_ADVANCE_SEC = 4f
+    const val FLOW8_PLAYBACK_OBSERVE_MS = 6_000L
 
     private val args get() = InstrumentationRegistry.getArguments()
 

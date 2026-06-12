@@ -105,6 +105,39 @@ object E2eWait {
         }
     }
 
+    /**
+     * Like [untilPlaybackAdvances] but watches longer and fails on stall warnings or early stop.
+     * Use for FLOW 8 UAC2 playback (historically stalled around 3–4s).
+     */
+    suspend fun untilPlaybackSustains(
+        ctrl: MixerSessionController,
+        minAdvanceSec: Float = E2eConfig.FLOW8_PLAYBACK_MIN_ADVANCE_SEC,
+        observeMs: Long = E2eConfig.FLOW8_PLAYBACK_OBSERVE_MS,
+        timeoutMs: Long = 90_000,
+    ) {
+        untilPlaying(ctrl, timeoutMs)
+        val startPos = ctrl.state.value.playbackPositionSec
+        val deadline = System.currentTimeMillis() + observeMs
+        withTimeout(timeoutMs) {
+            while (System.currentTimeMillis() < deadline) {
+                val state = ctrl.state.value
+                val warning = state.warningMessage.orEmpty()
+                check(!warning.contains("stalled", ignoreCase = true)) {
+                    "Playback stall at ${state.playbackPositionSec}s: $warning"
+                }
+                check(state.isPlaying) {
+                    "Playback stopped at ${state.playbackPositionSec}s (warning=$warning)"
+                }
+                delay(100)
+            }
+        }
+        val end = ctrl.state.value
+        check(end.playbackPositionSec >= startPos + minAdvanceSec) {
+            "Playhead only ${end.playbackPositionSec}s after ${observeMs}ms " +
+                "(need +${minAdvanceSec}s from ${startPos}s, warning=${end.warningMessage})"
+        }
+    }
+
     suspend fun untilPlaybackAdvances(
         ctrl: MixerSessionController,
         minAdvanceSec: Float = 1.0f,
