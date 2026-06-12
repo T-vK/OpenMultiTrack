@@ -2,7 +2,6 @@ package org.openmultitrack.app.ui.daw
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
@@ -24,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Article
@@ -524,7 +524,7 @@ private fun ResizeHandle(
 
     Box(
         modifier = modifier.pointerInput(edge) {
-            detectDragGesturesAfterLongPress(
+            detectDragGestures(
                 onDragStart = {
                     onResizeStartState()
                 },
@@ -534,15 +534,14 @@ private fun ResizeHandle(
                 onDragCancel = {
                     onResizeEndState()
                 },
-                onDrag = { change, dragAmount ->
-                    change.consume()
-                    onResizeDeltaState(
-                        edge,
-                        dragAmount.x / density,
-                        dragAmount.y / density,
-                    )
-                },
-            )
+            ) { change, dragAmount ->
+                change.consume()
+                onResizeDeltaState(
+                    edge,
+                    dragAmount.x / density,
+                    dragAmount.y / density,
+                )
+            }
         },
     )
 }
@@ -785,12 +784,9 @@ private fun LogViewerContent(
                         .background(MaterialTheme.colorScheme.surface),
                 )
             } else {
-                Text(
-                    logDisplayText,
-                    style = logTextStyle,
-                    softWrap = wordWrap,
+                SelectionContainer(
                     modifier = Modifier
-                        .fillMaxWidth()
+                        .fillMaxSize()
                         .verticalScroll(verticalScroll)
                         .then(
                             if (wordWrap) {
@@ -803,7 +799,14 @@ private fun LogViewerContent(
                             horizontal = LOG_CONTENT_PADDING_H,
                             vertical = LOG_CONTENT_PADDING_V,
                         ),
-                )
+                ) {
+                    Text(
+                        logDisplayText,
+                        style = logTextStyle,
+                        softWrap = wordWrap,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
     }
