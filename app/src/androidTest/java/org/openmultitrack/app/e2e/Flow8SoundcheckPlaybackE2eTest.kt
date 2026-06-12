@@ -99,7 +99,7 @@ class Flow8SoundcheckPlaybackE2eTest {
         InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("logcat -c")
     }
 
-    private fun assertPlayStarted(ctrl: org.openmultitrack.app.service.MixerSessionController) {
+    private suspend fun assertPlayStarted(ctrl: org.openmultitrack.app.service.MixerSessionController) {
         val ready = E2eWait.pollUntil(timeoutMs = 90_000) {
             val s = ctrl.state.value
             s.isPlaying || !s.warningMessage.isNullOrBlank()
