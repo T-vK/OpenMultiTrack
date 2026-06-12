@@ -2,6 +2,7 @@ package org.openmultitrack.app.ui.daw
 
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
@@ -9,6 +10,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -16,14 +18,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.distinctUntilChanged
 import org.openmultitrack.app.util.LogDisplayEntry
+
+private val clearlyAwayFromBottomThreshold = 72.dp
+private val nearBottomThreshold = 120.dp
+private const val programmaticScrollGraceNs = 150_000_000L
 
 @Composable
 private fun logLevelColorComposable(level: Char): Color {
@@ -94,55 +101,63 @@ fun LogViewerLazyList(
     val errorColor = logLevelColorComposable('E')
     val listState = rememberLazyListState()
     var stickToBottom by remember { mutableStateOf(true) }
+    var ignoreUserScrollUntilNs by remember { mutableLongStateOf(0L) }
     val freezeUpdatesState by rememberUpdatedState(freezeUpdates)
     val entriesState by rememberUpdatedState(entries)
+    val density = LocalDensity.current
+    val awayThresholdPx = with(density) { clearlyAwayFromBottomThreshold.roundToPx() }
+    val nearBottomThresholdPx = with(density) { nearBottomThreshold.roundToPx() }
 
-    LaunchedEffect(listState) {
-        snapshotFlow {
-            val info = listState.layoutInfo
-            val total = info.totalItemsCount
-            if (total == 0) {
-                true
-            } else {
-                val lastVisible = info.visibleItemsInfo.lastOrNull()
-                lastVisible != null &&
-                    lastVisible.index >= total - 1 &&
-                    lastVisible.offset + lastVisible.size <= info.viewportEndOffset + 48
-            }
-        }
-            .distinctUntilChanged()
-            .collect { atBottom ->
-                if (!listState.isScrollInProgress) {
-                    stickToBottom = atBottom
-                }
-            }
+    suspend fun scrollToTailIfNeeded() {
+        val current = entriesState
+        if (current.isEmpty()) return
+        ignoreUserScrollUntilNs = System.nanoTime() + programmaticScrollGraceNs
+        listState.scrollToItem(current.lastIndex, scrollOffset = Int.MAX_VALUE)
     }
 
-    LaunchedEffect(listState) {
+    LaunchedEffect(listState, awayThresholdPx, nearBottomThresholdPx) {
+        var wasScrolling = false
         snapshotFlow { listState.isScrollInProgress }
             .distinctUntilChanged()
             .collect { scrolling ->
-                if (!scrolling) {
-                    val info = listState.layoutInfo
-                    val total = info.totalItemsCount
-                    if (total == 0) {
-                        stickToBottom = true
-                    } else {
-                        val lastVisible = info.visibleItemsInfo.lastOrNull()
-                        stickToBottom = lastVisible != null &&
-                            lastVisible.index >= total - 1 &&
-                            lastVisible.offset + lastVisible.size <= info.viewportEndOffset + 48
+                if (wasScrolling && !scrolling) {
+                    if (System.nanoTime() < ignoreUserScrollUntilNs) {
+                        wasScrolling = scrolling
+                        return@collect
+                    }
+                    when {
+                        isClearlyAwayFromBottom(listState, awayThresholdPx) -> {
+                            stickToBottom = false
+                        }
+                        isNearBottom(listState, nearBottomThresholdPx) -> {
+                            stickToBottom = true
+                        }
                     }
                 }
+                wasScrolling = scrolling
             }
     }
 
-    LaunchedEffect(revision, stickToBottom) {
-        if (freezeUpdatesState) return@LaunchedEffect
-        val current = entriesState
-        if (!stickToBottom || current.isEmpty()) return@LaunchedEffect
-        val target = current.lastIndex
-        listState.scrollToItem(target, scrollOffset = Int.MAX_VALUE)
+    LaunchedEffect(revision, stickToBottom, freezeUpdatesState) {
+        if (freezeUpdatesState || !stickToBottom) return@LaunchedEffect
+        scrollToTailIfNeeded()
+    }
+
+    LaunchedEffect(listState, stickToBottom, freezeUpdatesState, nearBottomThresholdPx) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            Triple(info.viewportStartOffset, info.viewportEndOffset, info.totalItemsCount)
+        }
+            .distinctUntilChanged()
+            .collect {
+                if (
+                    !freezeUpdatesState &&
+                    stickToBottom &&
+                    !isNearBottom(listState, nearBottomThresholdPx)
+                ) {
+                    scrollToTailIfNeeded()
+                }
+            }
     }
 
     LazyColumn(
@@ -184,6 +199,29 @@ fun LogViewerLazyList(
             )
         }
     }
+}
+
+private fun isClearlyAwayFromBottom(state: LazyListState, awayThresholdPx: Int): Boolean {
+    val info = state.layoutInfo
+    val total = info.totalItemsCount
+    if (total == 0) return false
+    val lastIndex = total - 1
+    val lastVisible = info.visibleItemsInfo.lastOrNull() ?: return false
+    if (lastVisible.index < lastIndex - 1) return true
+    if (lastVisible.index < lastIndex) return true
+    val gapBelow = info.viewportEndOffset - (lastVisible.offset + lastVisible.size)
+    return gapBelow > awayThresholdPx
+}
+
+private fun isNearBottom(state: LazyListState, nearThresholdPx: Int): Boolean {
+    val info = state.layoutInfo
+    val total = info.totalItemsCount
+    if (total == 0) return true
+    val lastIndex = total - 1
+    val lastVisible = info.visibleItemsInfo.lastOrNull() ?: return true
+    if (lastVisible.index < lastIndex) return false
+    val gapBelow = info.viewportEndOffset - (lastVisible.offset + lastVisible.size)
+    return gapBelow <= nearThresholdPx
 }
 
 private fun logEntryStableKey(entry: LogDisplayEntry): String = when (entry) {
