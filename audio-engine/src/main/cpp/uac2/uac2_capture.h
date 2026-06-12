@@ -47,6 +47,9 @@ private:
 
     bool tryOpenLibusb(int usb_fd, const Uac2AltSetting& alt, bool java_interface_claimed);
     bool tryOpenUsbdevfs(int usb_fd, const Uac2AltSetting& alt, bool java_interface_claimed);
+    /** Returns true once at least one frame lands in the capture ring. */
+    bool waitForIncomingFrames(int timeout_ms);
+    void stopLibusbWorkersUnlocked();
     void closeUnlocked();
 
     void workerLoopUsbdevfs(std::promise<bool> init_promise);

@@ -49,7 +49,8 @@ class Flow8VuMeterInstrumentedTest {
             val sample = sampleVuLevels(ctrl, millis = 4_000)
             Log.i(TAG, "vu-only levels=$sample")
             assertThat(ctrl.state.value.isMonitoring).isFalse()
-            assertThat(sample.maxCh1).isGreaterThan(0.005f)
+            val peak = sample.lastLevels.values.maxOrNull() ?: 0f
+            assertThat(peak).isGreaterThan(0.005f)
         }
     }
 
@@ -138,6 +139,13 @@ class Flow8VuMeterInstrumentedTest {
             settings.showVuMeters = true
 
             val ctrl = manager.getOrCreate(mixerId)
+            ctrl.setAppMode(org.openmultitrack.domain.session.AppMode.MULTITRACK_RECORD)
+            withTimeout(15_000) {
+                ctrl.state.first {
+                    it.appMode == org.openmultitrack.domain.session.AppMode.MULTITRACK_RECORD
+                }
+            }
+            delay(500)
             block(ctrl, manager)
             manager.scheduleVuMeterSync()
             delay(300)

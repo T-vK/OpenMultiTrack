@@ -97,7 +97,20 @@ bool libusbPrepareStreaming(int usb_fd,
                  alt.alternate_setting,
                  alt.endpoint_address);
     } else {
-        OMT_LOGI("libusb wrap on Java-claimed iface=%u alt=%u ep=0x%02x (ioctl set alt)",
+        int r = libusb_set_interface_alt_setting(
+            handle, alt.interface_number, alt.alternate_setting);
+        if (r != 0) {
+            OMT_LOGW("libusb_set_interface_alt_setting on Java-claimed iface=%u: %s",
+                     alt.interface_number,
+                     libusb_error_name(r));
+        }
+        r = libusb_clear_halt(handle, alt.endpoint_address);
+        if (r != 0) {
+            OMT_LOGW("libusb_clear_halt ep=0x%02x: %s",
+                     alt.endpoint_address,
+                     libusb_error_name(r));
+        }
+        OMT_LOGI("libusb wrap on Java-claimed iface=%u alt=%u ep=0x%02x",
                  alt.interface_number,
                  alt.alternate_setting,
                  alt.endpoint_address);

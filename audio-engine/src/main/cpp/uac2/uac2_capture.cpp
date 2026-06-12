@@ -21,8 +21,40 @@ namespace openmultitrack::uac2 {
 namespace {
 
 constexpr int kNumUrbs = 8;
+constexpr int kOpenVerifyTimeoutMs = 1500;
+constexpr size_t kMinVerifyFrames = 48;
 
 }  // namespace
+
+bool Uac2Capture::waitForIncomingFrames(int timeout_ms) {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (std::chrono::steady_clock::now() < deadline && running_.load()) {
+        if (ring_ != nullptr && ring_->availableFrames() >= kMinVerifyFrames) {
+            OMT_LOGI("uac2 capture verify ok frames=%zu", ring_->availableFrames());
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    const size_t available = ring_ != nullptr ? ring_->availableFrames() : 0;
+    if (available > 0) {
+        OMT_LOGW("uac2 capture verify timeout with only %zu frames (need %zu)",
+                 available,
+                 kMinVerifyFrames);
+    }
+    return available >= kMinVerifyFrames;
+}
+
+void Uac2Capture::stopLibusbWorkersUnlocked() {
+    running_.store(false);
+    if (worker_.joinable()) {
+        worker_.join();
+    }
+    if (libusb_event_thread_.joinable()) {
+        libusb_event_thread_.join();
+    }
+    freeLibusbTransfers();
+}
 
 Uac2Capture& Uac2Capture::instance() {
     static Uac2Capture capture;
@@ -92,7 +124,11 @@ bool Uac2Capture::tryOpenLibusb(int usb_fd,
         return false;
     }
 
-    for (const bool micro_packets : {false, true}) {
+    // Samsung tablets often accept IN isoch only with frame-sized micro-packets; try that first.
+    for (const bool micro_packets : {true, false}) {
+        if (ring_ != nullptr) {
+            ring_->reset();
+        }
         urb_layout_ = layoutForAlt(alt, true, micro_packets);
         OMT_LOGI("uac2 capture libusb trying layout micro=%d urbs=%d x %d",
                  micro_packets ? 1 : 0,
@@ -105,20 +141,21 @@ bool Uac2Capture::tryOpenLibusb(int usb_fd,
         libusb_event_thread_ = std::thread(&Uac2Capture::libusbEventLoop, this);
         worker_ = std::thread(&Uac2Capture::workerLoopLibusb, this, std::move(init_promise));
 
-        if (init_future.wait_for(std::chrono::seconds(2)) == std::future_status::ready &&
-            init_future.get()) {
+        const bool submitted = init_future.wait_for(std::chrono::seconds(2)) ==
+                                   std::future_status::ready &&
+                               init_future.get();
+        if (submitted && waitForIncomingFrames(kOpenVerifyTimeoutMs)) {
             backend_ = IoBackend::Libusb;
             return true;
         }
 
-        running_.store(false);
-        if (worker_.joinable()) {
-            worker_.join();
+        if (submitted) {
+            OMT_LOGW(
+                "uac2 capture libusb layout micro=%d submitted but no frames in %dms",
+                micro_packets ? 1 : 0,
+                kOpenVerifyTimeoutMs);
         }
-        if (libusb_event_thread_.joinable()) {
-            libusb_event_thread_.join();
-        }
-        freeLibusbTransfers();
+        stopLibusbWorkersUnlocked();
     }
 
     libusbReleaseStreaming(libusb_handle_, alt.interface_number, libusb_owns_interface_);
@@ -144,7 +181,10 @@ bool Uac2Capture::tryOpenUsbdevfs(int usb_fd,
         return false;
     }
 
-    for (const bool micro_packets : {false, true}) {
+    for (const bool micro_packets : {true, false}) {
+        if (ring_ != nullptr) {
+            ring_->reset();
+        }
         urb_layout_ = layoutForAlt(alt, true, micro_packets);
         OMT_LOGI("uac2 capture usbdevfs trying layout micro=%d urbs=%d x %d",
                  micro_packets ? 1 : 0,
@@ -156,12 +196,20 @@ bool Uac2Capture::tryOpenUsbdevfs(int usb_fd,
         running_.store(true);
         worker_ = std::thread(&Uac2Capture::workerLoopUsbdevfs, this, std::move(init_promise));
 
-        if (init_future.wait_for(std::chrono::seconds(2)) == std::future_status::ready &&
-            init_future.get()) {
+        const bool submitted = init_future.wait_for(std::chrono::seconds(2)) ==
+                                   std::future_status::ready &&
+                               init_future.get();
+        if (submitted && waitForIncomingFrames(kOpenVerifyTimeoutMs)) {
             backend_ = IoBackend::Usbdevfs;
             return true;
         }
 
+        if (submitted) {
+            OMT_LOGW(
+                "uac2 capture usbdevfs layout micro=%d submitted but no frames in %dms",
+                micro_packets ? 1 : 0,
+                kOpenVerifyTimeoutMs);
+        }
         running_.store(false);
         if (worker_.joinable()) {
             worker_.join();

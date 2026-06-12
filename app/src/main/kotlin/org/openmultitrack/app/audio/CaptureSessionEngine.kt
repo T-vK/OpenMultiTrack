@@ -77,6 +77,9 @@ class CaptureSessionEngine(
     private var droppedFrames: Long = 0
 
     @Volatile
+    private var lastFrameReceivedNs: Long = 0
+
+    @Volatile
     private var usbDegraded: Boolean = false
 
     /** Wall-clock origin for the session timeline (persists across resume). */
@@ -110,6 +113,13 @@ class CaptureSessionEngine(
 
     val isUsbDegraded: Boolean
         get() = usbDegraded
+
+    /** True when the fanout loop has read USB frames recently (used to heal stale capture). */
+    fun isReceivingAudio(withinMs: Long = 1_500): Boolean {
+        val last = lastFrameReceivedNs
+        if (last <= 0L) return false
+        return System.nanoTime() - last <= withinMs * 1_000_000L
+    }
 
     fun isNativeCaptureOwner(): Boolean {
         if (syntheticGenerator != null) return true
@@ -174,7 +184,10 @@ class CaptureSessionEngine(
         usbDevice: UsbDevice?,
     ): Result<Unit> = lifecycleMutex.withLock {
         if (isCaptureActive && activeRoute?.backend == route.backend && !usbDegraded) {
-            return Result.success(Unit)
+            if (isNativeCaptureOwner() && isReceivingAudio(500)) {
+                return Result.success(Unit)
+            }
+            stopCaptureInternalLocked()
         }
         if (isRecording && (usbDegraded || isCaptureActive)) {
             return reconnectCaptureLocked(scope, route, usbDevice)
@@ -194,8 +207,22 @@ class CaptureSessionEngine(
         channelCount = status.channelCount
         sampleRate = status.sampleRate
         usbDegraded = false
+        lastFrameReceivedNs = 0L
         clearWaveforms()
         allocateWaveformRings()
+        val framesPerChunk = SessionRecorder.chunkFramesForChannels(channelCount)
+        val primeScratch = FloatArray(framesPerChunk * channelCount)
+        val primed = AudioEngineRouter.readRecordedFrames(primeScratch, framesPerChunk, route.backend)
+        if (primed > 0) {
+            lastFrameReceivedNs = System.nanoTime()
+            synchronized(meterLock) {
+                absorbInterleavedPeaks(meterHold, lastRawPeaks, primeScratch, primed, channelCount)
+            }
+        }
+        OmtLog.i(
+            "CaptureSession",
+            "startCapture primed=$primed ch=$channelCount backend=${route.backend}",
+        )
         startFanoutLoop(scope, route.backend)
         Result.success(Unit)
     }
@@ -215,6 +242,7 @@ class CaptureSessionEngine(
         sampleRate = sampleRateHz.coerceAtLeast(1)
         syntheticGenerator = synth
         usbDegraded = false
+        lastFrameReceivedNs = 0L
         clearWaveforms()
         allocateWaveformRings()
         OmtLog.i("CaptureSession", "startSyntheticCapture ch=$channelCount rate=$sampleRate")
@@ -408,6 +436,7 @@ class CaptureSessionEngine(
         pendingWaveformPeaks.fill(0f)
         meterHold.fill(0f)
         lastRawPeaks.fill(0f)
+        lastFrameReceivedNs = 0L
         lastWaveformEmitNs = 0L
     }
 
@@ -540,6 +569,7 @@ class CaptureSessionEngine(
                             continue
                         }
                         consecutiveEmptyReads = 0
+                        lastFrameReceivedNs = System.nanoTime()
                         if (backend != null) {
                             droppedFrames = AudioEngineRouter.recordingDroppedFrames(backend)
                         }

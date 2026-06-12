@@ -894,8 +894,8 @@ class MainViewModel(
             ctrl.setAppMode(mode)
             if (mode.isPlaybackMode) {
                 ctrl.refreshSoundcheckLibrary()
-                ensureUsbProbeForMixer(mixerId, mgr)
             }
+            ensureUsbProbeForMixer(mixerId, mgr)
         }
     }
 
@@ -2122,9 +2122,9 @@ class MainViewModel(
             val mode = settings.appModeForMixer(profile.id)
             ctrl.setRouting(routingStore.get(profile.id))
             ctrl.setAppMode(mode)
+            ensureUsbProbeForMixer(profile.id, manager)
             if (mode.isPlaybackMode) {
                 ctrl.refreshSoundcheckLibrary()
-                ensureUsbProbeForMixer(profile.id, manager)
             }
             observeMixerSession(profile.id, manager)
         }
