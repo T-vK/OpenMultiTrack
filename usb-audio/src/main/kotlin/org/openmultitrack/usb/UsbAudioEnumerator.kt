@@ -158,16 +158,16 @@ class UsbAudioEnumerator(
         if (profile.vendorId != device.vendorId || profile.productId != device.productId) {
             return false
         }
-        profile.usbDeviceName?.let { if (it == device.deviceName) return true }
         val serial = if (usbManager.hasPermission(device)) {
             runCatching { device.serialNumber }.getOrNull()
         } else {
             null
         }
-        profile.serialNumber?.let { saved ->
+        profile.serialNumber?.takeIf { it.isNotBlank() }?.let { saved ->
             if (serial != null) return saved == serial
         }
-        return profile.serialNumber == null
+        profile.usbDeviceName?.let { if (it == device.deviceName) return true }
+        return profile.serialNumber.isNullOrBlank()
     }
 
     private fun toDescriptor(device: UsbDevice): UsbAudioDeviceDescriptor {

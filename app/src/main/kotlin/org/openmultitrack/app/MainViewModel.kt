@@ -273,6 +273,7 @@ class MainViewModel(
     private val observedMixerIds = mutableSetOf<String>()
     private val scribbleImportMutex = Mutex()
     private var usbRecoveryJob: Job? = null
+    private var refreshUsbDebounceJob: Job? = null
     private val interruptedRecoveryJobs = mutableMapOf<String, Job>()
     private var sessionAttached = false
 
@@ -1488,19 +1489,52 @@ class MainViewModel(
             val usbManager = appContext.getSystemService(android.content.Context.USB_SERVICE)
                 as android.hardware.usb.UsbManager
             org.openmultitrack.usb.UsbPermissionCoordinator.markGranted(usbManager, usbDevice)
+            val serial = runCatching { usbDevice.serialNumber }.getOrNull()?.takeIf { it.isNotBlank() }
+            mixerStore.listMixers()
+                .filter { profile -> profileMatchesUsbDevice(profile, usbDevice) }
+                .forEach { profile ->
+                    val updated = profile.copy(
+                        usbDeviceName = usbDevice.deviceName,
+                        serialNumber = serial ?: profile.serialNumber,
+                        productName = usbDevice.productName ?: profile.productName,
+                    )
+                    if (updated != profile) {
+                        mixerStore.saveMixer(updated)
+                    }
+                }
+            loadMixers()
         }
         sessionClient.withManager { mgr ->
             val usb = enumerator.listUsbDevices()
             mixerStore.listMixers()
                 .filter { profile ->
-                    profile.usbDeviceName == deviceName ||
-                        (usbDevice != null &&
-                            profile.vendorId == usbDevice.vendorId &&
-                            profile.productId == usbDevice.productId)
+                    usbDevice != null && profileMatchesUsbDevice(profile, usbDevice)
                 }
                 .forEach { autoProbeMixer(it, mgr, usb) }
         }
-        refreshUsbAndOutputs()
+        scheduleRefreshUsbAndOutputs()
+    }
+
+    private fun profileMatchesUsbDevice(
+        profile: MixerProfile,
+        device: android.hardware.usb.UsbDevice,
+    ): Boolean {
+        if (profile.vendorId != device.vendorId || profile.productId != device.productId) {
+            return false
+        }
+        val serial = runCatching { device.serialNumber }.getOrNull()?.takeIf { it.isNotBlank() }
+        profile.serialNumber?.takeIf { it.isNotBlank() }?.let { saved ->
+            if (serial != null) return saved == serial
+        }
+        return profile.usbDeviceName == null || profile.usbDeviceName == device.deviceName
+    }
+
+    private fun scheduleRefreshUsbAndOutputs() {
+        refreshUsbDebounceJob?.cancel()
+        refreshUsbDebounceJob = viewModelScope.launch {
+            delay(300)
+            refreshUsbAndOutputs()
+        }
     }
 
     fun onUsbDetached(deviceName: String?) {

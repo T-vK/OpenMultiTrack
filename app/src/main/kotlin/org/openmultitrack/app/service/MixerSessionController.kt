@@ -60,6 +60,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import org.openmultitrack.usb.AudioEngineRouter
+import org.openmultitrack.usb.Flow8UsbPlaybackProfile
 import org.openmultitrack.usb.FullUsbProbeResult
 import org.openmultitrack.usb.UsbAudioEnumerator
 import org.openmultitrack.mixer.behringer.ScribbleStripLabel
@@ -716,7 +717,14 @@ class MixerSessionController(
         startSoundcheckPlaybackLocked(frame, trace)
     }
 
+    private fun isFlow8Active(): Boolean =
+        activeDescriptor?.let { Flow8UsbPlaybackProfile.isFlow8(it) } == true
+
     private suspend fun prepareUsbForPlaybackLocked() {
+        if (isFlow8Active()) {
+            prepareFlow8UsbForPlaybackLocked()
+            return
+        }
         if (_state.value.isMonitoring) {
             captureEngine.updateMonitor(MonitorMixConfig(enabled = false))
             _state.update { it.copy(isMonitoring = false) }
@@ -726,6 +734,28 @@ class MixerSessionController(
         if (captureEngine.isCaptureActive && !_state.value.isRecording) {
             withContext(Dispatchers.IO) { captureEngine.stopCapture() }
         }
+    }
+
+    /** FLOW 8 needs capture fully released and a short settle delay before UAC2 playback. */
+    private suspend fun prepareFlow8UsbForPlaybackLocked() {
+        if (_state.value.isMonitoring) {
+            captureEngine.updateMonitor(MonitorMixConfig(enabled = false))
+            _state.update { it.copy(isMonitoring = false) }
+        }
+        captureEngine.updateVuMetering(false)
+        _state.update { it.copy(isVuMetering = false) }
+        withContext(Dispatchers.IO) {
+            if (player.isPlaying) {
+                player.stopAndAwait()
+            }
+            AudioEngineRouter.stopPlayback()
+            if (captureEngine.isCaptureActive && !_state.value.isRecording) {
+                captureEngine.stopCapture()
+            }
+            AudioEngineRouter.stopAllRecording()
+            delay(Flow8UsbPlaybackProfile.PRE_PLAYBACK_DELAY_MS)
+        }
+        OmtLog.i("MixerSession", "FLOW 8 USB prepared for stereo playback")
     }
 
     /** Stop USB capture/playback so XR18 accepts OSC routing changes (verified on hardware). */
@@ -772,7 +802,8 @@ class MixerSessionController(
         }
         val clampedStart = startFrame.coerceIn(0L, (durationFrames - 1).coerceAtLeast(0L))
         withContext(Dispatchers.IO) {
-            if (_state.value.isMonitoring ||
+            if (isFlow8Active() ||
+                _state.value.isMonitoring ||
                 _state.value.isVuMetering ||
                 (captureEngine.isCaptureActive && !_state.value.isRecording)
             ) {
@@ -881,6 +912,14 @@ class MixerSessionController(
         } else {
             player.suspendAndAwait()
             trace?.mark("suspend complete (native engine kept warm)")
+        }
+        if (isFlow8Active()) {
+            withContext(Dispatchers.IO) {
+                AudioEngineRouter.stopPlayback()
+                AudioEngineRouter.stopAllRecording()
+                delay(Flow8UsbPlaybackProfile.POST_PLAYBACK_STOP_DELAY_MS)
+            }
+            trace?.mark("FLOW 8 playback teardown delay complete")
         }
         if (restoreRouting) {
             quiesceUsbBeforeRoutingLocked()
@@ -2151,8 +2190,12 @@ class MixerSessionController(
         return Result.success(route)
     }
 
-    private fun maxPlaybackChannelsFromProbe(probe: FullUsbProbeResult): Int =
-        probe.uac2Caps?.maxPlaybackChannels?.takeIf { it > 0 }
+    private fun maxPlaybackChannelsFromProbe(probe: FullUsbProbeResult): Int {
+        if (Flow8UsbPlaybackProfile.isFlow8(probe.usb)) {
+            return Flow8UsbPlaybackProfile.PREFERRED_PLAYBACK_CHANNELS
+        }
+        return probe.uac2Caps?.maxPlaybackChannels?.takeIf { it > 0 }
             ?: probe.output?.takeIf { it.isSuccess }?.channelCount
             ?: 2
+    }
 }

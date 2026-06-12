@@ -43,6 +43,7 @@ import kotlinx.coroutines.launch
 import org.openmultitrack.usb.BehringerUsbIdentifiers
 import org.openmultitrack.usb.UsbAudioEnumerator
 import org.openmultitrack.usb.UsbPermissionCoordinator
+import org.openmultitrack.usb.UsbPermissionQueue
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels {
@@ -51,6 +52,7 @@ class MainActivity : ComponentActivity() {
     private val settings by lazy { AppSettingsStore(applicationContext) }
 
     private val usbPermissionAction = "${BuildConfig.APPLICATION_ID}.USB_PERMISSION"
+    private val usbPermissionQueue = UsbPermissionQueue()
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -103,9 +105,11 @@ class MainActivity : ComponentActivity() {
                     }
                     if (device != null) {
                         UsbPermissionCoordinator.markRequestFinished(device, granted)
+                        usbPermissionQueue.onRequestFinished(device)
                         if (granted) {
                             viewModel.onUsbPermissionGranted(device.deviceName)
                         }
+                        drainUsbPermissionQueue()
                     }
                 }
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
@@ -120,7 +124,7 @@ class MainActivity : ComponentActivity() {
                     }
                     val desc = toDescriptor(attached)
                     viewModel.onUsbAttached(desc)
-                    requestUsbPermission(attached)
+                    enqueueUsbPermissionRequests()
                 }
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                     val detached = parseUsbDevice(intent)
@@ -276,16 +280,14 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        requestPermissionsForConnectedMixers()
+        enqueueUsbPermissionRequests()
         handleUsbIntent(intent)
         deliverNotificationTransportIntent(intent)
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                viewModel.usbPermissionRequests.collect { deviceName ->
-                    val usbManager = getSystemService(USB_SERVICE) as UsbManager
-                    val device = usbManager.deviceList[deviceName] ?: return@collect
-                    requestUsbPermission(device)
+                viewModel.usbPermissionRequests.collect {
+                    enqueueUsbPermissionRequests()
                 }
             }
         }
@@ -316,7 +318,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        requestPermissionsForConnectedMixers()
+        enqueueUsbPermissionRequests()
         requestBluetoothPermissionsForFlow8IfNeeded()
         requestAudioPermissionIfNeeded()
         viewModel.onAppResumed()
@@ -402,7 +404,9 @@ class MainActivity : ComponentActivity() {
     private fun handleUsbIntent(intent: Intent?) {
         val device = parseUsbDevice(intent ?: return) ?: return
         if (!viewModel.isSavedMixerUsbDevice(device)) return
-        requestUsbPermission(device)
+        val usbManager = getSystemService(USB_SERVICE) as UsbManager
+        usbPermissionQueue.enqueueMissing(listOf(device), usbManager)
+        drainUsbPermissionQueue()
     }
 
     private fun requestAudioPermissionIfNeeded() {
@@ -475,18 +479,28 @@ class MainActivity : ComponentActivity() {
         startActivity(intent)
     }
 
-    private fun requestPermissionsForConnectedMixers() {
+    private fun enqueueUsbPermissionRequests() {
         val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        usbManager.deviceList.values
+        val saved = usbManager.deviceList.values
             .filter { viewModel.isSavedMixerUsbDevice(it) }
-            .distinctBy { UsbPermissionCoordinator.stableKey(it) }
-            .forEach { device ->
-                if (usbManager.hasPermission(device)) {
-                    UsbPermissionCoordinator.markGranted(usbManager, device)
-                } else {
-                    requestUsbPermission(device)
-                }
+        usbPermissionQueue.enqueueMissing(saved, usbManager)
+        drainUsbPermissionQueue()
+    }
+
+    private fun drainUsbPermissionQueue() {
+        val usbManager = getSystemService(USB_SERVICE) as UsbManager
+        val connected = usbManager.deviceList.values
+        while (true) {
+            val device = usbPermissionQueue.pollNext(usbManager, connected) ?: return
+            if (usbManager.hasPermission(device)) {
+                UsbPermissionCoordinator.markGranted(usbManager, device)
+                usbPermissionQueue.onRequestFinished(device)
+                viewModel.onUsbPermissionGranted(device.deviceName)
+                continue
             }
+            requestUsbPermission(device)
+            return
+        }
     }
 
     private fun requestStorageAccessForPath(path: String) {
@@ -506,15 +520,21 @@ class MainActivity : ComponentActivity() {
         val usbManager = getSystemService(USB_SERVICE) as UsbManager
         if (usbManager.hasPermission(device)) {
             UsbPermissionCoordinator.markGranted(usbManager, device)
+            usbPermissionQueue.onRequestFinished(device)
             viewModel.onUsbPermissionGranted(device.deviceName)
+            drainUsbPermissionQueue()
             return
         }
         if (!UsbPermissionCoordinator.shouldRequest(usbManager, device)) {
+            usbPermissionQueue.onRequestFinished(device)
+            drainUsbPermissionQueue()
             return
         }
         if (!UsbPermissionCoordinator.markRequestStarted(device)) {
+            drainUsbPermissionQueue()
             return
         }
+        usbPermissionQueue.onRequestStarted(device)
         val permissionIntent = Intent(usbPermissionAction).setPackage(packageName)
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -528,6 +548,8 @@ class MainActivity : ComponentActivity() {
             usbManager.requestPermission(device, pi)
         }.onFailure { error ->
             UsbPermissionCoordinator.markRequestFinished(device, granted = false)
+            usbPermissionQueue.onRequestFinished(device)
+            drainUsbPermissionQueue()
             OmtLog.w("Activity", "USB permission request failed for ${device.deviceName}", error)
         }
     }

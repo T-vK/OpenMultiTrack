@@ -103,18 +103,23 @@ object AudioEngineRouter {
         requestedChannels: Int,
         sampleRateHz: Int = 48_000,
     ): PlaybackRoute? {
+        val effectiveChannels = if (Flow8UsbPlaybackProfile.isFlow8(probe.usb)) {
+            Flow8UsbPlaybackProfile.clampPlaybackChannels(requestedChannels)
+        } else {
+            requestedChannels
+        }
         val uac2 = probe.uac2Caps
         val oboeOut = probe.output?.takeIf { it.isSuccess }
         val oboeChannels = oboeOut?.channelCount ?: 0
 
         if (stream != null && uac2 != null && uac2.parseOk) {
-            val alt = NativeUac2Probe.selectBestPlaybackAlt(uac2, requestedChannels, sampleRateHz)
-            if (alt != null && alt.formatValid && alt.channels >= requestedChannels &&
-                (oboeChannels < requestedChannels || oboeOut == null)
+            val alt = NativeUac2Probe.selectBestPlaybackAlt(uac2, effectiveChannels, sampleRateHz)
+            if (alt != null && alt.formatValid && alt.channels >= effectiveChannels &&
+                (oboeChannels < effectiveChannels || oboeOut == null)
             ) {
                 OmtLog.i(
                     "Router",
-                    "playback → UAC2 ${alt.channels}ch (Oboe=${oboeChannels}ch, requested=$requestedChannels)",
+                    "playback → UAC2 ${alt.channels}ch (Oboe=${oboeChannels}ch, requested=$effectiveChannels)",
                 )
                 return PlaybackRoute(
                     backend = AudioBackend.UAC2,
@@ -127,7 +132,7 @@ object AudioEngineRouter {
         }
 
         if (oboeOut != null && oboeChannels >= 1) {
-            val channels = minOf(requestedChannels, oboeChannels)
+            val channels = minOf(effectiveChannels, oboeChannels)
             OmtLog.i("Router", "playback → Oboe ${channels}ch deviceId=${oboeOut.deviceId}")
             return PlaybackRoute(
                 backend = AudioBackend.OBOE,
@@ -138,7 +143,7 @@ object AudioEngineRouter {
         }
 
         if (stream != null && uac2 != null && uac2.parseOk) {
-            val alt = NativeUac2Probe.selectBestPlaybackAlt(uac2, minOf(requestedChannels, 2), sampleRateHz)
+            val alt = NativeUac2Probe.selectBestPlaybackAlt(uac2, minOf(effectiveChannels, 2), sampleRateHz)
                 ?: NativeUac2Probe.selectBestPlaybackAlt(uac2, 1, sampleRateHz)
             if (alt != null && alt.formatValid) {
                 OmtLog.i("Router", "playback → UAC2 fallback ${alt.channels}ch (Oboe unavailable)")
@@ -152,7 +157,7 @@ object AudioEngineRouter {
             }
         }
 
-        OmtLog.w("Router", "no playback route for requested=$requestedChannels")
+        OmtLog.w("Router", "no playback route for requested=$effectiveChannels")
         return null
     }
 

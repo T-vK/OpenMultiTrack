@@ -17,8 +17,17 @@ object UsbPermissionCoordinator {
 
     private val inFlightKeys = ConcurrentHashMap.newKeySet<String>()
     private val grantedAtByKey = ConcurrentHashMap<String, Long>()
+    /** Maps ephemeral [UsbDevice.deviceName] paths to a stable vid:pid:serial key. */
+    private val stableKeyByDeviceName = ConcurrentHashMap<String, String>()
+    /** Serial-based keys that were granted recently (survives deviceName path changes). */
+    private val grantedStableKeys = ConcurrentHashMap.newKeySet<String>()
 
     fun stableKey(device: UsbDevice): String {
+        stableKeyByDeviceName[device.deviceName]?.let { return it }
+        return computeStableKey(device).also { stableKeyByDeviceName[device.deviceName] = it }
+    }
+
+    private fun computeStableKey(device: UsbDevice): String {
         val serial = runCatching { device.serialNumber }.getOrNull()?.takeIf { it.isNotBlank() }
         return if (serial != null) {
             "${device.vendorId}:${device.productId}:$serial"
@@ -27,15 +36,41 @@ object UsbPermissionCoordinator {
         }
     }
 
+    fun registerDevice(usbManager: UsbManager, device: UsbDevice) {
+        val key = stableKey(device)
+        stableKeyByDeviceName[device.deviceName] = key
+        if (usbManager.hasPermission(device)) {
+            grantedStableKeys.add(key)
+        }
+    }
+
+    fun findDeviceByNameOrAlias(
+        deviceName: String,
+        connected: Collection<UsbDevice>,
+    ): UsbDevice? {
+        connected.firstOrNull { it.deviceName == deviceName }?.let { return it }
+        val aliasKey = stableKeyByDeviceName[deviceName] ?: return null
+        return connected.firstOrNull { stableKey(it) == aliasKey }
+    }
+
     fun hasPermission(usbManager: UsbManager, device: UsbDevice): Boolean =
         usbManager.hasPermission(device)
 
     fun shouldRequest(usbManager: UsbManager, device: UsbDevice): Boolean {
+        registerDevice(usbManager, device)
         if (usbManager.hasPermission(device)) {
             clearInFlight(device)
             return false
         }
         val key = stableKey(device)
+        if (grantedStableKeys.contains(key)) {
+            val grantedAt = grantedAtByKey[key]
+            if (grantedAt != null && SystemClock.elapsedRealtime() - grantedAt < GRANT_GRACE_MS) {
+                OmtLog.d("UsbPerm", "skip request — stable key recently granted for $key")
+                return false
+            }
+            grantedStableKeys.remove(key)
+        }
         if (key in inFlightKeys) {
             OmtLog.d("UsbPerm", "skip request — already in flight for $key")
             return false
@@ -70,8 +105,10 @@ object UsbPermissionCoordinator {
 
     fun markGranted(usbManager: UsbManager, device: UsbDevice) {
         if (!usbManager.hasPermission(device)) return
+        registerDevice(usbManager, device)
         val key = stableKey(device)
         inFlightKeys.remove(key)
+        grantedStableKeys.add(key)
         grantedAtByKey[key] = SystemClock.elapsedRealtime()
     }
 
@@ -85,5 +122,7 @@ object UsbPermissionCoordinator {
     internal fun resetForTest() {
         inFlightKeys.clear()
         grantedAtByKey.clear()
+        stableKeyByDeviceName.clear()
+        grantedStableKeys.clear()
     }
 }

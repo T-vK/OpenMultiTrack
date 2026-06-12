@@ -18,6 +18,8 @@ sealed class RoutingApplyOutcome {
     data object SkippedNoOsc : RoutingApplyOutcome()
     data object SkippedUnreachable : RoutingApplyOutcome()
     data object SkippedEmptyScope : RoutingApplyOutcome()
+    /** Live mixer routing already matches targets; caller should still capture baseline if needed. */
+    data object AlreadyMatched : RoutingApplyOutcome()
     data class ReadyToApply(val channelCount: Int, val kind: RoutingOverrideKind) : RoutingApplyOutcome()
     data class Applied(val transactionId: String) : RoutingApplyOutcome()
     data class Failed(val message: String) : RoutingApplyOutcome()
@@ -54,7 +56,11 @@ class RoutingOverrideCoordinator(
         if (config.level == RoutingAutomationLevel.PROMPT) {
             return RoutingApplyOutcome.ReadyToApply(routable.size, kind)
         }
-        return applyInternal(profile, config, kind, routable, port = port)
+        if (channelsAlreadyAtTarget(port, routable, kind)) {
+            Xr18RoutingLog.info("peekApply $kind ${routable.size} ch already at target — skip OSC apply")
+            return RoutingApplyOutcome.AlreadyMatched
+        }
+        return RoutingApplyOutcome.ReadyToApply(routable.size, kind)
     }
 
     fun createRoutingPort(host: String): MixerRoutingPort = routingFactory(host)
@@ -287,6 +293,21 @@ class RoutingOverrideCoordinator(
             RoutingRestoreOutcome.Restored
         } else {
             RoutingRestoreOutcome.Failed("Mixer routing restore failed")
+        }
+    }
+
+    private suspend fun channelsAlreadyAtTarget(
+        port: MixerRoutingPort,
+        routable: Set<Int>,
+        kind: RoutingOverrideKind,
+    ): Boolean {
+        val live = port.readChannelInputs(routable)
+        return routable.all { ch ->
+            val target = when (kind) {
+                RoutingOverrideKind.RECORD -> XAirInputSourceCatalog.recordTarget(ch)
+                RoutingOverrideKind.SOUNDCHECK -> XAirInputSourceCatalog.soundcheckTarget(ch)
+            }
+            live[ch]?.matchesRouting(target) == true
         }
     }
 

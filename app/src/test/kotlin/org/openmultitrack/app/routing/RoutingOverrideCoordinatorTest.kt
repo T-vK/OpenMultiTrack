@@ -159,6 +159,47 @@ class RoutingOverrideCoordinatorTest {
     }
 
     @Test
+    fun peekApply_auto_doesNotApplyWhenAlreadyAtTarget() = runBlocking {
+        val store = MemoryBaselineStore()
+        val port = TestRoutingPort(
+            channels = mutableMapOf(0 to XAirInputSourceCatalog.soundcheckTarget(0)),
+        )
+        val coordinator = RoutingOverrideCoordinator(store) { port }
+        val config = MixerRoutingAutomationConfig(level = RoutingAutomationLevel.AUTO)
+
+        val outcome = coordinator.peekApply(
+            xr18Profile,
+            config,
+            RoutingOverrideKind.SOUNDCHECK,
+            setOf(0),
+        )
+
+        assertThat(outcome).isEqualTo(RoutingApplyOutcome.AlreadyMatched)
+        assertThat(store.load()).isNull()
+    }
+
+    @Test
+    fun peekApply_auto_returnsReadyToApplyWithoutWriting() = runBlocking {
+        val store = MemoryBaselineStore()
+        val port = TestRoutingPort(
+            channels = mutableMapOf(0 to XAirChannelInputState(5, 0, 0)),
+        )
+        val coordinator = RoutingOverrideCoordinator(store) { port }
+        val config = MixerRoutingAutomationConfig(level = RoutingAutomationLevel.AUTO)
+
+        val outcome = coordinator.peekApply(
+            xr18Profile,
+            config,
+            RoutingOverrideKind.SOUNDCHECK,
+            setOf(0),
+        )
+
+        assertThat(outcome).isInstanceOf(RoutingApplyOutcome.ReadyToApply::class.java)
+        assertThat(store.load()).isNull()
+        assertThat(port.readChannelInput(0)?.usesUsbReturn).isFalse()
+    }
+
+    @Test
     fun applyConfirmed_clearsPendingWhenApplyFails() = runBlocking {
         val store = MemoryBaselineStore()
         val port = TestRoutingPort(

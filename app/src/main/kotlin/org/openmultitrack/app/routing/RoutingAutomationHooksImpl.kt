@@ -86,15 +86,18 @@ class RoutingAutomationHooksImpl(
                 return routingFailed(profile, kind, "No channels in scope for routing automation")
             is RoutingApplyOutcome.Applied -> return RoutingHookResult.Proceed
             is RoutingApplyOutcome.Failed -> return routingFailed(profile, kind, peek.message)
+            is RoutingApplyOutcome.AlreadyMatched -> Unit
             is RoutingApplyOutcome.ReadyToApply -> {
-                val deferred = CompletableDeferred<Boolean>()
-                applyDeferred.set(deferred)
-                withContext(Dispatchers.Main.immediate) {
-                    onApplyPrompt(
-                        RoutingApplyPromptState(profile.id, kind, peek.channelCount),
-                    )
+                if (config.level == RoutingAutomationLevel.PROMPT) {
+                    val deferred = CompletableDeferred<Boolean>()
+                    applyDeferred.set(deferred)
+                    withContext(Dispatchers.Main.immediate) {
+                        onApplyPrompt(
+                            RoutingApplyPromptState(profile.id, kind, peek.channelCount),
+                        )
+                    }
+                    if (!deferred.await()) return RoutingHookResult.Cancelled
                 }
-                if (!deferred.await()) return RoutingHookResult.Cancelled
             }
         }
         return when (
@@ -131,15 +134,18 @@ class RoutingAutomationHooksImpl(
                 return routingFailed(profile, kind, "No channels in scope for routing automation")
             is RoutingApplyOutcome.Applied -> return RoutingHookResult.Proceed
             is RoutingApplyOutcome.Failed -> return routingFailed(profile, kind, peek.message)
+            is RoutingApplyOutcome.AlreadyMatched -> Unit
             is RoutingApplyOutcome.ReadyToApply -> {
-                val deferred = CompletableDeferred<Boolean>()
-                applyDeferred.set(deferred)
-                withContext(Dispatchers.Main.immediate) {
-                    onApplyPrompt(
-                        RoutingApplyPromptState(profile.id, kind, peek.channelCount),
-                    )
+                if (config.level == RoutingAutomationLevel.PROMPT) {
+                    val deferred = CompletableDeferred<Boolean>()
+                    applyDeferred.set(deferred)
+                    withContext(Dispatchers.Main.immediate) {
+                        onApplyPrompt(
+                            RoutingApplyPromptState(profile.id, kind, peek.channelCount),
+                        )
+                    }
+                    if (!deferred.await()) return RoutingHookResult.Cancelled
                 }
-                if (!deferred.await()) return RoutingHookResult.Cancelled
             }
         }
         return when (
