@@ -151,10 +151,16 @@ class SessionRecorder {
     companion object {
         private const val SESSION_OWNER_ID = "legacy-session-recorder"
 
-        /** Keep writer buffer under ~512 KiB of floats regardless of channel count. */
+        /** Keep writer buffer under ~512 KiB of floats; smaller chunks when many channels. */
         fun chunkFramesForChannels(channelCount: Int): Int {
             val targetSamples = 262_144
-            return max(512, min(16_384, targetSamples / max(1, channelCount)))
+            val byChannels = targetSamples / max(1, channelCount)
+            val maxFrames = when {
+                channelCount >= 8 -> 2_048
+                channelCount >= 4 -> 4_096
+                else -> 8_192
+            }
+            return max(512, min(maxFrames, byChannels))
         }
     }
 }

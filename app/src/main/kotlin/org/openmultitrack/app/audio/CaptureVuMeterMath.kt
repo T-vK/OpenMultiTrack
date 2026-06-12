@@ -25,6 +25,22 @@ internal fun scaleCaptureVuPeak(raw: Float): Float {
         .coerceIn(0f, 1f)
 }
 
+/** Absorbs per-channel peaks (already computed) into VU hold values. */
+internal fun absorbChannelPeaks(
+    hold: FloatArray,
+    rawPeaks: FloatArray,
+    peaks: FloatArray,
+    channels: Int,
+) {
+    for (ch in 0 until channels) {
+        val peak = peaks[ch]
+        rawPeaks[ch] = peak
+        val target = scaleCaptureVuPeak(peak)
+        val coeff = if (target > hold[ch]) METER_ATTACK else METER_RELEASE
+        hold[ch] += (target - hold[ch]) * coeff
+    }
+}
+
 /** Absorbs a raw interleaved PCM chunk into per-channel peak hold values. */
 internal fun absorbInterleavedPeaks(
     hold: FloatArray,

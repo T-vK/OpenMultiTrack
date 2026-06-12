@@ -78,7 +78,7 @@ CaptureStatus Uac2Capture::open(int usb_fd, const Uac2AltSetting& alt, bool java
     java_interface_claimed_ = java_interface_claimed;
     channel_count_ = alt.format.channels;
     sample_rate_ = static_cast<int32_t>(alt.format.sample_rate_hz);
-    ring_ = std::make_unique<openmultitrack::SpscRingBuffer>(48'000, channel_count_);
+    ring_ = std::make_unique<openmultitrack::SpscRingBuffer>(144'000, channel_count_);
 
     // Prefer usbdevfs (emulator / hosts where SUBMITURB works). Fall back to libusb
     // when claim or isoch submit fails (e.g. XR18 on Samsung tablets).

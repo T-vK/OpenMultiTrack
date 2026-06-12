@@ -42,6 +42,28 @@ fun formatAdaptiveTransportTime(sec: Float): String {
     }
 }
 
+/** Parses [formatTransportTime] / [formatAdaptiveTransportTime] strings (M:SS, MM:SS, H:MM:SS). */
+fun parseTransportTime(text: String): Float? {
+    val trimmed = text.trim()
+    if (trimmed.isEmpty()) return null
+    val parts = trimmed.split(":").mapNotNull { it.trim().toIntOrNull() }
+    return when (parts.size) {
+        2 -> parts[0] * 60f + parts[1]
+        3 -> parts[0] * 3600f + parts[1] * 60f + parts[2]
+        else -> null
+    }
+}
+
+/** Parses "Soundcheck transport M:SS of M:SS" accessibility labels. */
+fun parseSoundcheckTransportLabel(label: String): Pair<Float, Float>? {
+    val body = label.trim().removePrefix(DawTransportSemantics.SOUNDCHECK_TRANSPORT_PREFIX).trim()
+    val split = body.split(" of ", limit = 2)
+    if (split.size != 2) return null
+    val position = parseTransportTime(split[0]) ?: return null
+    val duration = parseTransportTime(split[1]) ?: return null
+    return position to duration
+}
+
 fun formatRecordingStorageInfo(freeBytes: Long, estimateSec: Float): String =
     "${formatStorageBytes(freeBytes)}\n${formatRecordRemainingEstimate(estimateSec)}"
 

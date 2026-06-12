@@ -74,6 +74,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -445,7 +450,17 @@ private fun RecordTransportCluster(
                     style = MaterialTheme.typography.labelLarge,
                     color = if (isRecording) RecordRed else MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
-                    modifier = Modifier.padding(end = 6.dp),
+                    modifier = Modifier
+                        .padding(end = 6.dp)
+                        .testTag(DawTransportSemantics.RECORDING_ELAPSED_TEST_TAG)
+                        .clearAndSetSemantics {
+                            contentDescription = if (isRecording) {
+                                DawTransportSemantics.RECORDING_ELAPSED_PREFIX +
+                                    formatAdaptiveTransportTime(elapsed)
+                            } else {
+                                "Recording timer"
+                            }
+                        },
                 )
             }
         }

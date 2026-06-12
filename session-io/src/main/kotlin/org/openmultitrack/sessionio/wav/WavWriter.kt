@@ -22,6 +22,8 @@ class WavWriter private constructor(
     private var dataBytesWritten: Long = 0
     private var closed = false
     private var pcmBytes = ByteArray(0)
+    private var pendingPcm = ByteArray(0)
+    private var pendingLen = 0
 
     constructor(
         file: File,
@@ -65,13 +67,33 @@ class WavWriter private constructor(
             pcmBytes[bi++] = ((int24 shr 8) and 0xFF).toByte()
             pcmBytes[bi++] = ((int24 shr 16) and 0xFF).toByte()
         }
-        raf.write(pcmBytes, 0, byteLen)
+        appendPcm(pcmBytes, byteLen)
         dataBytesWritten += byteLen
+    }
+
+    private fun appendPcm(source: ByteArray, byteLen: Int) {
+        if (pendingLen + byteLen > pendingPcm.size) {
+            val grown = ByteArray(max(pendingPcm.size * 2, pendingLen + byteLen))
+            System.arraycopy(pendingPcm, 0, grown, 0, pendingLen)
+            pendingPcm = grown
+        }
+        System.arraycopy(source, 0, pendingPcm, pendingLen, byteLen)
+        pendingLen += byteLen
+        if (pendingLen >= FLUSH_THRESHOLD_BYTES) {
+            flushPendingPcm()
+        }
+    }
+
+    private fun flushPendingPcm() {
+        if (pendingLen <= 0) return
+        raf.write(pendingPcm, 0, pendingLen)
+        pendingLen = 0
     }
 
     override fun close() {
         if (closed) return
         closed = true
+        flushPendingPcm()
         finalizeHeader()
         raf.close()
     }
@@ -109,6 +131,7 @@ class WavWriter private constructor(
 
     companion object {
         private const val RIFF_HEADER_SIZE = 44
+        private const val FLUSH_THRESHOLD_BYTES = 262_144
 
         /** Reopen an existing WAV and append PCM after any data already on disk. */
         fun openForAppend(file: File, channelCount: Int, sampleRate: Int): WavWriter =

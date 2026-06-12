@@ -11,6 +11,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.openmultitrack.app.service.MixerSessionUiState
@@ -64,6 +68,16 @@ fun SoundcheckSessionInfoBar(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                    modifier = Modifier
+                        .testTag(DawTransportSemantics.SOUNDCHECK_TRANSPORT_TEST_TAG)
+                        .clearAndSetSemantics {
+                            contentDescription = if (hasSession) {
+                                DawTransportSemantics.SOUNDCHECK_TRANSPORT_PREFIX +
+                                    "${formatTransportTime(position)} of ${formatTransportTime(duration)}"
+                            } else {
+                                DawTransportSemantics.SOUNDCHECK_TRANSPORT_PREFIX + "0:00 of 0:00"
+                            }
+                        },
                 )
             }
             if (!statusLine.isNullOrBlank()) {
