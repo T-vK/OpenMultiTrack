@@ -117,7 +117,7 @@ fun LogViewerScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            LogViewerToolbar(
+            LogViewerMenuBar(
                 visibleLineCount = visibleLogLineCount,
                 totalLineCount = AppLogBuffer.lineCount(),
                 filterActive = levelFilterMask != DevLogLevelMask.ALL ||

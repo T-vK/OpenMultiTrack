@@ -752,7 +752,7 @@ private fun LogViewerContent(
 
         if (showMenuBar) {
             HorizontalDivider()
-            LogViewerToolbar(
+            LogViewerMenuBar(
                 visibleLineCount = visibleLogLineCount,
                 totalLineCount = AppLogBuffer.lineCount(),
                 filterActive = levelFilterMask != DevLogLevelMask.ALL ||
@@ -790,7 +790,6 @@ private fun LogViewerContent(
                 },
                 onDisabledTagsChange = { disabledTags = it },
                 onCustomFiltersChange = { customFilters = it },
-                compact = true,
             )
             HorizontalDivider()
         }
