@@ -81,6 +81,19 @@ internal fun RecordingTimelineRuler(
     }
 }
 
+internal fun liveWaveformEffectiveElapsedSec(
+    elapsedSec: Float,
+    peaks: FloatArray,
+    peaksPerSec: Int,
+): Float {
+    val fromPeaks = if (peaks.isNotEmpty()) {
+        peaks.size.toFloat() / peaksPerSec.coerceAtLeast(1)
+    } else {
+        0f
+    }
+    return maxOf(elapsedSec, fromPeaks)
+}
+
 /**
  * Maps live recording peaks into per-pixel columns for the visible viewport.
  * Column [i] represents a fixed slice of [viewWindowSec] starting at [viewStartSec].
@@ -257,7 +270,8 @@ internal fun LiveWaveformStrip(
     modifier: Modifier = Modifier,
     testTag: String = LIVE_WAVEFORM_TEST_TAG,
 ) {
-    val hasDrawableData = peaks.isNotEmpty() && viewWindowSec > 0f && elapsedSec > 0f
+    val effectiveElapsedSec = liveWaveformEffectiveElapsedSec(elapsedSec, peaks, peaksPerSec)
+    val hasDrawableData = peaks.isNotEmpty() && viewWindowSec > 0f && effectiveElapsedSec > 0f
     // Freeze the scale divisor on the first meaningful peak so a later loud transient
     // cannot rescale already-drawn timeline columns to invisibility.
     var livePeakCeiling by remember { mutableFloatStateOf(0f) }
@@ -283,7 +297,7 @@ internal fun LiveWaveformStrip(
             val columns = liveWaveformColumnsForDisplay(
                 peaks = scaledPeaks,
                 bufferWindowSec = bufferWindowSec,
-                elapsedSec = elapsedSec,
+                elapsedSec = effectiveElapsedSec,
                 peaksPerSec = peaksPerSec,
                 pixelCount = pixelCount,
                 viewStartSec = viewStartSec,

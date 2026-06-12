@@ -2087,7 +2087,10 @@ class MixerSessionController(
                                     waveformPeaks = emptyMap(),
                                     recordElapsedSec = 0f,
                                 )
-                                else -> s.copy(captureMeterLevels = levels)
+                                else -> s.copy(
+                                    captureMeterLevels = levels,
+                                    waveformPeaks = captureEngine.waveformSnapshots(normalize = false),
+                                )
                             }
                         }
                     }

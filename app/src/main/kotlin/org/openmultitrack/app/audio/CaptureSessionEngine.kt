@@ -806,7 +806,7 @@ class CaptureSessionEngine(
     }
 
     private fun maybeEmitWaveformPeaks() {
-        if (!isRecording) return
+        if (!isRecording && !vuMeteringEnabled.get()) return
         val intervalNs = 1_000_000_000L / waveformPeaksPerSecond
         val now = System.nanoTime()
         if (lastWaveformEmitNs != 0L && now - lastWaveformEmitNs < intervalNs) return

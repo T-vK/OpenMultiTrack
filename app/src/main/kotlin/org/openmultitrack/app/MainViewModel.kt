@@ -1761,7 +1761,7 @@ class MainViewModel(
 
     private fun overlaysBlockHeavySessionUpdates(): Boolean {
         val ui = _uiState.value
-        return ui.showSettings || ui.showLogViewer || ui.mixerSettingsMixerId != null
+        return ui.showSettings || ui.mixerSettingsMixerId != null
     }
 
     private fun sessionForUiWhileOverlay(session: MixerSessionUiState): MixerSessionUiState {

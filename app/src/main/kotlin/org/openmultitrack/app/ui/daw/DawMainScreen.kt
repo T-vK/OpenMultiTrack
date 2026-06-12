@@ -933,8 +933,16 @@ private fun ChannelStripList(
     ) {
         val count = visibleStrips.size.coerceAtLeast(1)
         val gap = 2.dp
-        val showTimeline = showWaveforms
-        val rulerAndGap = if (showTimeline) WaveformTimeRulerHeight + gap else 0.dp
+        val showLiveWaveforms = showWaveforms && (isRecording || isVuMetering)
+        val waveformElapsedSec = when {
+            isRecording -> recordElapsedSec
+            isVuMetering -> {
+                val peakCount = waveformPeaks.values.maxOfOrNull { it.peaks.size } ?: 0
+                peakCount.toFloat() / RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC
+            }
+            else -> 0f
+        }
+        val rulerAndGap = if (showLiveWaveforms) WaveformTimeRulerHeight + gap else 0.dp
         val totalGaps = gap * (count - 1).coerceAtLeast(0)
         val naturalHeight = (maxHeight - rulerAndGap - totalGaps) / count
         val useScroll = naturalHeight < MinStripHeight
@@ -990,7 +998,7 @@ private fun ChannelStripList(
         } else {
             recordViewWindowSec
         }
-        val displayViewStart = RecordViewLayout.anchoredStartSec(recordElapsedSec, displayViewWindow)
+        val displayViewStart = RecordViewLayout.anchoredStartSec(waveformElapsedSec, displayViewWindow)
 
         if (visibleStrips.isEmpty()) {
             Column(
@@ -1021,7 +1029,7 @@ private fun ChannelStripList(
         }
         Box(modifier = listModifier) {
         Column(Modifier.fillMaxSize()) {
-            if (showTimeline) {
+            if (showLiveWaveforms) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1039,7 +1047,7 @@ private fun ChannelStripList(
                             .onSizeChanged { waveformWidthPx = it.width.toFloat() },
                     ) {
                         RecordingTimelineRuler(
-                            elapsedSec = recordElapsedSec,
+                            elapsedSec = waveformElapsedSec,
                             viewStartSec = displayViewStart,
                             viewWindowSec = displayViewWindow,
                             modifier = Modifier.fillMaxSize(),
@@ -1060,11 +1068,16 @@ private fun ChannelStripList(
                     innerPad = innerPad,
                     labelFontSize = labelFontSize,
                     labelColumnWidth = labelColumnWidth,
-                    waveform = if (showWaveforms && isRecording) waveformPeaks[strip.index] else null,
+                    waveform = if (showLiveWaveforms) {
+                        val usbIndex = routing.inputSource(strip.index)
+                        waveformPeaks[usbIndex]
+                    } else {
+                        null
+                    },
                     recordWaveformHistorySec = recordWaveformHistorySec,
                     recordViewStartSec = displayViewStart,
                     recordViewWindowSec = displayViewWindow,
-                    recordElapsedSec = recordElapsedSec,
+                    recordElapsedSec = waveformElapsedSec,
                     captureMeterLevel = if (showVuMeters) {
                         val usbIndex = routing.inputSource(strip.index)
                         captureMeterLevels[usbIndex] ?: 0f
@@ -1084,7 +1097,7 @@ private fun ChannelStripList(
             }
             }
         }
-            if (showWaveforms) {
+            if (showLiveWaveforms && isRecording) {
                 Box(
                     modifier = Modifier
                         .matchParentSize()

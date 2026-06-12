@@ -31,6 +31,17 @@ class LiveWaveformDisplayTest {
         )
 
     @Test
+    fun effectiveElapsed_usesPeakBufferWhenTimelineIsStillZero() {
+        val peaks = FloatArray(30) { 0.5f }
+        val elapsed = liveWaveformEffectiveElapsedSec(
+            elapsedSec = 0f,
+            peaks = peaks,
+            peaksPerSec = 30,
+        )
+        assertThat(elapsed).isWithin(0.01f).of(1f)
+    }
+
+    @Test
     fun growthPhase_fillsFromLeft_oneSecondIsOneFifteenth() {
         val cols = columns(peaks = FloatArray(30) { 0.8f }, elapsedSec = 1f)
         assertThat(filledCount(cols, elapsedSec = 1f)).isEqualTo(6)
