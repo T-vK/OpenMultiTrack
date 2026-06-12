@@ -84,6 +84,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.openmultitrack.app.DawUiState
+import org.openmultitrack.app.health.MixerHealthCollector
 import org.openmultitrack.app.hasNewerRecordingThanSelected
 import org.openmultitrack.app.device.PrerequisiteKind
 import org.openmultitrack.app.scribble.Flow8BleScribbleImporter
@@ -258,6 +259,16 @@ fun DawMainScreen(
         state.mixers.isEmpty()
 
     val activeProfile = activeId?.let { id -> state.mixers.firstOrNull { it.id == id } }
+    val activeMixerHealth = activeProfile?.let { profile ->
+        session?.let { mixerSession ->
+            MixerHealthCollector.collect(
+                profile = profile,
+                session = mixerSession,
+                availableUsb = state.availableUsbDevices,
+                usbPermissionGranted = state.usbPermissionByMixer[profile.id] == true,
+            )
+        }
+    }
     val supportsOscRouting = activeProfile?.let {
         org.openmultitrack.app.scribble.ScribbleImportSupport.supportsOsc(it) &&
             !it.oscHost.isNullOrBlank()
@@ -578,6 +589,7 @@ fun DawMainScreen(
                         session?.appMode?.isPlaybackMode == true -> session?.let { s ->
                             SoundcheckPanel(
                                 session = s,
+                                health = activeMixerHealth,
                                 playbackChannelCount = MixerUsbChannelCounts.playbackChannelsForUi(
                                     profile = activeProfile ?: state.mixers.first { it.id == activeId },
                                     sessionPlaybackCount = s.playbackChannelCount,

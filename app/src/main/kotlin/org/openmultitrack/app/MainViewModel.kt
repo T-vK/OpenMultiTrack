@@ -109,6 +109,7 @@ data class DawUiState(
     val sessionByMixer: Map<String, MixerSessionUiState> = emptyMap(),
     val outputDevices: List<LabeledAudioDevice> = emptyList(),
     val availableUsbDevices: List<UsbAudioDeviceDescriptor> = emptyList(),
+    val usbPermissionByMixer: Map<String, Boolean> = emptyMap(),
     val addableUsbDevices: List<UsbAudioDeviceDescriptor> = emptyList(),
     val showAddMixerDialog: Boolean = false,
     val showMixerPicker: Boolean = false,
@@ -737,8 +738,16 @@ class MainViewModel(
             } else {
                 _uiState.value.addableUsbDevices
             }
+            val usbPermissionByMixer = profiles.associate { profile ->
+                profile.id to enumerator.hasUsbPermissionForProfile(profile)
+            }
             _uiState.update {
-                it.copy(availableUsbDevices = usb, addableUsbDevices = addable, outputDevices = outputs)
+                it.copy(
+                    availableUsbDevices = usb,
+                    usbPermissionByMixer = usbPermissionByMixer,
+                    addableUsbDevices = addable,
+                    outputDevices = outputs,
+                )
             }
             syncMixerUsbNames(usb)
             sessionClient.withManager { mgr ->
@@ -883,6 +892,7 @@ class MainViewModel(
             ctrl.setAppMode(mode)
             if (mode.isPlaybackMode) {
                 ctrl.refreshSoundcheckLibrary()
+                ensureUsbProbeForMixer(mixerId, mgr)
             }
         }
     }
@@ -1012,22 +1022,50 @@ class MainViewModel(
             return
         }
         sessionClient.withManager { it.getOrCreate(mixerId).selectSoundcheckSession(sessionDir) }
+        ensureUsbProbeForMixer(mixerId)
     }
 
     fun toggleSoundcheckPlayback(mixerId: String) {
+        val session = _uiState.value.sessionByMixer[mixerId]
+        org.openmultitrack.app.util.AppLogBuffer.append(
+            "I",
+            "Transport",
+            "toggleSoundcheckPlayback mixer=$mixerId isPlaying=${session?.isPlaying} probe=${session?.probe != null} probing=${session?.probing}",
+        )
         org.openmultitrack.app.audio.TransportTraceHub.mark(
             mixerId,
-            "ViewModel.toggleSoundcheckPlayback isPlaying=${_uiState.value.sessionByMixer[mixerId]?.isPlaying}",
+            "ViewModel.toggleSoundcheckPlayback isPlaying=${session?.isPlaying}",
         )
         if (isRemoteClient()) {
-            val playing = _uiState.value.sessionByMixer[mixerId]?.isPlaying == true
+            val playing = session?.isPlaying == true
             remoteCommand(
                 if (playing) "pause_playback" else "play_playback",
                 JSONObject().put("mixerId", mixerId),
             )
             return
         }
-        val willPlay = _uiState.value.sessionByMixer[mixerId]?.isPlaying != true
+        if (session?.selectedSoundcheckDir == null) {
+            showStatus("Open a recording first.", mixerId)
+            return
+        }
+        val willPlay = session.isPlaying != true
+        if (willPlay && (session.probe == null || session.probing)) {
+            ensureUsbProbeForMixer(mixerId)
+            val refreshed = _uiState.value.sessionByMixer[mixerId]
+            if (refreshed?.probe == null) {
+                val message = when {
+                    refreshed?.probing == true -> "Connecting to USB mixer…"
+                    resolveUsbDevice(
+                        _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return,
+                        _uiState.value.availableUsbDevices,
+                    ) == null -> "Mixer not on USB — reconnect the cable, then tap Play."
+                    else -> "USB mixer not ready — allow USB access if prompted, then tap Play."
+                }
+                showStatus(message, mixerId)
+                org.openmultitrack.app.util.AppLogBuffer.append("W", "Transport", "Play deferred — $message")
+                return
+            }
+        }
         if (willPlay && !sessionClient.isForeground() && !sessionClient.promoteForeground("Playback")) {
             showStatus("Could not start playback — allow notifications and try again.", mixerId)
             return
@@ -2081,6 +2119,7 @@ class MainViewModel(
             ctrl.setAppMode(mode)
             if (mode.isPlaybackMode) {
                 ctrl.refreshSoundcheckLibrary()
+                ensureUsbProbeForMixer(profile.id, manager)
             }
             observeMixerSession(profile.id, manager)
         }
@@ -2185,11 +2224,20 @@ class MainViewModel(
             return
         }
         viewModelScope.launch {
-            manager.getOrCreate(resolvedProfile.id).setProbing(true)
+            val ctrl = manager.getOrCreate(resolvedProfile.id)
+            ctrl.setProbing(true)
             AppLogBuffer.append("I", "Probe", "Auto-probing ${resolvedProfile.displayName} on ${usb.deviceName}")
-            val result = withContext(Dispatchers.IO) { probeService.probe(usb) }
-            manager.onProbeComplete(resolvedProfile.id, usb, result)
-            OmtLog.i("ViewModel", "auto-probed ${resolvedProfile.displayName}")
+            try {
+                val result = withContext(Dispatchers.IO) { probeService.probe(usb) }
+                manager.onProbeComplete(resolvedProfile.id, usb, result)
+                OmtLog.i("ViewModel", "auto-probed ${resolvedProfile.displayName}")
+                AppLogBuffer.append("I", "Probe", "Probe complete for ${resolvedProfile.displayName}")
+            } catch (e: Exception) {
+                OmtLog.e("ViewModel", "auto-probe failed for ${resolvedProfile.displayName}", e)
+                AppLogBuffer.append("E", "Probe", "Probe failed for ${resolvedProfile.displayName}: ${e.message}")
+                ctrl.setProbing(false)
+                showStatus("USB probe failed — unplug and replug the mixer.", resolvedProfile.id)
+            }
             usbRecoveryJob?.cancel()
             refreshInterruptedRecording(resolvedProfile.id, manager)
             val resumePending = IncompleteRecordingStore.recoverableSession(
@@ -2207,6 +2255,24 @@ class MainViewModel(
                     onFlow8MixerReady(resolvedProfile.id)
                 }
             }
+        }
+    }
+
+    private fun ensureUsbProbeForMixer(
+        mixerId: String,
+        manager: org.openmultitrack.app.service.MultiMixerSessionManager? = null,
+    ) {
+        if (isRemoteClient()) return
+        val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
+        val session = _uiState.value.sessionByMixer[mixerId]
+        if (session?.probe != null || session?.probing == true) return
+        val runProbe: (org.openmultitrack.app.service.MultiMixerSessionManager) -> Unit = { mgr ->
+            autoProbeMixer(profile, mgr, _uiState.value.availableUsbDevices)
+        }
+        if (manager != null) {
+            runProbe(manager)
+        } else {
+            sessionClient.withManager(runProbe)
         }
     }
 

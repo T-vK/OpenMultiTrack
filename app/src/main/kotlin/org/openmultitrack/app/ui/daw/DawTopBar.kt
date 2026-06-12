@@ -468,12 +468,13 @@ private fun PlaybackTransportCluster(
     onShowTrackmarkList: () -> Unit,
 ) {
     val isPlaying = session?.isPlaying == true
+    val sessionLoaded = session?.selectedSoundcheckDir != null
     val hostReady = session?.probe != null ||
         (isRemoteClient && session?.captureChannelCount?.let { it > 0 } == true)
-    val hasSession = session?.selectedSoundcheckDir != null && hostReady
-    LaunchedEffect(session?.selectedSoundcheckDir, hostReady, session?.probing) {
+    val playEnabled = sessionLoaded && (!isRemoteClient || hostReady)
+    LaunchedEffect(session?.selectedSoundcheckDir, hostReady, session?.probing, isRemoteClient) {
         when {
-            session?.selectedSoundcheckDir == null ->
+            !sessionLoaded ->
                 org.openmultitrack.app.util.AppLogBuffer.append(
                     "D",
                     "Transport",
@@ -483,13 +484,13 @@ private fun PlaybackTransportCluster(
                 org.openmultitrack.app.util.AppLogBuffer.append(
                     "D",
                     "Transport",
-                    "Play disabled — USB probe in progress",
+                    "Play waiting — USB probe in progress",
                 )
-            !hostReady ->
+            !hostReady && !isRemoteClient ->
                 org.openmultitrack.app.util.AppLogBuffer.append(
                     "W",
                     "Transport",
-                    "Play disabled — mixer not probed (reconnect USB or wait for probe)",
+                    "Play enabled — USB not probed yet (tap Play to connect)",
                 )
             else ->
                 org.openmultitrack.app.util.AppLogBuffer.append(
@@ -499,7 +500,7 @@ private fun PlaybackTransportCluster(
                 )
         }
     }
-    val canStop = hasSession && (isPlaying || (session?.playbackPositionSec ?: 0f) > 0.05f)
+    val canStop = sessionLoaded && (isPlaying || (session?.playbackPositionSec ?: 0f) > 0.05f)
     val hasTrackmarks = chaptersEnabled && session?.trackmarks?.isNotEmpty() == true
     TransportActionRow {
         if (chaptersEnabled) {
@@ -511,8 +512,15 @@ private fun PlaybackTransportCluster(
             )
         }
         TransportBarIconButton(
-            onClick = onTogglePlayback,
-            enabled = hasSession,
+            onClick = {
+                org.openmultitrack.app.util.AppLogBuffer.append(
+                    "I",
+                    "Transport",
+                    "Play tapped sessionLoaded=$sessionLoaded hostReady=$hostReady probing=${session?.probing}",
+                )
+                onTogglePlayback()
+            },
+            enabled = playEnabled,
             icon = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
             contentDescription = if (isPlaying) "Pause" else "Play",
         )
@@ -531,13 +539,13 @@ private fun PlaybackTransportCluster(
             )
             TransportBarIconButton(
                 onClick = onAddTrackmark,
-                enabled = hasSession,
+                enabled = sessionLoaded,
                 icon = Icons.Default.Bookmark,
                 contentDescription = "Add trackmark",
             )
             TransportBarIconButton(
                 onClick = onShowTrackmarkList,
-                enabled = hasSession,
+                enabled = sessionLoaded,
                 icon = Icons.Default.FormatListBulleted,
                 contentDescription = "Trackmark list",
             )

@@ -50,6 +50,7 @@ import org.openmultitrack.app.data.StripIconMode
 import org.openmultitrack.app.data.StripNumberMode
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.domain.channel.ChannelStripState
+import org.openmultitrack.domain.mixer.MixerHealthSnapshot
 import org.openmultitrack.domain.mixer.MixerRoutingConfig
 import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.sessionio.wav.SessionWaveformOverview
@@ -67,6 +68,7 @@ internal val WaveformTimeRulerHeight = 22.dp
 @Composable
 fun SoundcheckPanel(
     session: MixerSessionUiState,
+    health: MixerHealthSnapshot? = null,
     playbackChannelCount: Int = session.playbackChannelCount,
     showTrackmarks: Boolean = false,
     routing: MixerRoutingConfig = MixerRoutingConfig(),
@@ -92,7 +94,7 @@ fun SoundcheckPanel(
             .fillMaxSize()
             .padding(horizontal = 4.dp, vertical = 2.dp),
     ) {
-        SoundcheckSessionInfoBar(session = session)
+        SoundcheckSessionInfoBar(session = session, health = health)
         if (session.soundcheckWaveformsLoading) {
             LinearProgressIndicator(
                 progress = { session.soundcheckWaveformProgress.coerceIn(0f, 1f) },
