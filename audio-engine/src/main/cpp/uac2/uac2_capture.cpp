@@ -31,7 +31,7 @@ Uac2Capture& Uac2Capture::instance() {
 
 CaptureStatus Uac2Capture::open(int usb_fd, const Uac2AltSetting& alt, bool java_interface_claimed) {
     std::lock_guard<std::mutex> lock(mutex_);
-    close();
+    closeUnlocked();
 
     dropped_frames_.store(0);
 
@@ -56,7 +56,7 @@ CaptureStatus Uac2Capture::open(int usb_fd, const Uac2AltSetting& alt, bool java
     }
 
     if (!opened) {
-        close();
+        closeUnlocked();
         CaptureStatus status;
         status.error = "isoch URB submit failed";
         return status;
@@ -175,6 +175,15 @@ bool Uac2Capture::tryOpenUsbdevfs(int usb_fd,
 }
 
 void Uac2Capture::close() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    closeUnlocked();
+}
+
+void Uac2Capture::closeUnlocked() {
+    if (backend_ == IoBackend::None && libusb_handle_ == nullptr && usb_fd_ < 0) {
+        return;
+    }
+
     running_.store(false);
 
     if (backend_ == IoBackend::Libusb && libusb_ctx_ != nullptr) {

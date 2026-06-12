@@ -32,7 +32,7 @@ Uac2Playback& Uac2Playback::instance() {
 
 PlaybackStatus Uac2Playback::open(int usb_fd, const Uac2AltSetting& alt, bool java_interface_claimed) {
     std::lock_guard<std::mutex> lock(mutex_);
-    close();
+    closeUnlocked();
 
     underrun_frames_.store(0);
 
@@ -56,7 +56,7 @@ PlaybackStatus Uac2Playback::open(int usb_fd, const Uac2AltSetting& alt, bool ja
     }
 
     if (!opened) {
-        close();
+        closeUnlocked();
         PlaybackStatus status;
         status.error = "isoch URB submit failed";
         return status;
@@ -155,6 +155,15 @@ bool Uac2Playback::tryOpenUsbdevfs(int usb_fd,
 }
 
 void Uac2Playback::close() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    closeUnlocked();
+}
+
+void Uac2Playback::closeUnlocked() {
+    if (backend_ == IoBackend::None && libusb_handle_ == nullptr && usb_fd_ < 0) {
+        return;
+    }
+
     running_.store(false);
 
     if (backend_ == IoBackend::Libusb && libusb_ctx_ != nullptr) {

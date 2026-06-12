@@ -47,6 +47,7 @@ private:
 
     bool tryOpenLibusb(int usb_fd, const Uac2AltSetting& alt, bool java_interface_claimed);
     bool tryOpenUsbdevfs(int usb_fd, const Uac2AltSetting& alt, bool java_interface_claimed);
+    void closeUnlocked();
 
     void workerLoopUsbdevfs(std::promise<bool> init_promise);
     void workerLoopLibusb(std::promise<bool> init_promise);
