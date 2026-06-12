@@ -58,6 +58,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -441,6 +442,7 @@ private fun LogViewerContent(
     var coloredLevels by remember { mutableStateOf(settings.devLogColoredLevels) }
     var levelFilterMask by remember { mutableIntStateOf(settings.devLogLevelFilterMask) }
     var showMenuBar by remember { mutableStateOf(settings.devLogShowMenuBar) }
+    var wordWrap by remember { mutableStateOf(settings.devLogWordWrap) }
     var refreshTick by remember { mutableIntStateOf(0) }
     var textScale by rememberSaveable { mutableFloatStateOf(1f) }
 
@@ -502,7 +504,7 @@ private fun LogViewerContent(
     }
 
     Column(Modifier.fillMaxSize()) {
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(TITLE_BAR_HEIGHT)
@@ -518,40 +520,46 @@ private fun LogViewerContent(
                     } else {
                         Modifier
                     },
-                )
-                .padding(start = 8.dp, end = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                ),
         ) {
-            Text(
-                title,
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.weight(1f),
-            )
-            IconButton(
-                onClick = {
-                    showMenuBar = !showMenuBar
-                    settings.devLogShowMenuBar = showMenuBar
-                },
-                modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE),
+            Row(
+                modifier = Modifier.align(Alignment.Center),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    Icons.Default.Menu,
-                    contentDescription = if (showMenuBar) "Hide menu bar" else "Show menu bar",
-                    tint = if (showMenuBar) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                Text(title, style = MaterialTheme.typography.labelMedium)
+                IconButton(
+                    onClick = {
+                        showMenuBar = !showMenuBar
+                        settings.devLogShowMenuBar = showMenuBar
                     },
-                )
+                    modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE),
+                ) {
+                    Icon(
+                        Icons.Default.Menu,
+                        contentDescription = if (showMenuBar) "Hide menu bar" else "Show menu bar",
+                        tint = if (showMenuBar) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
             }
-            IconButton(onClick = onMinimize, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
-                Icon(Icons.Default.Minimize, contentDescription = "Minimize")
-            }
-            IconButton(onClick = onMaximize, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
-                Icon(maximizeIcon, contentDescription = maximizeContentDescription)
-            }
-            IconButton(onClick = onClose, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
-                Icon(Icons.Default.Close, contentDescription = "Close")
+            Row(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onMinimize, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
+                    Icon(Icons.Default.Minimize, contentDescription = "Minimize")
+                }
+                IconButton(onClick = onMaximize, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
+                    Icon(maximizeIcon, contentDescription = maximizeContentDescription)
+                }
+                IconButton(onClick = onClose, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
+                    Icon(Icons.Default.Close, contentDescription = "Close")
+                }
             }
         }
 
@@ -579,11 +587,26 @@ private fun LogViewerContent(
                     levelFilterMask = it
                     settings.devLogLevelFilterMask = it
                 },
+                wordWrap = wordWrap,
+                onWordWrapChange = {
+                    wordWrap = it
+                    settings.devLogWordWrap = it
+                },
             )
             HorizontalDivider()
         }
 
         val baseFontSize = MaterialTheme.typography.bodySmall.fontSize
+        val scaledFontSize = (baseFontSize.value * textScale).sp
+        val logTextStyle = MaterialTheme.typography.bodySmall.copy(
+            fontFamily = FontFamily.Monospace,
+            fontSize = scaledFontSize,
+            lineHeight = scaledFontSize,
+            lineHeightStyle = LineHeightStyle(
+                alignment = LineHeightStyle.Alignment.Top,
+                trim = LineHeightStyle.Trim.Both,
+            ),
+        )
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -595,14 +618,18 @@ private fun LogViewerContent(
         ) {
             Text(
                 logDisplayText,
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = (baseFontSize.value * textScale).sp,
-                ),
+                style = logTextStyle,
+                softWrap = wordWrap,
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxWidth()
                     .verticalScroll(verticalScroll)
-                    .horizontalScroll(horizontalScroll)
+                    .then(
+                        if (wordWrap) {
+                            Modifier
+                        } else {
+                            Modifier.horizontalScroll(horizontalScroll)
+                        },
+                    )
                     .padding(horizontal = 12.dp, vertical = 4.dp),
             )
         }
@@ -623,6 +650,8 @@ private fun LogViewerMenuBar(
     onHideTimestampsChange: (Boolean) -> Unit,
     onColoredLevelsChange: (Boolean) -> Unit,
     onLevelFilterMaskChange: (Int) -> Unit,
+    wordWrap: Boolean,
+    onWordWrapChange: (Boolean) -> Unit,
 ) {
     val menuLabelStyle = MaterialTheme.typography.labelSmall
     val menuItemPadding = Modifier.padding(horizontal = 2.dp)
@@ -690,6 +719,15 @@ private fun LogViewerMenuBar(
                 modifier = Modifier.size(20.dp),
             )
             Text("Colors", style = menuLabelStyle)
+        }
+        MenuBarDivider()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = wordWrap,
+                onCheckedChange = onWordWrapChange,
+                modifier = Modifier.size(20.dp),
+            )
+            Text("Word wrap", style = menuLabelStyle)
         }
         MenuBarDivider()
         Box {
