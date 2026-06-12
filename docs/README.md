@@ -50,6 +50,7 @@ Legacy single-file overview (redirects here): [architecture.md](architecture.md)
 | [product/ui-daw.md](product/ui-daw.md) | DAW screen, channel strips, transport, settings |
 | [product/session-format.md](product/session-format.md) | On-disk layout, `session.json`, waveforms |
 | [product/roadmap.md](product/roadmap.md) | Phased roadmap and open work |
+| [mixer-connectivity-and-session-ux-plan.md](mixer-connectivity-and-session-ux-plan.md) | Connection Health UI, transport progress, routing model, session v2 |
 
 ### Module reference
 
