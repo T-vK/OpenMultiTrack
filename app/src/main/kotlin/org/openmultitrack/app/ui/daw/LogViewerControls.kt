@@ -57,6 +57,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import java.util.UUID
 import org.openmultitrack.app.util.AppLogBuffer
@@ -67,11 +68,125 @@ import org.openmultitrack.app.util.LogCustomFilterMode
 private val barHeight = 40.dp
 private val chipHeight = 28.dp
 private val chipIconSize = 16.dp
-private val chipWithLabelWidth = 76.dp
-private val chipIconOnlyWidth = 34.dp
-private val searchExpandedMinWidth = 140.dp
+private val chipSpacing = 4.dp
+private val barPaddingH = 6.dp
+private val iconChipWidth = 36.dp
+private val labeledChipWidth = 78.dp
+private val dropdownChipExtra = 6.dp
+private val searchExpandedMaxWidth = 220.dp
+private val searchExpandedMinWidth = 88.dp
 
 private val maxLineOptions = listOf(200, 400, 600, 1000, 1_500)
+
+private enum class LogToolbarId {
+    Copy,
+    Clear,
+    Persist,
+    Time,
+    Color,
+    Wrap,
+    Levels,
+    Tags,
+    Regex,
+    Search,
+    MaxLines,
+}
+
+/** Rightmost labels are stripped first when the bar is narrow. */
+private val labelStripOrder = listOf(
+    LogToolbarId.MaxLines,
+    LogToolbarId.Search,
+    LogToolbarId.Regex,
+    LogToolbarId.Tags,
+    LogToolbarId.Levels,
+    LogToolbarId.Wrap,
+    LogToolbarId.Color,
+    LogToolbarId.Time,
+    LogToolbarId.Persist,
+    LogToolbarId.Clear,
+    LogToolbarId.Copy,
+)
+
+private data class LogToolbarLayout(
+    val showLabel: Map<LogToolbarId, Boolean>,
+    val searchExpandedWidth: Dp,
+    val searchShowPlaceholder: Boolean,
+    val searchShowMatchLabel: Boolean,
+)
+
+private fun toolbarItemWidth(
+    id: LogToolbarId,
+    showLabel: Boolean,
+    maxDisplayLines: Int,
+    searchExpanded: Boolean,
+    searchExpandedWidth: Dp,
+): Dp = when (id) {
+    LogToolbarId.Search -> if (searchExpanded) searchExpandedWidth else chipWidth(showLabel, hasDropdown = false)
+    LogToolbarId.MaxLines -> if (showLabel) {
+        maxOf(labeledChipWidth, (maxDisplayLines.toString().length * 7 + 44).dp)
+    } else {
+        iconChipWidth + dropdownChipExtra
+    }
+    LogToolbarId.Levels, LogToolbarId.Tags, LogToolbarId.Regex -> chipWidth(showLabel, hasDropdown = true)
+    else -> chipWidth(showLabel, hasDropdown = false)
+}
+
+private fun chipWidth(showLabel: Boolean, hasDropdown: Boolean): Dp =
+    if (showLabel) labeledChipWidth + if (hasDropdown) dropdownChipExtra else 0.dp
+    else iconChipWidth + if (hasDropdown) dropdownChipExtra else 0.dp
+
+private fun computeLogToolbarLayout(
+    maxWidth: Dp,
+    searchExpanded: Boolean,
+    maxDisplayLines: Int,
+): LogToolbarLayout {
+    val allIds = LogToolbarId.entries
+    val showLabel = allIds.associateWith { true }.toMutableMap()
+    var searchWidth = searchExpandedMaxWidth
+    var searchPlaceholder = true
+    var searchMatchLabel = true
+
+    fun totalWidth(): Dp {
+        var width = barPaddingH * 2
+        allIds.forEachIndexed { index, id ->
+            if (index > 0) width += chipSpacing
+            width += toolbarItemWidth(
+                id = id,
+                showLabel = showLabel[id] == true,
+                maxDisplayLines = maxDisplayLines,
+                searchExpanded = searchExpanded,
+                searchExpandedWidth = searchWidth,
+            )
+        }
+        return width
+    }
+
+    while (totalWidth() > maxWidth) {
+        when {
+            searchExpanded && searchWidth > searchExpandedMinWidth -> {
+                searchWidth = (searchWidth - 12.dp).coerceAtLeast(searchExpandedMinWidth)
+            }
+            searchExpanded && searchMatchLabel -> {
+                searchMatchLabel = false
+            }
+            searchExpanded && searchPlaceholder -> {
+                searchPlaceholder = false
+            }
+            else -> {
+                val hideId = labelStripOrder.firstOrNull { showLabel[it] == true }
+                if (hideId == null) break
+                showLabel[hideId] = false
+            }
+        }
+    }
+
+    return LogToolbarLayout(
+        showLabel = showLabel,
+        searchExpandedWidth = searchWidth,
+        searchShowPlaceholder = searchPlaceholder,
+        searchShowMatchLabel = searchMatchLabel,
+    )
+}
 
 @Composable
 fun LogViewerMenuBar(
@@ -120,185 +235,169 @@ fun LogViewerMenuBar(
                 .fillMaxWidth()
                 .height(barHeight),
         ) {
-            val toolbarItems = remember(
-                maxWidth,
-                searchExpanded,
-                searchQuery,
-                autoPersist,
-                hideTimestamps,
-                coloredLevels,
-                wordWrap,
-                levelFilterActive,
-                tagFilterActive,
-                regexFilterActive,
-                maxDisplayLines,
-            ) {
-                buildToolbarItems(
+            val toolbarLayout = remember(maxWidth, searchExpanded, maxDisplayLines) {
+                computeLogToolbarLayout(
+                    maxWidth = maxWidth,
                     searchExpanded = searchExpanded,
-                    searchQuery = searchQuery,
-                    autoPersist = autoPersist,
-                    hideTimestamps = hideTimestamps,
-                    coloredLevels = coloredLevels,
-                    wordWrap = wordWrap,
-                    levelFilterActive = levelFilterActive,
-                    tagFilterActive = tagFilterActive,
-                    regexFilterActive = regexFilterActive,
                     maxDisplayLines = maxDisplayLines,
                 )
             }
-            val labelBudget = (maxWidth - 12.dp) / chipWithLabelWidth
-            val labelsToHide = (toolbarItems.size - labelBudget.toInt()).coerceAtLeast(0)
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 6.dp),
+                    .padding(horizontal = barPaddingH),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(chipSpacing),
             ) {
-                toolbarItems.forEachIndexed { index, item ->
-                    val showLabel = index < toolbarItems.size - labelsToHide
-                    when (item) {
-                        ToolbarItem.Copy -> LogToolbarChip(
-                            label = "Copy",
-                            icon = Icons.Default.ContentCopy,
-                            selected = false,
-                            showLabel = showLabel,
-                            onClick = onCopy,
-                        )
-                        ToolbarItem.Clear -> LogToolbarChip(
-                            label = "Clear",
-                            icon = Icons.Default.Clear,
-                            selected = false,
-                            showLabel = showLabel,
-                            onClick = onClear,
-                        )
-                        ToolbarItem.Divider -> MenuBarDivider()
-                        ToolbarItem.Persist -> LogToolbarChip(
-                            label = "Save",
-                            icon = Icons.Default.Save,
-                            selected = autoPersist,
-                            showLabel = showLabel,
-                            onClick = { onAutoPersistChange(!autoPersist) },
-                        )
-                        ToolbarItem.Time -> LogToolbarChip(
-                            label = "Time",
-                            icon = Icons.Default.Schedule,
-                            selected = !hideTimestamps,
-                            showLabel = showLabel,
-                            onClick = { onHideTimestampsChange(!hideTimestamps) },
-                        )
-                        ToolbarItem.Color -> LogToolbarChip(
-                            label = "Color",
-                            icon = Icons.Default.Palette,
-                            selected = coloredLevels,
-                            showLabel = showLabel,
-                            onClick = { onColoredLevelsChange(!coloredLevels) },
-                        )
-                        ToolbarItem.Wrap -> LogToolbarChip(
-                            label = "Wrap",
-                            icon = Icons.Default.WrapText,
-                            selected = wordWrap,
-                            showLabel = showLabel,
-                            onClick = { onWordWrapChange(!wordWrap) },
-                        )
-                        ToolbarItem.Levels -> Box {
-                            LogToolbarChip(
-                                label = "Levels",
-                                icon = Icons.Default.FilterList,
-                                selected = levelFilterActive,
-                                showLabel = showLabel,
-                                showDropdownArrow = true,
-                                onClick = { levelMenuOpen = true },
+                LogToolbarChip(
+                    label = "Copy",
+                    icon = Icons.Default.ContentCopy,
+                    selected = false,
+                    isToggle = false,
+                    showLabel = toolbarLayout.showLabel[LogToolbarId.Copy] == true,
+                    onClick = onCopy,
+                )
+                LogToolbarChip(
+                    label = "Clear",
+                    icon = Icons.Default.Clear,
+                    selected = false,
+                    isToggle = false,
+                    showLabel = toolbarLayout.showLabel[LogToolbarId.Clear] == true,
+                    onClick = onClear,
+                )
+                LogToolbarChip(
+                    label = "Persist",
+                    icon = Icons.Default.Save,
+                    selected = autoPersist,
+                    isToggle = true,
+                    showLabel = toolbarLayout.showLabel[LogToolbarId.Persist] == true,
+                    onClick = { onAutoPersistChange(!autoPersist) },
+                )
+                LogToolbarChip(
+                    label = "Time",
+                    icon = Icons.Default.Schedule,
+                    selected = !hideTimestamps,
+                    isToggle = true,
+                    showLabel = toolbarLayout.showLabel[LogToolbarId.Time] == true,
+                    onClick = { onHideTimestampsChange(!hideTimestamps) },
+                )
+                LogToolbarChip(
+                    label = "Color",
+                    icon = Icons.Default.Palette,
+                    selected = coloredLevels,
+                    isToggle = true,
+                    showLabel = toolbarLayout.showLabel[LogToolbarId.Color] == true,
+                    onClick = { onColoredLevelsChange(!coloredLevels) },
+                )
+                LogToolbarChip(
+                    label = "Wrap",
+                    icon = Icons.Default.WrapText,
+                    selected = wordWrap,
+                    isToggle = true,
+                    showLabel = toolbarLayout.showLabel[LogToolbarId.Wrap] == true,
+                    onClick = { onWordWrapChange(!wordWrap) },
+                )
+                Box {
+                    LogToolbarChip(
+                        label = "Levels",
+                        icon = Icons.Default.FilterList,
+                        selected = levelFilterActive,
+                        isToggle = true,
+                        showLabel = toolbarLayout.showLabel[LogToolbarId.Levels] == true,
+                        showDropdownArrow = true,
+                        onClick = { levelMenuOpen = true },
+                    )
+                    DropdownMenu(
+                        expanded = levelMenuOpen,
+                        onDismissRequest = { levelMenuOpen = false },
+                    ) {
+                        LogLevelMenuItem('D', "Debug", DevLogLevelMask.DEBUG, levelFilterMask, onLevelFilterMaskChange)
+                        LogLevelMenuItem('I', "Info", DevLogLevelMask.INFO, levelFilterMask, onLevelFilterMaskChange)
+                        LogLevelMenuItem('W', "Warn", DevLogLevelMask.WARN, levelFilterMask, onLevelFilterMaskChange)
+                        LogLevelMenuItem('E', "Error", DevLogLevelMask.ERROR, levelFilterMask, onLevelFilterMaskChange)
+                    }
+                }
+                LogToolbarChip(
+                    label = "Tags",
+                    icon = Icons.Default.Label,
+                    selected = tagFilterActive,
+                    isToggle = true,
+                    showLabel = toolbarLayout.showLabel[LogToolbarId.Tags] == true,
+                    showDropdownArrow = true,
+                    onClick = { tagDialogOpen = true },
+                )
+                LogToolbarChip(
+                    label = "Regex",
+                    icon = Icons.Default.FilterList,
+                    selected = regexFilterActive,
+                    isToggle = true,
+                    showLabel = toolbarLayout.showLabel[LogToolbarId.Regex] == true,
+                    showDropdownArrow = true,
+                    onClick = { regexDialogOpen = true },
+                )
+                if (searchExpanded) {
+                    LogSearchBar(
+                        query = searchQuery,
+                        matchIndex = searchMatchIndex,
+                        matchCount = searchMatchCount,
+                        showPlaceholder = toolbarLayout.searchShowPlaceholder,
+                        showMatchLabel = toolbarLayout.searchShowMatchLabel,
+                        width = toolbarLayout.searchExpandedWidth,
+                        onQueryChange = {
+                            onSearchQueryChange(it)
+                            if (it.isBlank()) searchExpanded = false
+                        },
+                        onCollapse = {
+                            searchExpanded = false
+                            onSearchQueryChange("")
+                        },
+                        onNext = onSearchNext,
+                        onPrevious = onSearchPrevious,
+                    )
+                } else {
+                    LogToolbarChip(
+                        label = "Search",
+                        icon = Icons.Default.Search,
+                        selected = searchQuery.isNotBlank(),
+                        isToggle = false,
+                        showLabel = toolbarLayout.showLabel[LogToolbarId.Search] == true,
+                        onClick = { searchExpanded = true },
+                    )
+                }
+                Box {
+                    LogToolbarChip(
+                        label = maxDisplayLines.toString(),
+                        icon = Icons.Default.TableRows,
+                        selected = maxDisplayLines != AppLogBuffer.MAX_DISPLAY_LINES,
+                        isToggle = true,
+                        showLabel = toolbarLayout.showLabel[LogToolbarId.MaxLines] == true,
+                        showDropdownArrow = true,
+                        onClick = { maxLinesMenuOpen = true },
+                    )
+                    DropdownMenu(
+                        expanded = maxLinesMenuOpen,
+                        onDismissRequest = { maxLinesMenuOpen = false },
+                    ) {
+                        maxLineOptions.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text("$option lines") },
+                                leadingIcon = if (option == maxDisplayLines) {
+                                    {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                } else {
+                                    null
+                                },
+                                onClick = {
+                                    onMaxDisplayLinesChange(option)
+                                    maxLinesMenuOpen = false
+                                },
                             )
-                            DropdownMenu(
-                                expanded = levelMenuOpen,
-                                onDismissRequest = { levelMenuOpen = false },
-                            ) {
-                                LogLevelMenuItem('D', "Debug", DevLogLevelMask.DEBUG, levelFilterMask, onLevelFilterMaskChange)
-                                LogLevelMenuItem('I', "Info", DevLogLevelMask.INFO, levelFilterMask, onLevelFilterMaskChange)
-                                LogLevelMenuItem('W', "Warn", DevLogLevelMask.WARN, levelFilterMask, onLevelFilterMaskChange)
-                                LogLevelMenuItem('E', "Error", DevLogLevelMask.ERROR, levelFilterMask, onLevelFilterMaskChange)
-                            }
-                        }
-                        ToolbarItem.Tags -> LogToolbarChip(
-                            label = "Tags",
-                            icon = Icons.Default.Label,
-                            selected = tagFilterActive,
-                            showLabel = showLabel,
-                            showDropdownArrow = true,
-                            onClick = { tagDialogOpen = true },
-                        )
-                        ToolbarItem.Regex -> LogToolbarChip(
-                            label = "Regex",
-                            icon = Icons.Default.FilterList,
-                            selected = regexFilterActive,
-                            showLabel = showLabel,
-                            showDropdownArrow = true,
-                            onClick = { regexDialogOpen = true },
-                        )
-                        ToolbarItem.Search -> {
-                            if (searchExpanded) {
-                                LogSearchBar(
-                                    query = searchQuery,
-                                    matchIndex = searchMatchIndex,
-                                    matchCount = searchMatchCount,
-                                    showLabel = showLabel,
-                                    onQueryChange = {
-                                        onSearchQueryChange(it)
-                                        if (it.isBlank()) searchExpanded = false
-                                    },
-                                    onCollapse = {
-                                        searchExpanded = false
-                                        onSearchQueryChange("")
-                                    },
-                                    onNext = onSearchNext,
-                                    onPrevious = onSearchPrevious,
-                                )
-                            } else {
-                                LogToolbarChip(
-                                    label = "Search",
-                                    icon = Icons.Default.Search,
-                                    selected = searchQuery.isNotBlank(),
-                                    showLabel = showLabel,
-                                    onClick = { searchExpanded = true },
-                                )
-                            }
-                        }
-                        ToolbarItem.MaxLines -> Box {
-                            LogToolbarChip(
-                                label = maxDisplayLines.toString(),
-                                icon = Icons.Default.TableRows,
-                                selected = maxDisplayLines != AppLogBuffer.MAX_DISPLAY_LINES,
-                                showLabel = showLabel,
-                                showDropdownArrow = true,
-                                onClick = { maxLinesMenuOpen = true },
-                            )
-                            DropdownMenu(
-                                expanded = maxLinesMenuOpen,
-                                onDismissRequest = { maxLinesMenuOpen = false },
-                            ) {
-                                maxLineOptions.forEach { option ->
-                                    DropdownMenuItem(
-                                        text = { Text("$option lines") },
-                                        leadingIcon = if (option == maxDisplayLines) {
-                                            {
-                                                Icon(
-                                                    Icons.Default.Check,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(18.dp),
-                                                )
-                                            }
-                                        } else {
-                                            null
-                                        },
-                                        onClick = {
-                                            onMaxDisplayLinesChange(option)
-                                            maxLinesMenuOpen = false
-                                        },
-                                    )
-                                }
-                            }
                         }
                     }
                 }
@@ -323,57 +422,37 @@ fun LogViewerMenuBar(
     }
 }
 
-private sealed interface ToolbarItem {
-    data object Copy : ToolbarItem
-    data object Clear : ToolbarItem
-    data object Divider : ToolbarItem
-    data object Persist : ToolbarItem
-    data object Time : ToolbarItem
-    data object Color : ToolbarItem
-    data object Wrap : ToolbarItem
-    data object Levels : ToolbarItem
-    data object Tags : ToolbarItem
-    data object Regex : ToolbarItem
-    data object Search : ToolbarItem
-    data object MaxLines : ToolbarItem
-}
-
-private fun buildToolbarItems(
-    searchExpanded: Boolean,
-    searchQuery: String,
-    autoPersist: Boolean,
-    hideTimestamps: Boolean,
-    coloredLevels: Boolean,
-    wordWrap: Boolean,
-    levelFilterActive: Boolean,
-    tagFilterActive: Boolean,
-    regexFilterActive: Boolean,
-    maxDisplayLines: Int,
-): List<ToolbarItem> = listOf(
-    ToolbarItem.Copy,
-    ToolbarItem.Clear,
-    ToolbarItem.Divider,
-    ToolbarItem.Persist,
-    ToolbarItem.Time,
-    ToolbarItem.Color,
-    ToolbarItem.Wrap,
-    ToolbarItem.Divider,
-    ToolbarItem.Levels,
-    ToolbarItem.Tags,
-    ToolbarItem.Regex,
-    ToolbarItem.Search,
-    ToolbarItem.MaxLines,
-)
-
 @Composable
 private fun LogToolbarChip(
     label: String,
     icon: ImageVector,
     selected: Boolean,
+    isToggle: Boolean,
     showLabel: Boolean,
     showDropdownArrow: Boolean = false,
     onClick: () -> Unit,
 ) {
+    val scheme = MaterialTheme.colorScheme
+    val colors = if (isToggle) {
+        FilterChipDefaults.filterChipColors(
+            containerColor = scheme.surfaceContainerHighest,
+            labelColor = scheme.onSurfaceVariant,
+            iconColor = scheme.onSurfaceVariant,
+            selectedContainerColor = scheme.primary,
+            selectedLabelColor = scheme.onPrimary,
+            selectedLeadingIconColor = scheme.onPrimary,
+            selectedTrailingIconColor = scheme.onPrimary,
+        )
+    } else {
+        FilterChipDefaults.filterChipColors(
+            containerColor = scheme.surfaceContainerHighest,
+            labelColor = scheme.onSurface,
+            iconColor = scheme.onSurface,
+            selectedContainerColor = scheme.secondaryContainer,
+            selectedLabelColor = scheme.onSecondaryContainer,
+            selectedLeadingIconColor = scheme.onSecondaryContainer,
+        )
+    }
     FilterChip(
         selected = selected,
         onClick = onClick,
@@ -400,14 +479,21 @@ private fun LogToolbarChip(
             .height(chipHeight)
             .then(
                 if (showLabel) {
-                    Modifier.widthIn(min = chipWithLabelWidth - 8.dp)
+                    Modifier.widthIn(min = labeledChipWidth - 6.dp)
                 } else {
-                    Modifier.width(chipIconOnlyWidth)
+                    Modifier.width(
+                        iconChipWidth + if (showDropdownArrow) dropdownChipExtra else 0.dp,
+                    )
                 },
             ),
+        colors = colors,
         border = FilterChipDefaults.filterChipBorder(
             enabled = true,
             selected = selected,
+            borderColor = scheme.outlineVariant,
+            selectedBorderColor = if (isToggle) scheme.primary else scheme.secondary,
+            borderWidth = if (selected) 1.5.dp else 1.dp,
+            selectedBorderWidth = 2.dp,
         ),
     )
 }
@@ -417,7 +503,9 @@ private fun LogSearchBar(
     query: String,
     matchIndex: Int,
     matchCount: Int,
-    showLabel: Boolean,
+    showPlaceholder: Boolean,
+    showMatchLabel: Boolean,
+    width: Dp,
     onQueryChange: (String) -> Unit,
     onCollapse: () -> Unit,
     onNext: () -> Unit,
@@ -435,7 +523,7 @@ private fun LogSearchBar(
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         modifier = Modifier
             .height(chipHeight)
-            .widthIn(min = searchExpandedMinWidth, max = 220.dp),
+            .width(width),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -459,7 +547,7 @@ private fun LogSearchBar(
                     .padding(horizontal = 4.dp),
                 decorationBox = { inner ->
                     Box(contentAlignment = Alignment.CenterStart) {
-                        if (query.isEmpty() && showLabel) {
+                        if (query.isEmpty() && showPlaceholder) {
                             Text(
                                 "Search",
                                 style = MaterialTheme.typography.labelSmall,
@@ -470,7 +558,7 @@ private fun LogSearchBar(
                     }
                 },
             )
-            if (matchLabel.isNotBlank()) {
+            if (showMatchLabel && matchLabel.isNotBlank()) {
                 Text(
                     matchLabel,
                     style = MaterialTheme.typography.labelSmall,
@@ -704,6 +792,7 @@ private fun LogCustomFilterRow(
             label = "Filter",
             icon = Icons.Default.FilterList,
             selected = filter.enabled,
+            isToggle = true,
             showLabel = false,
             onClick = { onChange(filter.copy(enabled = !filter.enabled)) },
         )
