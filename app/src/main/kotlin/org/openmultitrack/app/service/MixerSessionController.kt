@@ -216,6 +216,7 @@ class MixerSessionController(
             )
         }
         syncVuMeterCapture()
+        ensureLiveCaptureUiUpdates()
         refreshStorageEstimate()
         if (_state.value.appMode.isPlaybackMode) {
             scope.launch {
@@ -1490,15 +1491,15 @@ class MixerSessionController(
             }
             if (!captureEngine.isCaptureActive) {
                 _state.update { it.copy(isVuMetering = false) }
-                return
+            } else {
+                _state.update { it.copy(isVuMetering = true, warningMessage = null) }
             }
-            _state.update { it.copy(isVuMetering = true, warningMessage = null) }
-            startCaptureUiUpdates()
         } else {
             _state.update { it.copy(isVuMetering = false) }
             stopWaveformUpdatesIfIdle()
             releaseCaptureIfIdleLocked()
         }
+        ensureLiveCaptureUiUpdates()
     }
 
     internal fun debugRawMeterPeaksForTest(): FloatArray = captureEngine.debugRawMeterPeaks()
@@ -2014,54 +2015,81 @@ class MixerSessionController(
     }
 
     private fun startCaptureUiUpdates() {
+        ensureLiveCaptureUiUpdates()
+    }
+
+    private fun liveCaptureUiUpdatesDesired(): Boolean =
+        _state.value.isMonitoring || _state.value.isRecording || vuCaptureDesired()
+
+    private fun ensureLiveCaptureUiUpdates() {
+        if (!liveCaptureUiUpdatesDesired()) {
+            stopWaveformUpdatesIfIdle()
+            return
+        }
+        if (waveformJob?.isActive == true) return
         waveformJob?.cancel()
         refreshStorageEstimate()
         waveformJob = scope.launch {
             var storageTick = 0
+            var healTick = 0
             while (isActive) {
-                if (captureEngine.isCaptureActive) {
-                    if (storageTick++ % 25 == 0) {
-                        refreshStorageEstimate()
-                    }
-                    val levels = captureEngine.captureMeterLevels()
-                    val nowNs = System.nanoTime()
-                    if (nowNs - lastVuLogNs >= 2_000_000_000L) {
-                        lastVuLogNs = nowNs
-                        val ch1 = levels[0] ?: 0f
-                        val ch2 = levels[1] ?: 0f
-                        if (levels.isNotEmpty()) {
-                            OmtLog.i(
-                                "VuMeter",
-                                "ch1=${"%.3f".format(ch1)} ch2=${"%.3f".format(ch2)} " +
-                                    "vuOnly=${_state.value.isVuMetering} " +
-                                    "monitoring=${_state.value.isMonitoring}",
-                            )
-                        }
-                    }
-                    _state.update { s ->
-                        when {
-                            s.isRecording -> {
-                                val elapsed = captureEngine.recordElapsedSec()
-                                val updated = withRecordViewFollowPlayhead(s, elapsed).copy(
-                                    waveformPeaks = captureEngine.waveformSnapshots(normalize = false),
-                                    recordElapsedSec = elapsed,
-                                    captureMeterLevels = levels,
-                                )
-                                val mediaSec = elapsed.toInt()
-                                if (mediaSec != lastMediaProgressSec) {
-                                    lastMediaProgressSec = mediaSec
-                                    AudioSessionBridge.tickMediaProgress(updated)
+                if (liveCaptureUiUpdatesDesired()) {
+                    if (!captureEngine.isCaptureActive) {
+                        if (vuCaptureDesired() && healTick++ % 25 == 0) {
+                            captureMutex.withLock {
+                                if (vuCaptureDesired() && !captureEngine.isCaptureActive) {
+                                    syncVuMeterCaptureWhileLocked()
                                 }
-                                updated
                             }
-                            s.isMonitoring -> s.copy(
-                                captureMeterLevels = levels,
-                                waveformPeaks = emptyMap(),
-                                recordElapsedSec = 0f,
-                            )
-                            else -> s.copy(captureMeterLevels = levels)
+                        }
+                    } else {
+                        healTick = 0
+                        if (storageTick++ % 25 == 0) {
+                            refreshStorageEstimate()
+                        }
+                        val levels = captureEngine.captureMeterLevels()
+                        val nowNs = System.nanoTime()
+                        if (nowNs - lastVuLogNs >= 2_000_000_000L) {
+                            lastVuLogNs = nowNs
+                            val ch1 = levels[0] ?: 0f
+                            val ch2 = levels[1] ?: 0f
+                            if (levels.isNotEmpty()) {
+                                OmtLog.i(
+                                    "VuMeter",
+                                    "ch1=${"%.3f".format(ch1)} ch2=${"%.3f".format(ch2)} " +
+                                        "vuOnly=${_state.value.isVuMetering} " +
+                                        "monitoring=${_state.value.isMonitoring}",
+                                )
+                            }
+                        }
+                        _state.update { s ->
+                            when {
+                                s.isRecording -> {
+                                    val elapsed = captureEngine.recordElapsedSec()
+                                    val updated = withRecordViewFollowPlayhead(s, elapsed).copy(
+                                        waveformPeaks = captureEngine.waveformSnapshots(normalize = false),
+                                        recordElapsedSec = elapsed,
+                                        captureMeterLevels = levels,
+                                    )
+                                    val mediaSec = elapsed.toInt()
+                                    if (mediaSec != lastMediaProgressSec) {
+                                        lastMediaProgressSec = mediaSec
+                                        AudioSessionBridge.tickMediaProgress(updated)
+                                    }
+                                    updated
+                                }
+                                s.isMonitoring -> s.copy(
+                                    captureMeterLevels = levels,
+                                    waveformPeaks = emptyMap(),
+                                    recordElapsedSec = 0f,
+                                )
+                                else -> s.copy(captureMeterLevels = levels)
+                            }
                         }
                     }
+                } else {
+                    stopWaveformUpdatesIfIdle()
+                    break
                 }
                 delay(40)
             }

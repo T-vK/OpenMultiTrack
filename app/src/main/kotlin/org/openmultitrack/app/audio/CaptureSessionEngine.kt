@@ -101,6 +101,7 @@ class CaptureSessionEngine(
     private var waveformWindowSec = DEFAULT_WAVEFORM_WINDOW_SEC
     private var waveformPeaksPerSecond = DEFAULT_WAVEFORM_PEAKS_PER_SEC
     private var lastWaveformEmitNs = 0L
+    private var lastMeterDecayNs = 0L
 
     val isCaptureActive: Boolean
         get() = fanoutJob?.isActive == true
@@ -413,7 +414,6 @@ class CaptureSessionEngine(
     fun captureMeterLevels(): Map<Int, Float> = synchronized(meterLock) {
         val out = LinkedHashMap<Int, Float>(channelCount)
         for (ch in 0 until channelCount) {
-            meterHold[ch] *= METER_DECAY_PER_UI_TICK
             if (meterHold[ch] > METER_OUTPUT_THRESHOLD) {
                 out[ch] = meterHold[ch]
             }
@@ -438,6 +438,7 @@ class CaptureSessionEngine(
         lastRawPeaks.fill(0f)
         lastFrameReceivedNs = 0L
         lastWaveformEmitNs = 0L
+        lastMeterDecayNs = 0L
     }
 
     @VisibleForTesting
@@ -551,6 +552,7 @@ class CaptureSessionEngine(
             try {
                 while (isActive) {
                     try {
+                        decayMeterHoldForElapsed()
                         val rawFrames = when {
                             synthetic != null -> synthetic.fill(scratch, framesPerChunk)
                             usbDegraded -> 0
@@ -774,6 +776,21 @@ class CaptureSessionEngine(
         buildSessionMetadata(config, sampleRate, framesWritten).writeTo(dir)
     }
 
+    private fun decayMeterHoldForElapsed() {
+        val now = System.nanoTime()
+        val prev = lastMeterDecayNs
+        lastMeterDecayNs = now
+        if (prev <= 0L) return
+        val elapsedMs = (now - prev) / 1_000_000f
+        if (elapsedMs < 8f) return
+        val factor = kotlin.math.exp(-elapsedMs / METER_DECAY_TAU_MS)
+        synchronized(meterLock) {
+            for (ch in 0 until channelCount) {
+                meterHold[ch] *= factor
+            }
+        }
+    }
+
     private fun accumulateWaveformPeaks(scratch: FloatArray, frames: Int, channels: Int) {
         synchronized(meterLock) {
             for (ch in 0 until channels) {
@@ -818,7 +835,7 @@ class CaptureSessionEngine(
         const val DEFAULT_WAVEFORM_WINDOW_SEC = 15f
         const val DEFAULT_WAVEFORM_PEAKS_PER_SEC = 30
         private const val TARGET_WAVEFORM_CAPACITY = 900
-        private const val METER_DECAY_PER_UI_TICK = 0.88f
+        private const val METER_DECAY_TAU_MS = 250f
         private const val METER_OUTPUT_THRESHOLD = 1e-5f
 
         /** Keep roughly constant peak count across window sizes so short windows stay sharp. */
