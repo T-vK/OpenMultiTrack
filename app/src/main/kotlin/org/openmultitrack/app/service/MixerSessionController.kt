@@ -62,6 +62,7 @@ import kotlin.math.min
 import org.openmultitrack.usb.AudioEngineRouter
 import org.openmultitrack.usb.Flow8UsbPlaybackProfile
 import org.openmultitrack.usb.FullUsbProbeResult
+import org.openmultitrack.usb.MixerUsbChannelCounts
 import org.openmultitrack.usb.UsbAudioEnumerator
 import org.openmultitrack.mixer.behringer.ScribbleStripLabel
 import org.openmultitrack.mixer.behringer.UsbChannelScribble
@@ -2189,13 +2190,6 @@ class MixerSessionController(
         return Result.success(route)
     }
 
-    private fun maxPlaybackChannelsFromProbe(probe: FullUsbProbeResult): Int {
-        val uac2Playback = probe.uac2Caps?.maxPlaybackChannels?.takeIf { it > 0 }
-        if (Flow8UsbPlaybackProfile.isFlow8(probe.usb)) {
-            return Flow8UsbPlaybackProfile.playbackChannelsFromProbe(uac2Playback ?: 0)
-        }
-        return uac2Playback
-            ?: probe.output?.takeIf { it.isSuccess }?.channelCount
-            ?: 2
-    }
+    private fun maxPlaybackChannelsFromProbe(probe: FullUsbProbeResult): Int =
+        MixerUsbChannelCounts.playbackChannels(probe)
 }

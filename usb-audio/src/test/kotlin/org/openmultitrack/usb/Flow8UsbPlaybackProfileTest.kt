@@ -24,9 +24,9 @@ class Flow8UsbPlaybackProfileTest {
     }
 
     @Test
-    fun playbackChannelsFromProbe_usesFourUsbReturns() {
+    fun playbackChannelsFromProbe_alwaysFourUsbReturns() {
         assertThat(Flow8UsbPlaybackProfile.playbackChannelsFromProbe(4)).isEqualTo(4)
-        assertThat(Flow8UsbPlaybackProfile.playbackChannelsFromProbe(10)).isEqualTo(4)
+        assertThat(Flow8UsbPlaybackProfile.playbackChannelsFromProbe(1)).isEqualTo(4)
         assertThat(Flow8UsbPlaybackProfile.playbackChannelsFromProbe(0)).isEqualTo(4)
     }
 }

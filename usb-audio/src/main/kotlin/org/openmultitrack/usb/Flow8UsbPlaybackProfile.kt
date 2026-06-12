@@ -23,10 +23,7 @@ object Flow8UsbPlaybackProfile {
     fun isFlow8(vendorId: Int, productId: Int): Boolean =
         vendorId == BehringerUsbIdentifiers.VENDOR_ID_BEHINGER && productId == PRODUCT_ID
 
-    fun playbackChannelsFromProbe(maxPlaybackChannels: Int): Int =
-        when {
-            maxPlaybackChannels >= USB_PLAYBACK_CHANNELS -> USB_PLAYBACK_CHANNELS
-            maxPlaybackChannels > 0 -> maxPlaybackChannels
-            else -> USB_PLAYBACK_CHANNELS
-        }
+    /** FLOW 8 always exposes four USB playback returns regardless of Oboe stereo fallback. */
+    fun playbackChannelsFromProbe(@Suppress("UNUSED_PARAMETER") maxPlaybackChannels: Int): Int =
+        USB_PLAYBACK_CHANNELS
 }

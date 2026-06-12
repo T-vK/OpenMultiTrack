@@ -67,6 +67,7 @@ internal val WaveformTimeRulerHeight = 22.dp
 @Composable
 fun SoundcheckPanel(
     session: MixerSessionUiState,
+    playbackChannelCount: Int = session.playbackChannelCount,
     showTrackmarks: Boolean = false,
     routing: MixerRoutingConfig = MixerRoutingConfig(),
     normalized: Boolean,
@@ -129,7 +130,7 @@ fun SoundcheckPanel(
                     trackmarks = if (showTrackmarks) session.trackmarks else emptyList(),
                     routing = routing,
                     appMode = session.appMode,
-                    playbackChannelCount = session.playbackChannelCount,
+                    playbackChannelCount = playbackChannelCount,
                     durationSec = session.playbackDurationSec,
                     viewStartSec = session.soundcheckViewStartSec,
                     viewWindowSec = session.soundcheckViewWindowSec,

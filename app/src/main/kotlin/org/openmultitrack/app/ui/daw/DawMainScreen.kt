@@ -103,6 +103,7 @@ import org.openmultitrack.domain.remote.RemoteRole
 import org.openmultitrack.domain.remote.RemoteProtocol
 import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.domain.session.TransportState
+import org.openmultitrack.usb.MixerUsbChannelCounts
 import org.openmultitrack.domain.session.isPlaybackMode
 import org.openmultitrack.remote.RemoteDiscoveredHost
 import org.openmultitrack.usb.LabeledAudioDevice
@@ -358,7 +359,11 @@ fun DawMainScreen(
                 channelCount = sessionForSettings?.channelStrips?.size
                     ?: profile.channelStrips.size,
                 usbChannelCount = sessionForSettings?.captureChannelCount ?: 0,
-                usbPlaybackChannelCount = sessionForSettings?.playbackChannelCount ?: 0,
+                usbPlaybackChannelCount = MixerUsbChannelCounts.playbackChannelsForUi(
+                    profile = profile,
+                    sessionPlaybackCount = sessionForSettings?.playbackChannelCount ?: 0,
+                    probe = sessionForSettings?.probe,
+                ),
                 strips = sessionForSettings?.channelStrips ?: profile.channelStrips,
                 config = mixerRoutingById[settingsMixerId] ?: MixerRoutingConfig(),
                 appMode = sessionForSettings?.appMode,
@@ -578,6 +583,11 @@ fun DawMainScreen(
                         session?.appMode?.isPlaybackMode == true -> session?.let { s ->
                             SoundcheckPanel(
                                 session = s,
+                                playbackChannelCount = MixerUsbChannelCounts.playbackChannelsForUi(
+                                    profile = activeProfile ?: state.mixers.first { it.id == activeId },
+                                    sessionPlaybackCount = s.playbackChannelCount,
+                                    probe = s.probe,
+                                ),
                                 showTrackmarks = state.chapterSupportEnabled,
                                 routing = activeRouting,
                                 normalized = playbackWaveformNormalized,
@@ -777,12 +787,17 @@ fun DawMainScreen(
 
     playbackStripOverlay?.let { index ->
         val s = session ?: return@let
+        val profile = activeProfile ?: return@let
         val strip = s.channelStrips.firstOrNull { it.index == index } ?: return@let
         ChannelStripControlDialog(
             strip = strip,
             routing = activeRouting,
             usbChannelCount = s.captureChannelCount.coerceAtLeast(s.channelStrips.size),
-            usbPlaybackChannelCount = s.playbackChannelCount.coerceAtLeast(1),
+            usbPlaybackChannelCount = MixerUsbChannelCounts.playbackChannelsForUi(
+                profile = profile,
+                sessionPlaybackCount = s.playbackChannelCount,
+                probe = s.probe,
+            ),
             controlMode = StripControlMode.PLAYBACK,
             hideArm = true,
             hideMonitor = true,
