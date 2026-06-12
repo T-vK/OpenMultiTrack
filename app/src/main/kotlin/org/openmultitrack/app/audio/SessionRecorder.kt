@@ -153,8 +153,8 @@ class SessionRecorder {
 
         /** Keep writer buffer under ~512 KiB of floats regardless of channel count. */
         fun chunkFramesForChannels(channelCount: Int): Int {
-            val targetSamples = 131_072
-            return max(256, min(4096, targetSamples / max(1, channelCount)))
+            val targetSamples = 262_144
+            return max(512, min(16_384, targetSamples / max(1, channelCount)))
         }
     }
 }

@@ -21,6 +21,7 @@ class WavWriter private constructor(
     private val raf = RandomAccessFile(file, "rw")
     private var dataBytesWritten: Long = 0
     private var closed = false
+    private var pcmBytes = ByteArray(0)
 
     constructor(
         file: File,
@@ -52,17 +53,20 @@ class WavWriter private constructor(
         check(!closed) { "Writer closed" }
         val expected = frames * channelCount
         require(samples.size >= expected) { "samples too short: ${samples.size} < $expected" }
-        val bytes = ByteArray(frames * channelCount * 3)
+        val byteLen = expected * 3
+        if (pcmBytes.size < byteLen) {
+            pcmBytes = ByteArray(byteLen)
+        }
         var bi = 0
         for (i in 0 until expected) {
             val clamped = max(-1f, min(1f, samples[i]))
             val int24 = (clamped * 8388607f).toInt()
-            bytes[bi++] = (int24 and 0xFF).toByte()
-            bytes[bi++] = ((int24 shr 8) and 0xFF).toByte()
-            bytes[bi++] = ((int24 shr 16) and 0xFF).toByte()
+            pcmBytes[bi++] = (int24 and 0xFF).toByte()
+            pcmBytes[bi++] = ((int24 shr 8) and 0xFF).toByte()
+            pcmBytes[bi++] = ((int24 shr 16) and 0xFF).toByte()
         }
-        raf.write(bytes)
-        dataBytesWritten += bytes.size
+        raf.write(pcmBytes, 0, byteLen)
+        dataBytesWritten += byteLen
     }
 
     override fun close() {

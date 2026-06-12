@@ -5,13 +5,16 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import org.openmultitrack.audio.NativeAudioEngine
 import org.openmultitrack.audio.NativeAudioMonitor
 import org.openmultitrack.audio.OmtLog
@@ -65,6 +68,8 @@ class CaptureSessionEngine(
         ) : RecordingWriteRequest
 
         data class Silence(val frameCount: Int) : RecordingWriteRequest
+
+        data object Shutdown : RecordingWriteRequest
     }
 
     private data class ActiveRecordingWriters(
@@ -75,8 +80,9 @@ class CaptureSessionEngine(
     private val lifecycleMutex = Mutex()
     private var captureScope: CoroutineScope? = null
     private var fanoutJob: Job? = null
-    private var recordingWriteJob: Job? = null
-    private var recordingWriteChannel: Channel<RecordingWriteRequest>? = null
+    private var diskWriteExecutor: ExecutorService? = null
+    private var diskWriteFuture: Future<*>? = null
+    private val diskWriteQueue = LinkedBlockingQueue<RecordingWriteRequest>(DISK_WRITE_QUEUE_CAPACITY)
     private var activeRecordingWriters: ActiveRecordingWriters? = null
     private var activeRoute: CaptureRoute? = null
     private var activeBackend: AudioBackend? = null
@@ -133,6 +139,7 @@ class CaptureSessionEngine(
     private var waveformPeaksPerSecond = DEFAULT_WAVEFORM_PEAKS_PER_SEC
     private var lastWaveformEmitNs = 0L
     private var lastMeterDecayNs = 0L
+    private var syntheticRealtimeAnchorNs = 0L
 
     val isCaptureActive: Boolean
         get() = fanoutJob?.isActive == true
@@ -166,6 +173,29 @@ class CaptureSessionEngine(
     fun recordElapsedSec(): Float {
         if (!isRecording) return 0f
         return if (sampleRate > 0) framesCaptured.toFloat() / sampleRate else 0f
+    }
+
+    @VisibleForTesting
+    internal fun debugTimingSnapshot(): RecordingTimingSnapshot = RecordingTimingSnapshot(
+        framesCaptured = framesCaptured,
+        framesWritten = framesWritten,
+        diskQueueDepth = diskWriteQueue.size,
+        droppedFrames = droppedFrames,
+        sampleRate = sampleRate,
+    )
+
+    data class RecordingTimingSnapshot(
+        val framesCaptured: Long,
+        val framesWritten: Long,
+        val diskQueueDepth: Int,
+        val droppedFrames: Long,
+        val sampleRate: Int,
+    ) {
+        val capturedSec: Float
+            get() = if (sampleRate > 0) framesCaptured.toFloat() / sampleRate else 0f
+
+        val writtenSec: Float
+            get() = if (sampleRate > 0) framesWritten.toFloat() / sampleRate else 0f
     }
 
     fun updateVuMetering(enabled: Boolean) {
@@ -276,6 +306,7 @@ class CaptureSessionEngine(
         sampleRate = sampleRateHz.coerceAtLeast(1)
         syntheticGenerator = synth
         usbDegraded = false
+        syntheticRealtimeAnchorNs = 0L
         lastFrameReceivedNs = 0L
         clearWaveforms()
         allocateWaveformRings()
@@ -300,6 +331,7 @@ class CaptureSessionEngine(
         framesWritten = 0
         framesCaptured = 0
         resetLiveWaveformBuffers()
+        syntheticRealtimeAnchorNs = 0L
         recordingStartedAtEpochMs = System.currentTimeMillis()
         lastMetadataPersistFrames = 0
 
@@ -640,6 +672,9 @@ class CaptureSessionEngine(
                         consecutiveEmptyReads = 0
                         lastFrameReceivedNs = System.nanoTime()
                         framesCaptured += frames
+                        if (synthetic != null) {
+                            throttleSyntheticToRealtime()
+                        }
                         if (backend != null) {
                             droppedFrames = AudioEngineRouter.recordingDroppedFrames(backend)
                         }
@@ -697,44 +732,50 @@ class CaptureSessionEngine(
     }
 
     private fun startRecordingWriteLoop() {
-        val scope = captureScope ?: return
-        if (recordingWriteJob?.isActive == true) return
+        if (diskWriteFuture != null) return
         val writers = ActiveRecordingWriters(
             resilient = sessionWriter,
             perChannel = perChannelWriter,
         )
         if (writers.resilient == null && writers.perChannel == null) return
         activeRecordingWriters = writers
-        val channel = Channel<RecordingWriteRequest>(Channel.UNLIMITED)
-        recordingWriteChannel = channel
-        recordingWriteJob = scope.launch(diskWriteDispatcher) {
+        val executor = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "capture-disk-write").apply {
+                priority = Thread.NORM_PRIORITY + 1
+            }
+        }
+        diskWriteExecutor = executor
+        diskWriteFuture = executor.submit {
             try {
-                for (request in channel) {
-                    val active = activeRecordingWriters ?: break
+                while (true) {
+                    val request = diskWriteQueue.take()
+                    if (request === RecordingWriteRequest.Shutdown) break
+                    val active = activeRecordingWriters ?: continue
                     when (request) {
                         is RecordingWriteRequest.Frames -> {
                             val samples = request.samples
-                            val frames = request.frameCount
+                            val frameCount = request.frameCount
                             val channels = request.channelCount
                             if (active.resilient != null) {
-                                active.resilient.writeInterleavedMultiChannel(samples, frames, channels)
+                                active.resilient.writeInterleavedMultiChannel(samples, frameCount, channels)
                             } else {
-                                active.perChannel?.writeInterleavedMultiChannel(samples, frames, channels)
+                                active.perChannel?.writeInterleavedMultiChannel(samples, frameCount, channels)
                             }
-                            framesWritten += frames
+                            framesWritten += frameCount
                             if (request.returnToPool) {
                                 releaseWriteBuffer(samples)
                             }
                         }
                         is RecordingWriteRequest.Silence -> {
-                            val frames = request.frameCount
+                            val frameCount = request.frameCount
                             if (active.resilient != null) {
-                                active.resilient.writeSilence(frames)
+                                active.resilient.writeSilence(frameCount)
                             } else {
-                                active.perChannel?.writeSilence(frames)
+                                active.perChannel?.writeSilence(frameCount)
                             }
-                            framesWritten += frames
+                            framesWritten += frameCount
                         }
+                        RecordingWriteRequest.Shutdown -> break
                     }
                     maybePersistTimelineAsync()
                 }
@@ -744,17 +785,25 @@ class CaptureSessionEngine(
         }
     }
 
-    private suspend fun stopRecordingWriteLoop() {
+    private fun stopRecordingWriteLoop() {
         acceptRecordingWrites = false
-        recordingWriteChannel?.close()
-        recordingWriteJob?.join()
-        recordingWriteChannel = null
-        recordingWriteJob = null
+        runCatching {
+            diskWriteQueue.put(RecordingWriteRequest.Shutdown)
+        }
+        runCatching {
+            diskWriteFuture?.get(120, TimeUnit.SECONDS)
+        }.onFailure { e ->
+            OmtLog.w("CaptureSession", "disk writer drain timed out: ${e.message}")
+        }
+        diskWriteFuture = null
+        diskWriteExecutor?.shutdownNow()
+        diskWriteExecutor = null
+        diskWriteQueue.clear()
         activeRecordingWriters = null
         acceptRecordingWrites = true
     }
 
-    private suspend fun writeRecordingFrames(scratch: FloatArray, frames: Int, channels: Int) {
+    private fun writeRecordingFrames(scratch: FloatArray, frames: Int, channels: Int) {
         if (!isRecording || !acceptRecordingWrites) return
         val toWrite = if (usbDegraded) {
             val maxFrames = (sessionTargetFrames() - framesWritten).coerceAtLeast(0)
@@ -763,20 +812,22 @@ class CaptureSessionEngine(
             frames
         }
         if (toWrite <= 0) return
-        val channel = recordingWriteChannel
-        if (channel != null) {
-            val sampleCount = toWrite * channels
-            val copy = acquireWriteBuffer(sampleCount)
-            System.arraycopy(scratch, 0, copy, 0, sampleCount)
-            try {
-                channel.send(RecordingWriteRequest.Frames(copy, toWrite, channels))
-            } catch (_: Exception) {
-                releaseWriteBuffer(copy)
-            }
+        if (activeRecordingWriters == null) {
+            writeRecordingFramesSync(scratch, toWrite, channels)
+            framesWritten += toWrite
             return
         }
-        writeRecordingFramesSync(scratch, toWrite, channels)
-        framesWritten += toWrite
+        val sampleCount = toWrite * channels
+        val copy = acquireWriteBuffer(sampleCount)
+        System.arraycopy(scratch, 0, copy, 0, sampleCount)
+        val queued = diskWriteQueue.offer(
+            RecordingWriteRequest.Frames(copy, toWrite, channels),
+        )
+        if (!queued) {
+            releaseWriteBuffer(copy)
+            writeRecordingFramesSync(scratch, toWrite, channels)
+            framesWritten += toWrite
+        }
     }
 
     private fun writeRecordingFramesSync(scratch: FloatArray, toWrite: Int, channels: Int) {
@@ -795,16 +846,20 @@ class CaptureSessionEngine(
         }
     }
 
-    private suspend fun enqueueSilenceFrames(frames: Int) {
+    private fun enqueueSilenceFrames(frames: Int) {
         if (frames <= 0 || !acceptRecordingWrites) return
-        val channel = recordingWriteChannel
-        if (channel != null) {
-            try {
-                channel.send(RecordingWriteRequest.Silence(frames))
-            } catch (_: Exception) {
+        if (activeRecordingWriters != null) {
+            if (!diskWriteQueue.offer(RecordingWriteRequest.Silence(frames))) {
+                writeSilenceFramesSync(frames)
+                framesWritten += frames
             }
             return
         }
+        writeSilenceFramesSync(frames)
+        framesWritten += frames
+    }
+
+    private fun writeSilenceFramesSync(frames: Int) {
         val resilient = sessionWriter
         val legacyWriter = perChannelWriter
         try {
@@ -813,7 +868,6 @@ class CaptureSessionEngine(
             } else {
                 legacyWriter?.writeSilence(frames)
             }
-            framesWritten += frames
         } catch (_: IllegalStateException) {
         }
     }
@@ -954,6 +1008,27 @@ class CaptureSessionEngine(
         writeBufferPool.offer(buffer)
     }
 
+    private fun throttleSyntheticToRealtime() {
+        val rate = sampleRate.coerceAtLeast(1)
+        val anchor = syntheticRealtimeAnchorNs
+        if (anchor <= 0L) {
+            syntheticRealtimeAnchorNs = System.nanoTime()
+            return
+        }
+        val targetNs = framesCaptured * 1_000_000_000L / rate
+        val elapsedNs = System.nanoTime() - anchor
+        val sleepNs = targetNs - elapsedNs
+        if (sleepNs > 2_000_000L) {
+            val sleepMs = sleepNs / 1_000_000L
+            val sleepExtraNs = (sleepNs % 1_000_000L).toInt()
+            if (sleepMs > 0L) {
+                Thread.sleep(sleepMs)
+            } else if (sleepExtraNs > 0) {
+                Thread.sleep(0, sleepExtraNs)
+            }
+        }
+    }
+
     private fun decayMeterHoldForElapsed() {
         val now = System.nanoTime()
         val prev = lastMeterDecayNs
@@ -1015,16 +1090,13 @@ class CaptureSessionEngine(
         private const val TARGET_WAVEFORM_CAPACITY = 900
         private const val METER_DECAY_TAU_MS = 250f
         private const val METER_OUTPUT_THRESHOLD = 1e-5f
-        private const val WRITE_BUFFER_POOL_SIZE = 6
+        private const val WRITE_BUFFER_POOL_SIZE = 12
+        private const val DISK_WRITE_QUEUE_CAPACITY = 48
 
         private val captureFanoutDispatcher = Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "capture-fanout").apply {
                 priority = Thread.MAX_PRIORITY
             }
-        }.asCoroutineDispatcher()
-
-        private val diskWriteDispatcher = Executors.newSingleThreadExecutor { runnable ->
-            Thread(runnable, "capture-disk-write")
         }.asCoroutineDispatcher()
 
         private val writeBufferPool = ArrayBlockingQueue<FloatArray>(WRITE_BUFFER_POOL_SIZE)
