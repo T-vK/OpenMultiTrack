@@ -113,6 +113,10 @@ class CaptureSessionEngine(
     private var recordingStartedAtEpochMs: Long? = null
 
     private var lastMetadataPersistFrames: Long = 0
+    private var lastMetadataPersistNs: Long = 0L
+
+    @Volatile
+    private var acceptRecordingWrites: Boolean = true
 
     private val monitorConfig = AtomicReference(MonitorMixConfig())
     private val virtualMicConfig = AtomicReference<VirtualMicConfig?>(null)
@@ -161,10 +165,7 @@ class CaptureSessionEngine(
 
     fun recordElapsedSec(): Float {
         if (!isRecording) return 0f
-        val frameSec = if (sampleRate > 0) framesCaptured.toFloat() / sampleRate else 0f
-        if (usbDegraded) return frameSec
-        val started = recordingStartedAtEpochMs ?: return frameSec
-        return (System.currentTimeMillis() - started).coerceAtLeast(0) / 1000f
+        return if (sampleRate > 0) framesCaptured.toFloat() / sampleRate else 0f
     }
 
     fun updateVuMetering(enabled: Boolean) {
@@ -393,15 +394,22 @@ class CaptureSessionEngine(
         val dir = sessionDir
         val config = recordingConfig
         val rate = sampleRate
+        val capturedFrames = framesCaptured
         val resilient = sessionWriter
         val writer = perChannelWriter
         val legacy = legacyWavWriter
+        acceptRecordingWrites = false
         stopRecordingWriteLoop()
         val recordedFrames = when {
             resilient != null -> resilient.totalFramesWritten()
             writer != null -> writer.totalFramesWritten()
-            else -> framesCaptured.coerceAtLeast(framesWritten)
+            else -> framesWritten.coerceAtLeast(capturedFrames)
         }
+        OmtLog.i(
+            "CaptureSession",
+            "closeRecording captured=$capturedFrames queued=$framesWritten disk=$recordedFrames " +
+                "rate=$rate markComplete=$markComplete",
+        )
         sessionWriter = null
         resilient?.close()
         perChannelWriter = null
@@ -713,6 +721,7 @@ class CaptureSessionEngine(
                             } else {
                                 active.perChannel?.writeInterleavedMultiChannel(samples, frames, channels)
                             }
+                            framesWritten += frames
                             if (request.returnToPool) {
                                 releaseWriteBuffer(samples)
                             }
@@ -724,6 +733,7 @@ class CaptureSessionEngine(
                             } else {
                                 active.perChannel?.writeSilence(frames)
                             }
+                            framesWritten += frames
                         }
                     }
                     maybePersistTimelineAsync()
@@ -735,15 +745,17 @@ class CaptureSessionEngine(
     }
 
     private suspend fun stopRecordingWriteLoop() {
+        acceptRecordingWrites = false
         recordingWriteChannel?.close()
         recordingWriteJob?.join()
         recordingWriteChannel = null
         recordingWriteJob = null
         activeRecordingWriters = null
+        acceptRecordingWrites = true
     }
 
     private suspend fun writeRecordingFrames(scratch: FloatArray, frames: Int, channels: Int) {
-        if (!isRecording) return
+        if (!isRecording || !acceptRecordingWrites) return
         val toWrite = if (usbDegraded) {
             val maxFrames = (sessionTargetFrames() - framesWritten).coerceAtLeast(0)
             minOf(frames.toLong(), maxFrames).toInt()
@@ -758,7 +770,6 @@ class CaptureSessionEngine(
             System.arraycopy(scratch, 0, copy, 0, sampleCount)
             try {
                 channel.send(RecordingWriteRequest.Frames(copy, toWrite, channels))
-                framesWritten += toWrite
             } catch (_: Exception) {
                 releaseWriteBuffer(copy)
             }
@@ -785,12 +796,11 @@ class CaptureSessionEngine(
     }
 
     private suspend fun enqueueSilenceFrames(frames: Int) {
-        if (frames <= 0) return
+        if (frames <= 0 || !acceptRecordingWrites) return
         val channel = recordingWriteChannel
         if (channel != null) {
             try {
                 channel.send(RecordingWriteRequest.Silence(frames))
-                framesWritten += frames
             } catch (_: Exception) {
             }
             return
@@ -918,12 +928,17 @@ class CaptureSessionEngine(
     )
 
     private fun maybePersistTimelineAsync() {
+        val now = System.nanoTime()
+        if (now - lastMetadataPersistNs < 500_000_000L) return
         val dir = sessionDir ?: return
         val config = recordingConfig ?: return
-        val captured = framesCaptured
-        if (captured - lastMetadataPersistFrames < sampleRate / 2) return
-        lastMetadataPersistFrames = captured
-        buildSessionMetadata(config, sampleRate, captured).writeTo(dir)
+        val diskFrames = sessionWriter?.totalFramesWritten()
+            ?: perChannelWriter?.totalFramesWritten()
+            ?: framesWritten
+        if (diskFrames - lastMetadataPersistFrames < sampleRate / 2) return
+        lastMetadataPersistFrames = diskFrames
+        lastMetadataPersistNs = now
+        buildSessionMetadata(config, sampleRate, diskFrames).writeTo(dir)
     }
 
     private fun acquireWriteBuffer(sampleCount: Int): FloatArray {
