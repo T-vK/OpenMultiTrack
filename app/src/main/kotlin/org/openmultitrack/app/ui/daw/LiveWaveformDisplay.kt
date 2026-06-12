@@ -270,8 +270,7 @@ internal fun LiveWaveformStrip(
     modifier: Modifier = Modifier,
     testTag: String = LIVE_WAVEFORM_TEST_TAG,
 ) {
-    val effectiveElapsedSec = liveWaveformEffectiveElapsedSec(elapsedSec, peaks, peaksPerSec)
-    val hasDrawableData = peaks.isNotEmpty() && viewWindowSec > 0f && effectiveElapsedSec > 0f
+    val hasDrawableData = peaks.isNotEmpty() && viewWindowSec > 0f && elapsedSec > 0f
     // Freeze the scale divisor on the first meaningful peak so a later loud transient
     // cannot rescale already-drawn timeline columns to invisibility.
     var livePeakCeiling by remember { mutableFloatStateOf(0f) }
@@ -297,7 +296,7 @@ internal fun LiveWaveformStrip(
             val columns = liveWaveformColumnsForDisplay(
                 peaks = scaledPeaks,
                 bufferWindowSec = bufferWindowSec,
-                elapsedSec = effectiveElapsedSec,
+                elapsedSec = elapsedSec,
                 peaksPerSec = peaksPerSec,
                 pixelCount = pixelCount,
                 viewStartSec = viewStartSec,

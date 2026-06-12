@@ -265,6 +265,7 @@ class CaptureSessionEngine(
         sessionDir = dir
         recordingConfig = config
         framesWritten = 0
+        resetLiveWaveformBuffers()
         recordingStartedAtEpochMs = System.currentTimeMillis()
         lastMetadataPersistFrames = 0
 
@@ -368,6 +369,8 @@ class CaptureSessionEngine(
         sessionDir = null
         recordingStartedAtEpochMs = null
         lastMetadataPersistFrames = 0
+        framesWritten = 0
+        resetLiveWaveformBuffers()
 
         if (dir != null) {
             if (markComplete) {
@@ -432,13 +435,22 @@ class CaptureSessionEngine(
     }
 
     fun clearWaveforms() {
-        for (i in waveformRings.indices) waveformRings[i] = null
-        pendingWaveformPeaks.fill(0f)
-        meterHold.fill(0f)
-        lastRawPeaks.fill(0f)
+        resetLiveWaveformBuffers()
+        synchronized(meterLock) {
+            meterHold.fill(0f)
+            lastRawPeaks.fill(0f)
+        }
         lastFrameReceivedNs = 0L
-        lastWaveformEmitNs = 0L
         lastMeterDecayNs = 0L
+    }
+
+    /** Clears live waveform ring buffers without touching VU meter state. */
+    fun resetLiveWaveformBuffers() {
+        pendingWaveformPeaks.fill(0f)
+        lastWaveformEmitNs = 0L
+        if (channelCount > 0) {
+            allocateWaveformRings()
+        }
     }
 
     @VisibleForTesting
@@ -806,7 +818,7 @@ class CaptureSessionEngine(
     }
 
     private fun maybeEmitWaveformPeaks() {
-        if (!isRecording && !vuMeteringEnabled.get()) return
+        if (!isRecording) return
         val intervalNs = 1_000_000_000L / waveformPeaksPerSecond
         val now = System.nanoTime()
         if (lastWaveformEmitNs != 0L && now - lastWaveformEmitNs < intervalNs) return

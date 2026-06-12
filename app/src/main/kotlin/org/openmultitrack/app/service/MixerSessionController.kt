@@ -250,6 +250,8 @@ class MixerSessionController(
                                 transportState = TransportState.IDLE,
                                 playbackPositionSec = 0f,
                                 soundcheckMeterLevels = emptyMap(),
+                                waveformPeaks = emptyMap(),
+                                recordElapsedSec = 0f,
                             )
                         }
                         withContext(Dispatchers.IO) {
@@ -265,6 +267,7 @@ class MixerSessionController(
                                 usbStream?.close()
                                 usbStream = null
                             }
+                            captureEngine.resetLiveWaveformBuffers()
                         }
                     }
                     _state.update { it.copy(appMode = mode) }
@@ -277,10 +280,25 @@ class MixerSessionController(
         _state.update { it.copy(appMode = mode) }
         if (mode.isPlaybackMode) {
             captureEngine.updateVuMetering(false)
-            _state.update { it.copy(isVuMetering = false) }
+            _state.update {
+                it.copy(
+                    isVuMetering = false,
+                    waveformPeaks = emptyMap(),
+                    recordElapsedSec = 0f,
+                )
+            }
             refreshSoundcheckLibrary()
             scope.launch {
-                captureMutex.withLock { warmPlaybackRouteLocked() }
+                captureMutex.withLock {
+                    withContext(Dispatchers.IO) {
+                        if (isFlow8Active()) {
+                            prepareFlow8UsbForPlaybackLocked()
+                        } else {
+                            prepareUsbForPlaybackLocked()
+                        }
+                    }
+                    warmPlaybackRouteLocked()
+                }
             }
             _state.update {
                 it.copy(
@@ -769,8 +787,17 @@ class MixerSessionController(
         }
         captureEngine.updateVuMetering(false)
         _state.update { it.copy(isVuMetering = false) }
-        if (captureEngine.isCaptureActive && !_state.value.isRecording) {
-            withContext(Dispatchers.IO) { captureEngine.stopCapture() }
+        withContext(Dispatchers.IO) {
+            if (player.isPlaying) {
+                player.stopAndAwait()
+            }
+            AudioEngineRouter.stopPlayback()
+            if (captureEngine.isCaptureActive && !_state.value.isRecording) {
+                captureEngine.stopCapture()
+            }
+            AudioEngineRouter.stopAllRecording()
+            usbStream?.close()
+            usbStream = null
         }
     }
 
@@ -835,6 +862,8 @@ class MixerSessionController(
                 captureEngine.stopCapture()
             }
             AudioEngineRouter.stopAllRecording()
+            usbStream?.close()
+            usbStream = null
             delay(Flow8UsbPlaybackProfile.PRE_PLAYBACK_DELAY_MS)
         }
         OmtLog.i("MixerSession", "FLOW 8 USB prepared for playback")
@@ -1251,6 +1280,7 @@ class MixerSessionController(
                             prof.storageFolderName(),
                         )
                         TransportTraceHub.mark(mixerId, "captureEngine.startRecording")
+                        captureEngine.resetLiveWaveformBuffers()
                         captureEngine.startRecording(
                             CaptureSessionEngine.RecordingConfig(
                                 mixerId = prof.id,
@@ -1386,6 +1416,8 @@ class MixerSessionController(
                     lastRecordingPath = session?.filePath ?: it.lastRecordingPath,
                     statusMessage = "Recording paused",
                     recordStartedAtEpochMs = 0L,
+                    waveformPeaks = emptyMap(),
+                    recordElapsedSec = 0f,
                 )
             }
             resetRecordViewAfterStop()
@@ -1426,6 +1458,8 @@ class MixerSessionController(
                     lastRecordingPath = session?.filePath ?: it.lastRecordingPath,
                     statusMessage = session?.let { s -> "Saved → ${s.filePath}" } ?: "Stopped",
                     recordStartedAtEpochMs = 0L,
+                    waveformPeaks = emptyMap(),
+                    recordElapsedSec = 0f,
                 )
             }
             resetRecordViewAfterStop()
@@ -2087,10 +2121,7 @@ class MixerSessionController(
                                     waveformPeaks = emptyMap(),
                                     recordElapsedSec = 0f,
                                 )
-                                else -> s.copy(
-                                    captureMeterLevels = levels,
-                                    waveformPeaks = captureEngine.waveformSnapshots(normalize = false),
-                                )
+                                else -> s.copy(captureMeterLevels = levels)
                             }
                         }
                     }

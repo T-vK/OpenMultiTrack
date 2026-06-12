@@ -933,15 +933,7 @@ private fun ChannelStripList(
     ) {
         val count = visibleStrips.size.coerceAtLeast(1)
         val gap = 2.dp
-        val showLiveWaveforms = showWaveforms && (isRecording || isVuMetering)
-        val waveformElapsedSec = when {
-            isRecording -> recordElapsedSec
-            isVuMetering -> {
-                val peakCount = waveformPeaks.values.maxOfOrNull { it.peaks.size } ?: 0
-                peakCount.toFloat() / RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC
-            }
-            else -> 0f
-        }
+        val showLiveWaveforms = showWaveforms && isRecording
         val rulerAndGap = if (showLiveWaveforms) WaveformTimeRulerHeight + gap else 0.dp
         val totalGaps = gap * (count - 1).coerceAtLeast(0)
         val naturalHeight = (maxHeight - rulerAndGap - totalGaps) / count
@@ -998,7 +990,7 @@ private fun ChannelStripList(
         } else {
             recordViewWindowSec
         }
-        val displayViewStart = RecordViewLayout.anchoredStartSec(waveformElapsedSec, displayViewWindow)
+        val displayViewStart = RecordViewLayout.anchoredStartSec(recordElapsedSec, displayViewWindow)
 
         if (visibleStrips.isEmpty()) {
             Column(
@@ -1047,7 +1039,7 @@ private fun ChannelStripList(
                             .onSizeChanged { waveformWidthPx = it.width.toFloat() },
                     ) {
                         RecordingTimelineRuler(
-                            elapsedSec = waveformElapsedSec,
+                            elapsedSec = recordElapsedSec,
                             viewStartSec = displayViewStart,
                             viewWindowSec = displayViewWindow,
                             modifier = Modifier.fillMaxSize(),
@@ -1077,7 +1069,7 @@ private fun ChannelStripList(
                     recordWaveformHistorySec = recordWaveformHistorySec,
                     recordViewStartSec = displayViewStart,
                     recordViewWindowSec = displayViewWindow,
-                    recordElapsedSec = waveformElapsedSec,
+                    recordElapsedSec = recordElapsedSec,
                     captureMeterLevel = if (showVuMeters) {
                         val usbIndex = routing.inputSource(strip.index)
                         captureMeterLevels[usbIndex] ?: 0f
