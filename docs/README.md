@@ -91,6 +91,8 @@ These folders capture hardware reverse-engineering and implementation plans. The
 | [uac2-host-plan/](uac2-host-plan/) | UAC2 isoch host via libusb (largely implemented in `audio-engine`) |
 | [flow8-reverse-engineering/](flow8-reverse-engineering/) | Flow 8 USB MIDI / BLE protocol notes |
 | [xr18-scribble-strip/](xr18-scribble-strip/) | XR18 scribble strip OSC tooling |
+| [xr18-transport-timing-report.md](xr18-transport-timing-report.md) | Measured Record / Stop / Play step timings (XR18 hardware) |
+| [xr18-transport-latency-reduction.md](xr18-transport-latency-reduction.md) | Plan to reach ~200 ms transport start |
 
 ### Deprecated / superseded
 

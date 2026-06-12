@@ -1,5 +1,7 @@
 # XR18 Routing Automation — Implementation Plan
 
+**Performance:** See [transport timing report](xr18-transport-timing-report.md) and [latency reduction plan](xr18-transport-latency-reduction.md).
+
 ## Goal
 
 Automatically switch XR18 channel input routing over OSC when **recording starts/stops** or **soundcheck playback starts/stops** — not when merely selecting record or soundcheck **mode** in the UI.
