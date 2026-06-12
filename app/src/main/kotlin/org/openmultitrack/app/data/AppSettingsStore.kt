@@ -107,6 +107,19 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_DEBUG_LOG, true)
         set(value) = prefs.edit().putBoolean(KEY_DEBUG_LOG, value).apply()
 
+    /** Continuously flush the in-app log buffer to disk for crash recovery. */
+    var devLogAutoPersist: Boolean
+        get() = prefs.getBoolean(KEY_DEV_LOG_AUTO_PERSIST, true)
+        set(value) = prefs.edit().putBoolean(KEY_DEV_LOG_AUTO_PERSIST, value).apply()
+
+    var devLogHideTimestamps: Boolean
+        get() = prefs.getBoolean(KEY_DEV_LOG_HIDE_TIMESTAMPS, false)
+        set(value) = prefs.edit().putBoolean(KEY_DEV_LOG_HIDE_TIMESTAMPS, value).apply()
+
+    var devLogShowMenuBar: Boolean
+        get() = prefs.getBoolean(KEY_DEV_LOG_SHOW_MENU_BAR, true)
+        set(value) = prefs.edit().putBoolean(KEY_DEV_LOG_SHOW_MENU_BAR, value).apply()
+
     var hideArmButton: Boolean
         get() = prefs.getBoolean(KEY_HIDE_ARM, false)
         set(value) = prefs.edit().putBoolean(KEY_HIDE_ARM, value).apply()
@@ -371,6 +384,9 @@ class AppSettingsStore(context: Context) {
         private const val KEY_LOCAL_SPILL_MINUTES = "local_spill_minutes"
         private const val KEY_MIN_FREE_STORAGE_BYTES = "min_free_storage_bytes"
         private const val KEY_DEBUG_LOG = "debug_log"
+        private const val KEY_DEV_LOG_AUTO_PERSIST = "dev_log_auto_persist"
+        private const val KEY_DEV_LOG_HIDE_TIMESTAMPS = "dev_log_hide_timestamps"
+        private const val KEY_DEV_LOG_SHOW_MENU_BAR = "dev_log_show_menu_bar"
         private const val KEY_HIDE_ARM = "hide_arm_button"
         private const val KEY_HIDE_MONITOR = "hide_monitor_button"
         private const val KEY_HIDE_SOLO = "hide_solo_button"

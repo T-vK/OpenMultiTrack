@@ -3,6 +3,9 @@ package org.openmultitrack.app.ui.daw
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,8 +27,10 @@ import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Minimize
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -53,15 +58,20 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.util.AppLogBuffer
 
 private const val MIN_WINDOW_WIDTH_DP = 220f
 private const val MIN_WINDOW_HEIGHT_DP = 160f
 private val RESIZE_HANDLE_THICKNESS = 14.dp
 private val RESIZE_CORNER_SIZE = 22.dp
+private val TITLE_BAR_HEIGHT = 32.dp
+private val TITLE_BAR_BUTTON_SIZE = 28.dp
+private val MENU_BAR_HEIGHT = 28.dp
 
 private enum class ResizeEdge {
     Top,
@@ -96,7 +106,7 @@ fun FloatingLogViewerOverlay(
     var windowWidthDp by rememberSaveable { mutableFloatStateOf(340f) }
     var windowHeightDp by rememberSaveable { mutableFloatStateOf(260f) }
 
-  Box(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .zIndex(1000f),
@@ -420,9 +430,33 @@ private fun LogViewerContent(
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
-    var includePersisted by rememberSaveable { mutableStateOf(false) }
-    var persistMessage by remember { mutableStateOf<String?>(null) }
+    val settings = remember(context) { AppSettingsStore(context) }
+
+    var autoPersist by remember { mutableStateOf(settings.devLogAutoPersist) }
+    var hideTimestamps by remember { mutableStateOf(settings.devLogHideTimestamps) }
+    var showMenuBar by remember { mutableStateOf(settings.devLogShowMenuBar) }
     var refreshTick by remember { mutableIntStateOf(0) }
+    var textScale by rememberSaveable { mutableFloatStateOf(1f) }
+
+    LaunchedEffect(autoPersist) {
+        settings.devLogAutoPersist = autoPersist
+        AppLogBuffer.setAutoPersist(context, autoPersist)
+    }
+
+    val logText = remember(refreshTick, autoPersist, hideTimestamps) {
+        AppLogBuffer.displayText(
+            context = context,
+            includePersisted = autoPersist,
+            hideTimestamps = hideTimestamps,
+        )
+    }
+    val verticalScroll = rememberScrollState()
+    val horizontalScroll = rememberScrollState()
+    val transformState = rememberTransformableState { zoomChange, _, _ ->
+        if (zoomChange != 1f) {
+            textScale = (textScale * zoomChange).coerceIn(0.5f, 4f)
+        }
+    }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -431,14 +465,9 @@ private fun LogViewerContent(
         }
     }
 
-    val logText = remember(refreshTick, includePersisted) {
-        AppLogBuffer.displayText(context, includePersisted)
-    }
-    val scrollState = rememberScrollState()
-
     LaunchedEffect(logText) {
-        if (scrollState.maxValue > 0) {
-            scrollState.animateScrollTo(scrollState.maxValue)
+        if (verticalScroll.maxValue > 0) {
+            verticalScroll.animateScrollTo(verticalScroll.maxValue)
         }
     }
 
@@ -446,7 +475,7 @@ private fun LogViewerContent(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(40.dp)
+                .height(TITLE_BAR_HEIGHT)
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .then(
                     if (onDragTitleBar != null) {
@@ -460,76 +489,161 @@ private fun LogViewerContent(
                         Modifier
                     },
                 )
-                .padding(horizontal = 4.dp),
+                .padding(start = 8.dp, end = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 title,
-                style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 8.dp),
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = onMinimize, modifier = Modifier.size(36.dp)) {
+            IconButton(
+                onClick = {
+                    showMenuBar = !showMenuBar
+                    settings.devLogShowMenuBar = showMenuBar
+                },
+                modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE),
+            ) {
+                Icon(
+                    Icons.Default.Menu,
+                    contentDescription = if (showMenuBar) "Hide menu bar" else "Show menu bar",
+                    tint = if (showMenuBar) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+            IconButton(onClick = onMinimize, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
                 Icon(Icons.Default.Minimize, contentDescription = "Minimize")
             }
-            IconButton(onClick = onMaximize, modifier = Modifier.size(36.dp)) {
+            IconButton(onClick = onMaximize, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
                 Icon(maximizeIcon, contentDescription = maximizeContentDescription)
             }
-            IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
+            IconButton(onClick = onClose, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
                 Icon(Icons.Default.Close, contentDescription = "Close")
             }
         }
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = { clipboard.setText(AnnotatedString(logText)) }) {
-                Text("Copy")
-            }
-            TextButton(
-                onClick = {
-                    val saved = AppLogBuffer.persistSession(context)
-                    persistMessage = if (saved) "Session saved" else "Nothing to save"
+
+        if (showMenuBar) {
+            HorizontalDivider()
+            LogViewerMenuBar(
+                lineCount = AppLogBuffer.lineCount(),
+                autoPersist = autoPersist,
+                hideTimestamps = hideTimestamps,
+                onCopy = { clipboard.setText(AnnotatedString(logText)) },
+                onClear = { AppLogBuffer.clearCurrentSession(context) },
+                onAutoPersistChange = { autoPersist = it },
+                onHideTimestampsChange = {
+                    hideTimestamps = it
+                    settings.devLogHideTimestamps = it
                 },
-            ) {
-                Text("Persist")
-            }
-            TextButton(onClick = { AppLogBuffer.clearCurrentSession() }) {
-                Text("Clear")
-            }
-            Text(
-                "${AppLogBuffer.lineCount()} lines",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            HorizontalDivider()
         }
-        Row(
-            Modifier.padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Checkbox(checked = includePersisted, onCheckedChange = { includePersisted = it })
-            Text("Previous sessions", style = MaterialTheme.typography.bodySmall)
-        }
-        persistMessage?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
-            )
-        }
-        Text(
-            logText,
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+
+        val baseFontSize = MaterialTheme.typography.bodySmall.fontSize
+        Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .verticalScroll(scrollState)
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+                .transformable(
+                    state = transformState,
+                    lockRotationOnZoomPan = true,
+                ),
+        ) {
+            Text(
+                logText,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = (baseFontSize.value * textScale).sp,
+                ),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(verticalScroll)
+                    .horizontalScroll(horizontalScroll)
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun LogViewerMenuBar(
+    lineCount: Int,
+    autoPersist: Boolean,
+    hideTimestamps: Boolean,
+    onCopy: () -> Unit,
+    onClear: () -> Unit,
+    onAutoPersistChange: (Boolean) -> Unit,
+    onHideTimestampsChange: (Boolean) -> Unit,
+) {
+    val menuLabelStyle = MaterialTheme.typography.labelSmall
+    val menuItemPadding = Modifier.padding(horizontal = 2.dp)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(MENU_BAR_HEIGHT)
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        TextButton(
+            onClick = onCopy,
+            modifier = menuItemPadding.height(MENU_BAR_HEIGHT),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+        ) {
+            Text("Copy", style = menuLabelStyle)
+        }
+        MenuBarDivider()
+        TextButton(
+            onClick = onClear,
+            modifier = menuItemPadding.height(MENU_BAR_HEIGHT),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+        ) {
+            Text("Clear", style = menuLabelStyle)
+        }
+        MenuBarDivider()
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 2.dp),
+        ) {
+            Checkbox(
+                checked = autoPersist,
+                onCheckedChange = onAutoPersistChange,
+                modifier = Modifier.size(20.dp),
+            )
+            Text("Persist logs", style = menuLabelStyle)
+        }
+        MenuBarDivider()
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(
+                checked = hideTimestamps,
+                onCheckedChange = onHideTimestampsChange,
+                modifier = Modifier.size(20.dp),
+            )
+            Text("Hide timestamps", style = menuLabelStyle)
+        }
+        Box(modifier = Modifier.weight(1f))
+        Text(
+            "$lineCount lines",
+            style = menuLabelStyle,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(end = 6.dp),
         )
     }
+}
+
+@Composable
+private fun MenuBarDivider() {
+    Box(
+        modifier = Modifier
+            .width(1.dp)
+            .height(18.dp)
+            .background(MaterialTheme.colorScheme.outlineVariant),
+    )
 }

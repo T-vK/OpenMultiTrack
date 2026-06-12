@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.util.AppLogBuffer
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -40,10 +41,15 @@ fun LogViewerScreen(
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
-    var includePersisted by remember { mutableStateOf(true) }
-    var persistMessage by remember { mutableStateOf<String?>(null) }
-    val logText = remember(includePersisted) {
-        AppLogBuffer.displayText(context, includePersisted)
+    val settings = remember(context) { AppSettingsStore(context) }
+    var autoPersist by remember { mutableStateOf(settings.devLogAutoPersist) }
+    var hideTimestamps by remember { mutableStateOf(settings.devLogHideTimestamps) }
+    val logText = remember(autoPersist, hideTimestamps) {
+        AppLogBuffer.displayText(
+            context = context,
+            includePersisted = autoPersist,
+            hideTimestamps = hideTimestamps,
+        )
     }
     val scrollState = rememberScrollState()
 
@@ -75,36 +81,30 @@ fun LogViewerScreen(
                 ) {
                     Text("Copy")
                 }
-                TextButton(
-                    onClick = {
-                        val saved = AppLogBuffer.persistSession(context)
-                        persistMessage = if (saved) {
-                            "Session saved"
-                        } else {
-                            "Nothing to save"
-                        }
-                    },
-                ) {
-                    Text("Persist")
-                }
-                TextButton(onClick = { AppLogBuffer.clearCurrentSession() }) {
-                    Text("Clear current")
+                TextButton(onClick = { AppLogBuffer.clearCurrentSession(context) }) {
+                    Text("Clear")
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(
-                    checked = includePersisted,
-                    onCheckedChange = { includePersisted = it },
+                    checked = autoPersist,
+                    onCheckedChange = {
+                        autoPersist = it
+                        settings.devLogAutoPersist = it
+                        AppLogBuffer.setAutoPersist(context, it)
+                    },
                 )
-                Text("Show previous sessions", style = MaterialTheme.typography.bodyMedium)
+                Text("Persist logs", style = MaterialTheme.typography.bodyMedium)
             }
-            persistMessage?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(bottom = 4.dp),
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = hideTimestamps,
+                    onCheckedChange = {
+                        hideTimestamps = it
+                        settings.devLogHideTimestamps = it
+                    },
                 )
+                Text("Hide timestamps", style = MaterialTheme.typography.bodyMedium)
             }
             Text(
                 logText,
