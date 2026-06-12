@@ -59,6 +59,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -72,9 +73,9 @@ import org.openmultitrack.app.util.LogDisplayEntry
 
 private const val MIN_WINDOW_WIDTH_DP = 220f
 private const val MIN_WINDOW_HEIGHT_DP = 160f
-private val RESIZE_HANDLE_THICKNESS = 14.dp
-private val RESIZE_CORNER_SIZE = 22.dp
-private val TITLE_BAR_HEIGHT = 32.dp
+private val RESIZE_HANDLE_THICKNESS = 10.dp
+private val RESIZE_CORNER_SIZE = 36.dp
+private val TITLE_BAR_HEIGHT = 36.dp
 private val TITLE_BAR_BUTTON_SIZE = 28.dp
 private val MENU_BAR_HEIGHT = 28.dp
 
@@ -210,6 +211,7 @@ private fun FloatingLogWindow(
             LogViewerContent(
                 title = "Debug log",
                 onDragTitleBar = onMove,
+                titleBarHorizontalInset = RESIZE_CORNER_SIZE,
                 onMinimize = onMinimize,
                 onMaximize = onMaximize,
                 onClose = onClose,
@@ -217,19 +219,6 @@ private fun FloatingLogWindow(
                 maximizeContentDescription = "Maximize",
             )
         }
-        ResizeHandle(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .height(RESIZE_HANDLE_THICKNESS),
-            edge = ResizeEdge.Top,
-            offsetX = offsetX,
-            offsetY = offsetY,
-            widthDp = widthDp,
-            heightDp = heightDp,
-            density = density.density,
-            onResize = onResize,
-        )
         ResizeHandle(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -247,7 +236,8 @@ private fun FloatingLogWindow(
             modifier = Modifier
                 .align(Alignment.CenterStart)
                 .fillMaxHeight()
-                .width(RESIZE_HANDLE_THICKNESS),
+                .width(RESIZE_HANDLE_THICKNESS)
+                .padding(top = TITLE_BAR_HEIGHT),
             edge = ResizeEdge.Left,
             offsetX = offsetX,
             offsetY = offsetY,
@@ -260,7 +250,8 @@ private fun FloatingLogWindow(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight()
-                .width(RESIZE_HANDLE_THICKNESS),
+                .width(RESIZE_HANDLE_THICKNESS)
+                .padding(top = TITLE_BAR_HEIGHT),
             edge = ResizeEdge.Right,
             offsetX = offsetX,
             offsetY = offsetY,
@@ -272,7 +263,8 @@ private fun FloatingLogWindow(
         ResizeHandle(
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .size(RESIZE_CORNER_SIZE),
+                .size(RESIZE_CORNER_SIZE)
+                .zIndex(3f),
             edge = ResizeEdge.TopLeft,
             offsetX = offsetX,
             offsetY = offsetY,
@@ -284,7 +276,8 @@ private fun FloatingLogWindow(
         ResizeHandle(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .size(RESIZE_CORNER_SIZE),
+                .size(RESIZE_CORNER_SIZE)
+                .zIndex(3f),
             edge = ResizeEdge.TopRight,
             offsetX = offsetX,
             offsetY = offsetY,
@@ -296,7 +289,8 @@ private fun FloatingLogWindow(
         ResizeHandle(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .size(RESIZE_CORNER_SIZE),
+                .size(RESIZE_CORNER_SIZE)
+                .zIndex(3f),
             edge = ResizeEdge.BottomLeft,
             offsetX = offsetX,
             offsetY = offsetY,
@@ -308,7 +302,8 @@ private fun FloatingLogWindow(
         ResizeHandle(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .size(RESIZE_CORNER_SIZE),
+                .size(RESIZE_CORNER_SIZE)
+                .zIndex(3f),
             edge = ResizeEdge.BottomRight,
             offsetX = offsetX,
             offsetY = offsetY,
@@ -427,6 +422,7 @@ private fun FloatingLogMaximized(
 private fun LogViewerContent(
     title: String,
     onDragTitleBar: ((dx: Float, dy: Float) -> Unit)?,
+    titleBarHorizontalInset: androidx.compose.ui.unit.Dp = 0.dp,
     onMinimize: () -> Unit,
     onMaximize: () -> Unit,
     onClose: () -> Unit,
@@ -520,28 +516,13 @@ private fun LogViewerContent(
                     } else {
                         Modifier
                     },
-                ),
+                )
+                .padding(horizontal = titleBarHorizontalInset),
         ) {
-            Text(
-                title,
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.align(Alignment.Center),
-            )
             Row(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 2.dp),
+                modifier = Modifier.fillMaxSize(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = onMinimize, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
-                    Icon(Icons.Default.Minimize, contentDescription = "Minimize")
-                }
-                IconButton(onClick = onMaximize, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
-                    Icon(maximizeIcon, contentDescription = maximizeContentDescription)
-                }
-                IconButton(onClick = onClose, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
-                    Icon(Icons.Default.Close, contentDescription = "Close")
-                }
                 IconButton(
                     onClick = {
                         showMenuBar = !showMenuBar
@@ -558,6 +539,21 @@ private fun LogViewerContent(
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
                     )
+                }
+                Text(
+                    title,
+                    style = MaterialTheme.typography.labelMedium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onMinimize, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
+                    Icon(Icons.Default.Minimize, contentDescription = "Minimize")
+                }
+                IconButton(onClick = onMaximize, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
+                    Icon(maximizeIcon, contentDescription = maximizeContentDescription)
+                }
+                IconButton(onClick = onClose, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
+                    Icon(Icons.Default.Close, contentDescription = "Close")
                 }
             }
         }
