@@ -522,11 +522,26 @@ private fun LogViewerContent(
                     },
                 ),
         ) {
-            Row(
+            Text(
+                title,
+                style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier.align(Alignment.Center),
+            )
+            Row(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(title, style = MaterialTheme.typography.labelMedium)
+                IconButton(onClick = onMinimize, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
+                    Icon(Icons.Default.Minimize, contentDescription = "Minimize")
+                }
+                IconButton(onClick = onMaximize, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
+                    Icon(maximizeIcon, contentDescription = maximizeContentDescription)
+                }
+                IconButton(onClick = onClose, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
+                    Icon(Icons.Default.Close, contentDescription = "Close")
+                }
                 IconButton(
                     onClick = {
                         showMenuBar = !showMenuBar
@@ -543,22 +558,6 @@ private fun LogViewerContent(
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
                     )
-                }
-            }
-            Row(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onMinimize, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
-                    Icon(Icons.Default.Minimize, contentDescription = "Minimize")
-                }
-                IconButton(onClick = onMaximize, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
-                    Icon(maximizeIcon, contentDescription = maximizeContentDescription)
-                }
-                IconButton(onClick = onClose, modifier = Modifier.size(TITLE_BAR_BUTTON_SIZE)) {
-                    Icon(Icons.Default.Close, contentDescription = "Close")
                 }
             }
         }
