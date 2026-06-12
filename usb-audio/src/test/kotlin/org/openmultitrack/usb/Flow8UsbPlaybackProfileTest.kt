@@ -24,8 +24,9 @@ class Flow8UsbPlaybackProfileTest {
     }
 
     @Test
-    fun clampPlaybackChannels_capsAtStereo() {
-        assertThat(Flow8UsbPlaybackProfile.clampPlaybackChannels(10)).isEqualTo(2)
-        assertThat(Flow8UsbPlaybackProfile.clampPlaybackChannels(1)).isEqualTo(1)
+    fun playbackChannelsFromProbe_usesFourUsbReturns() {
+        assertThat(Flow8UsbPlaybackProfile.playbackChannelsFromProbe(4)).isEqualTo(4)
+        assertThat(Flow8UsbPlaybackProfile.playbackChannelsFromProbe(10)).isEqualTo(4)
+        assertThat(Flow8UsbPlaybackProfile.playbackChannelsFromProbe(0)).isEqualTo(4)
     }
 }

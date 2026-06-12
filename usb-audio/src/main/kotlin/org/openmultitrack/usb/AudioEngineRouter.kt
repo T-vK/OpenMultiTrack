@@ -103,12 +103,12 @@ object AudioEngineRouter {
         requestedChannels: Int,
         sampleRateHz: Int = 48_000,
     ): PlaybackRoute? {
+        val uac2 = probe.uac2Caps
         val effectiveChannels = if (Flow8UsbPlaybackProfile.isFlow8(probe.usb)) {
-            Flow8UsbPlaybackProfile.clampPlaybackChannels(requestedChannels)
+            Flow8UsbPlaybackProfile.playbackChannelsFromProbe(uac2?.maxPlaybackChannels ?: 0)
         } else {
             requestedChannels
         }
-        val uac2 = probe.uac2Caps
         val oboeOut = probe.output?.takeIf { it.isSuccess }
         val oboeChannels = oboeOut?.channelCount ?: 0
 

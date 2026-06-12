@@ -755,7 +755,7 @@ class MixerSessionController(
             AudioEngineRouter.stopAllRecording()
             delay(Flow8UsbPlaybackProfile.PRE_PLAYBACK_DELAY_MS)
         }
-        OmtLog.i("MixerSession", "FLOW 8 USB prepared for stereo playback")
+        OmtLog.i("MixerSession", "FLOW 8 USB prepared for playback")
     }
 
     /** Stop USB capture/playback so XR18 accepts OSC routing changes (verified on hardware). */
@@ -802,8 +802,7 @@ class MixerSessionController(
         }
         val clampedStart = startFrame.coerceIn(0L, (durationFrames - 1).coerceAtLeast(0L))
         withContext(Dispatchers.IO) {
-            if (isFlow8Active() ||
-                _state.value.isMonitoring ||
+            if (_state.value.isMonitoring ||
                 _state.value.isVuMetering ||
                 (captureEngine.isCaptureActive && !_state.value.isRecording)
             ) {
@@ -2191,10 +2190,11 @@ class MixerSessionController(
     }
 
     private fun maxPlaybackChannelsFromProbe(probe: FullUsbProbeResult): Int {
+        val uac2Playback = probe.uac2Caps?.maxPlaybackChannels?.takeIf { it > 0 }
         if (Flow8UsbPlaybackProfile.isFlow8(probe.usb)) {
-            return Flow8UsbPlaybackProfile.PREFERRED_PLAYBACK_CHANNELS
+            return Flow8UsbPlaybackProfile.playbackChannelsFromProbe(uac2Playback ?: 0)
         }
-        return probe.uac2Caps?.maxPlaybackChannels?.takeIf { it > 0 }
+        return uac2Playback
             ?: probe.output?.takeIf { it.isSuccess }?.channelCount
             ?: 2
     }

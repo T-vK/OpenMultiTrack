@@ -5,12 +5,14 @@ import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 /**
  * FLOW 8 USB playback constraints.
  *
- * Hardware validation: multichannel UAC2 playback from Android can leave the mixer
- * in a broken output state until power cycle. Stereo USB return 1/2 is safe.
+ * The mixer exposes **four** USB playback returns (U01–U04 per UAC2 descriptor).
+ * Capture must be fully released before playback to avoid firmware lockup; channel
+ * count should follow the probe, not be forced down to stereo.
  */
 object Flow8UsbPlaybackProfile {
     const val PRODUCT_ID = 0x050c
-    const val PREFERRED_PLAYBACK_CHANNELS = 2
+    /** USB return channels reported by hardware probe (UAC2 playback alt). */
+    const val USB_PLAYBACK_CHANNELS = 4
     const val PRE_PLAYBACK_DELAY_MS = 120L
     const val POST_PLAYBACK_STOP_DELAY_MS = 80L
 
@@ -21,6 +23,10 @@ object Flow8UsbPlaybackProfile {
     fun isFlow8(vendorId: Int, productId: Int): Boolean =
         vendorId == BehringerUsbIdentifiers.VENDOR_ID_BEHINGER && productId == PRODUCT_ID
 
-    fun clampPlaybackChannels(requested: Int): Int =
-        minOf(requested, PREFERRED_PLAYBACK_CHANNELS).coerceAtLeast(1)
+    fun playbackChannelsFromProbe(maxPlaybackChannels: Int): Int =
+        when {
+            maxPlaybackChannels >= USB_PLAYBACK_CHANNELS -> USB_PLAYBACK_CHANNELS
+            maxPlaybackChannels > 0 -> maxPlaybackChannels
+            else -> USB_PLAYBACK_CHANNELS
+        }
 }
