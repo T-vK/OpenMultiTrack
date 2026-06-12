@@ -41,7 +41,8 @@ class Flow8SoundcheckPlaybackE2eTest {
     }
 
     @Test
-    fun soundcheckPlaybackSustainsAndSurvivesStopPlay() = runBlocking {
+    fun soundcheckPlaybackSustainsAndSurvivesStopPlay() {
+        runBlocking {
         val h = E2eMixerHarness(appRule).also { harness = it }
         val ctrl = h.bindAndRegisterFlow8()
         h.syncUiWithHarnessMixer(h.mixerId, AppMode.MULTITRACK_RECORD)
@@ -93,6 +94,7 @@ class Flow8SoundcheckPlaybackE2eTest {
         val finalLog = E2eLogcat.dumpRecent(600, TAG, "MixerSession", "Player", "OmtE2e")
         E2eLogcat.assertNoPlaybackFaults(finalLog)
         Log.i(TAG, "playback e2e passed (first=${firstPos}s second=${secondPos}s)")
+        }
     }
 
     private fun clearAppLogcat() {
