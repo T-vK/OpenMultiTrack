@@ -13,6 +13,7 @@ import org.openmultitrack.domain.session.TransportStatus
 import org.openmultitrack.sessionio.session.SessionMetadata
 import org.openmultitrack.sessionio.wav.PerChannelWavReader
 import org.openmultitrack.sessionio.wav.WavReader
+import org.openmultitrack.usb.AudioBackend
 import org.openmultitrack.usb.AudioEngineRouter
 import org.openmultitrack.usb.PlaybackRoute
 import java.io.File
@@ -28,6 +29,10 @@ class SessionPlayer {
     private var seekReader: ((Long) -> Unit)? = null
     private var playbackEpoch: Int = 0
     private var nativePlaybackWarm: Boolean = false
+    /** UAC2 isoch OUT must be paced to wall clock — otherwise the read loop drains the WAV instantly. */
+    private var paceSampleRate: Int = 0
+    private var paceAnchorNs: Long = 0L
+    private var paceStartFrames: Long = 0L
     private val readerLock = Any()
     private val meterLevels = FloatArray(32)
     private var meterChannelCount = 0
@@ -132,6 +137,7 @@ class SessionPlayer {
                 seekReader?.invoke(clamped)
             }
             status = status.copy(positionFrames = clamped)
+            resetUac2PaceAnchor(clamped)
         } catch (e: Exception) {
             OmtLog.e("Player", "seek failed", e)
         }
@@ -230,6 +236,8 @@ class SessionPlayer {
         }
         activeBackend = backend
         nativePlaybackWarm = true
+        paceSampleRate = if (backend == AudioBackend.UAC2) sampleRate else 0
+        resetUac2PaceAnchor(startFrame)
 
         status = TransportStatus(
             state = TransportState.PLAYING,
@@ -306,6 +314,7 @@ class SessionPlayer {
                 onFramesSubmitted(written)
                 updateMeterLevels(chunkScratch, written, outputChannels, frameOffset = 0)
                 status = status.copy(positionFrames = status.positionFrames + written)
+                throttleUac2PlaybackIfAhead()
                 maybeLoopRewind()
             }
         }
@@ -344,8 +353,28 @@ class SessionPlayer {
                 onFramesSubmitted(written)
                 updateMeterLevels(chunkScratch, written, channels, frameOffset = 0)
                 status = status.copy(positionFrames = status.positionFrames + written)
+                throttleUac2PlaybackIfAhead()
                 maybeLoopRewind()
             }
+        }
+    }
+
+    private fun resetUac2PaceAnchor(positionFrames: Long) {
+        paceAnchorNs = System.nanoTime()
+        paceStartFrames = positionFrames
+    }
+
+    /** Keep UAC2 submission near real time so transport position matches audible playback. */
+    private fun throttleUac2PlaybackIfAhead() {
+        if (paceSampleRate <= 0) return
+        val headroomFrames = (paceSampleRate / 10).coerceAtLeast(2_400).toLong()
+        while (playbackJob?.isActive == true) {
+            val elapsedNs = System.nanoTime() - paceAnchorNs
+            val targetFrames = paceStartFrames + elapsedNs * paceSampleRate / 1_000_000_000L
+            val ahead = status.positionFrames - targetFrames
+            if (ahead <= headroomFrames) return
+            val sleepMs = ((ahead - headroomFrames) * 1_000L / paceSampleRate).coerceIn(1L, 50L)
+            Thread.sleep(sleepMs)
         }
     }
 
@@ -413,6 +442,7 @@ class SessionPlayer {
         loopStartFrame = null
         loopEndFrame = null
         loopEnabled = false
+        paceSampleRate = 0
         resetMeterLevels()
     }
 }
