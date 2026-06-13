@@ -45,6 +45,7 @@ class VirtualDemoCaptureInstrumentedTest {
                     channelStrips = strips,
                 ),
             ).getOrThrow()
+            engine.anchorRecordingTimeline()
 
             delay(2_000)
             val snap = engine.waveformSnapshots(normalize = false)[0]

@@ -74,6 +74,7 @@ class RecordingSessionTimingInstrumentedTest {
                 writePlan = writePlan,
             ),
         ).getOrThrow()
+        engine.anchorRecordingTimeline()
 
         val targetWallSec = 12f
         val wallStartMs = System.currentTimeMillis()

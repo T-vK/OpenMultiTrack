@@ -1342,6 +1342,7 @@ class MixerSessionController(
                                 writePlan = writePlan,
                             ),
                         ).getOrThrow()
+                        captureEngine.anchorRecordingTimeline()
                         TransportTraceHub.mark(mixerId, "captureEngine.startRecording ok")
                         recordingStarted = true
                     }
