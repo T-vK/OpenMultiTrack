@@ -83,6 +83,10 @@ UsbIoStatus clearEndpointHalt(int usb_fd, uint8_t endpoint_address) {
     return ok;
 }
 
+bool isInEndpoint(uint8_t endpoint_address) {
+    return (endpoint_address & 0x80) != 0;
+}
+
 }  // namespace
 
 void detachForeignDrivers(int usb_fd, uint8_t keep_iface) {
@@ -131,7 +135,9 @@ UsbIoStatus setAltOnClaimedInterface(int usb_fd, const Uac2AltSetting& alt) {
         return fail("SETINTERFACE", errno);
     }
 
-    const UsbIoStatus halt = clearEndpointHalt(usb_fd, alt.endpoint_address);
+    const UsbIoStatus halt = isInEndpoint(alt.endpoint_address)
+        ? clearEndpointHalt(usb_fd, alt.endpoint_address)
+        : UsbIoStatus{.ok = true};
     if (!halt.ok) {
         OMT_LOGW("usb_io CLEAR_HALT ep=0x%02x failed (%s)",
                  alt.endpoint_address,
@@ -191,7 +197,9 @@ UsbIoStatus claimAndSetAlt(int usb_fd, const Uac2AltSetting& alt) {
         }
     }
 
-    const UsbIoStatus halt = clearEndpointHalt(usb_fd, alt.endpoint_address);
+    const UsbIoStatus halt = isInEndpoint(alt.endpoint_address)
+        ? clearEndpointHalt(usb_fd, alt.endpoint_address)
+        : UsbIoStatus{.ok = true};
     if (!halt.ok) {
         OMT_LOGW("usb_io CLEAR_HALT ep=0x%02x failed (%s)",
                  alt.endpoint_address,
@@ -235,7 +243,9 @@ UsbIoStatus claimAndSetAltWithDriverDetach(int usb_fd, const Uac2AltSetting& alt
         return fail("SETINTERFACE", errno);
     }
 
-    (void)clearEndpointHalt(usb_fd, alt.endpoint_address);
+    if (isInEndpoint(alt.endpoint_address)) {
+        (void)clearEndpointHalt(usb_fd, alt.endpoint_address);
+    }
     OMT_LOGI("usb_io claimed iface=%u alt=%u ep=0x%02x (driver detach)",
              alt.interface_number,
              alt.alternate_setting,

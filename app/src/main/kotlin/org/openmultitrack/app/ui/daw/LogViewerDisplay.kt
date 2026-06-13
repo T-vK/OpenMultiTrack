@@ -182,7 +182,7 @@ fun LogViewerLazyList(
     ) {
         itemsIndexed(
             items = entries,
-            key = { _, entry -> logEntryStableKey(entry) },
+            key = { index, entry -> "$index:${logEntryStableKey(entry)}" },
         ) { _, entry ->
             val line = remember(
                 entry,

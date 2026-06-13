@@ -24,6 +24,13 @@ namespace {
 
 constexpr int kNumUrbs = 8;
 
+void prepareLibusbIsoOutTransfer(libusb_transfer* transfer) {
+    if (transfer == nullptr) return;
+    for (int p = 0; p < transfer->num_iso_packets; ++p) {
+        transfer->iso_packet_desc[p].actual_length = transfer->iso_packet_desc[p].length;
+    }
+}
+
 }  // namespace
 
 Uac2Playback& Uac2Playback::instance() {
@@ -219,6 +226,8 @@ void Uac2Playback::closeUnlocked() {
     }
     libusb_transfers_.clear();
     libusb_buffers_.clear();
+    libusb_in_flight_mask_.store(0);
+    libusb_submitted_frames_.store(0);
 
     if (backend_ == IoBackend::Libusb && libusb_handle_ != nullptr) {
         libusbReleaseStreaming(
@@ -438,9 +447,7 @@ void Uac2Playback::workerLoopLibusb(std::promise<bool> init_promise) {
             fillUrbBuffer(transfer->buffer,
                           static_cast<size_t>(transfer->length),
                           &frames);
-            for (int p = 0; p < transfer->num_iso_packets; ++p) {
-                transfer->iso_packet_desc[p].actual_length = 0;
-            }
+            prepareLibusbIsoOutTransfer(transfer);
 
             const int r = libusb_submit_transfer(transfer);
             if (r != 0) {
