@@ -17,10 +17,12 @@ object InterleavedRawPcmSplitter {
         sampleRate: Int,
         bytesPerFrame: Int,
         frameCount: Long,
+        sourceFrameOffset: Long = 0L,
     ) {
         require(bytesPerFrame == sourceChannelCount * 4) {
             "expected 32-bit interleaved PCM bytesPerFrame=$bytesPerFrame"
         }
+        require(sourceFrameOffset >= 0L) { "sourceFrameOffset must be non-negative" }
         val armed = channelStrips.filter { it.armed }
         val writers = armed.associate { strip ->
             strip.index to WavWriter(
@@ -33,6 +35,9 @@ object InterleavedRawPcmSplitter {
         val channelScratch = ByteArray(SCRATCH_FRAMES * 3)
         var framesRemaining = frameCount
         RandomAccessFile(rawFile, "r").use { input ->
+            if (sourceFrameOffset > 0L) {
+                input.seek(sourceFrameOffset * bytesPerFrame)
+            }
             while (framesRemaining > 0) {
                 val chunkFrames = minOf(framesRemaining, SCRATCH_FRAMES.toLong()).toInt()
                 val chunkBytes = chunkFrames * bytesPerFrame

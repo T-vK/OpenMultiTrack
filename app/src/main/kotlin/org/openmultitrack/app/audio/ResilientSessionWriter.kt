@@ -34,6 +34,11 @@ class ResilientSessionWriter private constructor(
 ) : AutoCloseable {
     private var primaryHealthy = true
     private var liveFramesWritten: Long = 0
+    private var nativeStagingSkipFrames: Long = 0
+
+    fun setNativeStagingSkipFrames(frames: Long) {
+        nativeStagingSkipFrames = frames.coerceAtLeast(0L)
+    }
 
     constructor(
         primarySessionDir: File,
@@ -231,6 +236,7 @@ class ResilientSessionWriter private constructor(
                 sampleRate = sampleRateHz,
                 bytesPerFrame = nativePcmBytesPerFrame,
                 frameCount = frames,
+                sourceFrameOffset = nativeStagingSkipFrames,
             )
         }.onFailure { e ->
             OmtLog.e("ResilientWriter", "native staging split failed: ${e.message}")

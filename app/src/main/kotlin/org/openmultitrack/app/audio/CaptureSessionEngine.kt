@@ -114,6 +114,8 @@ class CaptureSessionEngine(
     @Volatile
     private var nativePcmRecordingActive: Boolean = false
 
+    private var nativeFramesBaselineAtRecordingStart: Long = 0L
+
     @Volatile
     private var framesWritten: Long = 0
 
@@ -176,7 +178,8 @@ class CaptureSessionEngine(
             val backend = activeBackend
             if (backend != null) {
                 val nativeFrames = AudioEngineRouter.nativePcmFileFramesWritten(backend)
-                if (nativeFrames > framesCaptured) {
+                val sessionFrames = nativeFrames - nativeFramesBaselineAtRecordingStart
+                if (sessionFrames > framesCaptured) {
                     lastFrameReceivedNs = System.nanoTime()
                 }
             }
@@ -416,6 +419,7 @@ class CaptureSessionEngine(
         recordingConfig = config
         framesWritten = 0
         framesCaptured = 0
+        nativeFramesBaselineAtRecordingStart = 0L
         recordingMeterChunkCounter = 0
         resetLiveWaveformBuffers()
         syntheticRealtimeAnchorNs = 0L
@@ -457,6 +461,21 @@ class CaptureSessionEngine(
                 stagingFile = null
             }
             nativePcmRecordingActive = nativeActive
+            if (nativeActive && captureBackend == AudioBackend.UAC2) {
+                var backlogPeak = 0L
+                repeat(40) {
+                    backlogPeak = maxOf(
+                        backlogPeak,
+                        AudioEngineRouter.nativePcmFileFramesWritten(captureBackend),
+                    )
+                    kotlinx.coroutines.delay(5)
+                }
+                nativeFramesBaselineAtRecordingStart = backlogPeak
+                OmtLog.i(
+                    "CaptureSession",
+                    "native PCM backlog settle baseline=$backlogPeak frames",
+                )
+            }
             sessionWriter = ResilientSessionWriter(
                 primarySessionDir = plan.primarySessionDir,
                 mirrorSessionDirs = plan.mirrorSessionDirs,
@@ -472,6 +491,9 @@ class CaptureSessionEngine(
         } else {
             perChannelWriter = PerChannelWavWriter(dir, config.channelStrips, sampleRate)
             sessionWriter = null
+        }
+        if (nativePcmRecordingActive && nativeFramesBaselineAtRecordingStart > 0L) {
+            sessionWriter?.setNativeStagingSkipFrames(nativeFramesBaselineAtRecordingStart)
         }
 
         buildSessionMetadata(config, sampleRate, framesWritten).writeTo(dir)
@@ -564,10 +586,11 @@ class CaptureSessionEngine(
 
     private fun syncNativeRecordingProgress(backend: AudioBackend): Boolean {
         val nativeFrames = AudioEngineRouter.nativePcmFileFramesWritten(backend)
-        if (nativeFrames <= framesCaptured) return false
-        framesCaptured = nativeFrames
-        framesWritten = nativeFrames
-        sessionWriter?.setLiveFramesWritten(nativeFrames)
+        val sessionFrames = (nativeFrames - nativeFramesBaselineAtRecordingStart).coerceAtLeast(0L)
+        if (sessionFrames <= framesCaptured) return false
+        framesCaptured = sessionFrames
+        framesWritten = sessionFrames
+        sessionWriter?.setLiveFramesWritten(sessionFrames)
         lastFrameReceivedNs = System.nanoTime()
         if (recordingMeterChunkCounter % 16 == 0) {
             droppedFrames = AudioEngineRouter.recordingDroppedFrames(backend)
@@ -588,9 +611,10 @@ class CaptureSessionEngine(
         stopRecordingWriteLoop()
         val nativeFrames = stopNativePcmRecordingIfActive()
         if (nativeFrames > 0L) {
-            resilient?.setLiveFramesWritten(nativeFrames)
-            framesCaptured = nativeFrames.coerceAtLeast(framesCaptured)
-            framesWritten = nativeFrames.coerceAtLeast(framesWritten)
+            val sessionFrames = (nativeFrames - nativeFramesBaselineAtRecordingStart).coerceAtLeast(0L)
+            resilient?.setLiveFramesWritten(sessionFrames)
+            framesCaptured = sessionFrames.coerceAtLeast(framesCaptured)
+            framesWritten = sessionFrames.coerceAtLeast(framesWritten)
         }
         val recordedFrames = when {
             resilient != null -> resilient.totalFramesWritten()
