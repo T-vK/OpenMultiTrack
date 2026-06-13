@@ -103,6 +103,28 @@ class ResilientSessionWriter private constructor(
     )
 
     fun writeInterleavedMultiChannel(samples: FloatArray, frames: Int, sourceChannelCount: Int) {
+        livePrimary?.let { writer ->
+            if (primaryHealthy) {
+                if (minFreeBytes > 0 && primaryRoot.usableSpace < minFreeBytes) {
+                    primaryHealthy = false
+                } else {
+                    val wrote = runCatching {
+                        writeFloatInterleavedToLiveWriter(writer, samples, frames, sourceChannelCount)
+                    }
+                    if (wrote.isSuccess) {
+                        liveFramesWritten += frames
+                        return
+                    }
+                    primaryHealthy = false
+                }
+            }
+            liveSpill?.let { spillWriter ->
+                runCatching {
+                    writeFloatInterleavedToLiveWriter(spillWriter, samples, frames, sourceChannelCount)
+                }
+            }
+            return
+        }
         if (primaryHealthy) {
             if (minFreeBytes > 0 && primaryRoot.usableSpace < minFreeBytes) {
                 primaryHealthy = false
@@ -262,6 +284,36 @@ class ResilientSessionWriter private constructor(
             OmtLog.e("ResilientWriter", "interleaved split failed: ${e.message}")
         }
         tmp.delete()
+    }
+
+    private fun writeFloatInterleavedToLiveWriter(
+        writer: WavWriter,
+        samples: FloatArray,
+        frames: Int,
+        sourceChannelCount: Int,
+    ) {
+        val channels = captureChannelCount
+        val expected = frames * sourceChannelCount
+        require(samples.size >= expected) { "samples too short: ${samples.size} < $expected" }
+        val bytesPerFrame = channels * 4
+        val byteLen = frames * bytesPerFrame
+        val packed = ByteArray(byteLen)
+        var bi = 0
+        for (f in 0 until frames) {
+            for (c in 0 until channels) {
+                val sample = if (c < sourceChannelCount) {
+                    samples[f * sourceChannelCount + c]
+                } else {
+                    0f
+                }
+                val bits = java.lang.Float.floatToIntBits(sample)
+                packed[bi++] = (bits and 0xFF).toByte()
+                packed[bi++] = ((bits shr 8) and 0xFF).toByte()
+                packed[bi++] = ((bits shr 16) and 0xFF).toByte()
+                packed[bi++] = ((bits shr 24) and 0xFF).toByte()
+            }
+        }
+        writer.writeRawInterleavedPcm(packed, frames, bytesPerFrame)
     }
 
     private fun syncRedundantCopies() {

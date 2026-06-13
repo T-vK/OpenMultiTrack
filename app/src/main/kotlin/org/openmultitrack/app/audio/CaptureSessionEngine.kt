@@ -434,7 +434,7 @@ class CaptureSessionEngine(
         recordingStartedAtEpochMs = null
         lastMetadataPersistFrames = 0
 
-        if (plan != null) {
+        if (plan != null && syntheticGenerator == null) {
             var stagingFile = if (channelCount >= INTERLEAVED_LIVE_THRESHOLD) {
                 plan.liveCaptureStagingFile
             } else {
@@ -484,6 +484,12 @@ class CaptureSessionEngine(
         } else {
             perChannelWriter = PerChannelWavWriter(dir, config.channelStrips, sampleRate)
             sessionWriter = null
+            if (syntheticGenerator != null) {
+                OmtLog.i(
+                    "CaptureSession",
+                    "synthetic capture → per-channel WAV writer ch=$channelCount",
+                )
+            }
         }
 
         buildSessionMetadata(config, sampleRate, framesWritten).writeTo(dir)

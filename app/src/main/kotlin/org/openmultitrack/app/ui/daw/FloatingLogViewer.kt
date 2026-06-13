@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Close
@@ -814,25 +813,21 @@ private fun LogViewerContent(
                     lockRotationOnZoomPan = true,
                 ),
         ) {
-            SelectionContainer(
+            LogViewerLazyList(
+                entries = logEntries,
+                hideTimestamps = hideTimestamps,
+                coloredLevels = coloredLevels,
+                textStyle = logTextStyle,
+                wordWrap = wordWrap,
+                freezeUpdates = freezeLogUpdates,
+                scrollToIndex = scrollToSearchIndex,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(
                         horizontal = LOG_CONTENT_PADDING_H,
                         vertical = LOG_CONTENT_PADDING_V,
                     ),
-            ) {
-                LogViewerLazyList(
-                    entries = logEntries,
-                    hideTimestamps = hideTimestamps,
-                    coloredLevels = coloredLevels,
-                    textStyle = logTextStyle,
-                    wordWrap = wordWrap,
-                    freezeUpdates = freezeLogUpdates,
-                    scrollToIndex = scrollToSearchIndex,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
+            )
         }
     }
 }

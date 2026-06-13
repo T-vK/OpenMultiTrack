@@ -3,7 +3,6 @@ package org.openmultitrack.app.ui.daw
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -160,22 +159,18 @@ fun LogViewerScreen(
                 },
             )
             HorizontalDivider()
-            SelectionContainer(
+            LogViewerLazyList(
+                entries = logEntries,
+                hideTimestamps = hideTimestamps,
+                coloredLevels = coloredLevels,
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                wordWrap = wordWrap,
+                freezeUpdates = false,
+                scrollToIndex = scrollToSearchIndex,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 8.dp, vertical = 4.dp),
-            ) {
-                LogViewerLazyList(
-                    entries = logEntries,
-                    hideTimestamps = hideTimestamps,
-                    coloredLevels = coloredLevels,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    wordWrap = wordWrap,
-                    freezeUpdates = false,
-                    scrollToIndex = scrollToSearchIndex,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
+            )
         }
     }
 }

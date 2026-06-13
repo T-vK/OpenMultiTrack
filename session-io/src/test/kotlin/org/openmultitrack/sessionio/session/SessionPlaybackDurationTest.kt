@@ -38,4 +38,29 @@ class SessionPlaybackDurationTest {
             dir.deleteRecursively()
         }
     }
+
+    @Test
+    fun isPlayable_falseWhenIncompleteOrNoWavs() {
+        val dir = createTempDir()
+        try {
+            val meta = SessionMetadata(
+                mixerId = "test",
+                mixerFolderName = "test",
+                customTitle = null,
+                sampleRate = 48_000,
+                format = SessionFormat.PER_CHANNEL_WAV,
+                channels = listOf(ChannelMetadata(0, "channel01.wav", "#1", 0)),
+                incomplete = true,
+            )
+            assertThat(SessionPlaybackDuration.isPlayable(dir, meta)).isFalse()
+
+            val completeMeta = meta.copy(incomplete = false)
+            assertThat(SessionPlaybackDuration.isPlayable(dir, completeMeta)).isFalse()
+
+            File(dir, "channel01.wav").writeText("stub")
+            assertThat(SessionPlaybackDuration.isPlayable(dir, completeMeta)).isTrue()
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }

@@ -468,6 +468,15 @@ class MixerSessionController(
                     TransportTraceHub.finish(mixerId, "loadRecordingIntoSoundcheck failed: no metadata")
                     return@withLock
                 }
+                if (!SessionPlaybackDuration.isPlayable(dir, metadata)) {
+                    TransportTraceHub.finish(mixerId, "loadRecordingIntoSoundcheck skipped: no channel WAVs")
+                    _state.update {
+                        it.copy(
+                            warningMessage = "Recording has no audio on disk — cannot open soundcheck",
+                        )
+                    }
+                    return@withLock
+                }
                 val durationSec = withContext(Dispatchers.IO) {
                     SessionPlaybackDuration.durationSec(dir, metadata)
                 }
@@ -2279,12 +2288,24 @@ class MixerSessionController(
                 return@launch
             }
             TransportTraceHub.mark(mixerId, "waveforms extracting ${metadata.channels.size} ch")
-            val overview = withContext(Dispatchers.IO) {
-                SessionWaveformExtractor.extractIncremental(dir, metadata) { chIndex, peaks, completed, total ->
-                    launch(Dispatchers.Main.immediate) {
-                        mergeSoundcheckChannelPeaks(chIndex, peaks, completed, total)
+            val overview = try {
+                withContext(Dispatchers.IO) {
+                    SessionWaveformExtractor.extractIncremental(dir, metadata) { chIndex, peaks, completed, total ->
+                        launch(Dispatchers.Main.immediate) {
+                            mergeSoundcheckChannelPeaks(chIndex, peaks, completed, total)
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                OmtLog.e("MixerSession", "waveform extract failed for ${dir.name}", e)
+                TransportTraceHub.mark(mixerId, "waveforms extract failed: ${e.message}")
+                _state.update {
+                    it.copy(
+                        soundcheckWaveformsLoading = false,
+                        warningMessage = "Could not load waveforms — ${e.message}",
+                    )
+                }
+                return@launch
             }
             withContext(Dispatchers.IO) { SessionWaveformCache.save(dir, overview) }
             applySoundcheckWaveformOverview(overview, loading = false)

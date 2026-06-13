@@ -9,8 +9,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.openmultitrack.app.data.RecordingWritePlan
 import org.openmultitrack.domain.mixer.DemoBandChannels
 import org.openmultitrack.domain.mixer.VirtualMixer
+import org.openmultitrack.sessionio.session.SessionMetadata
+import org.openmultitrack.sessionio.session.SessionPlaybackDuration
 import java.io.File
 
 @RunWith(AndroidJUnit4::class)
@@ -56,6 +59,55 @@ class VirtualDemoCaptureInstrumentedTest {
             engine.stopRecording()
             engine.stopCapture()
             tmp.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun syntheticCapture_withWritePlan_writesChannelWavs() {
+        runBlocking {
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            val engine = CaptureSessionEngine("virtual-demo-writeplan")
+            engine.startSyntheticCapture(
+                scope,
+                VirtualMixer.DEMO_CHANNEL_COUNT,
+                VirtualMixer.SAMPLE_RATE_HZ,
+                generator = SyntheticCaptureGenerator.fromDemoBand(VirtualMixer.SAMPLE_RATE_HZ),
+            ).getOrThrow()
+
+            val root = File.createTempFile("omt-demo-plan", null).apply {
+                delete()
+                mkdirs()
+            }
+            val sessionDir = File(root, "Demo/session-plan").apply { mkdirs() }
+            val writePlan = RecordingWritePlan(
+                primarySessionDir = sessionDir,
+                mirrorSessionDirs = emptyList(),
+                spillSessionDir = null,
+                primaryRoot = root,
+                minFreeBytes = 0L,
+                liveCaptureStagingFile = null,
+            )
+            engine.startRecording(
+                CaptureSessionEngine.RecordingConfig(
+                    mixerId = "virtual",
+                    mixerFolderName = "Demo",
+                    storageRoot = root,
+                    channelStrips = DemoBandChannels.channelStripStates(),
+                    writePlan = writePlan,
+                ),
+            ).getOrThrow()
+            engine.anchorRecordingTimeline()
+
+            delay(1_500)
+            engine.stopRecording()
+            engine.stopCapture()
+
+            val metadata = SessionMetadata.read(sessionDir)?.withResolvedChannels(sessionDir)
+            assertThat(metadata).isNotNull()
+            assertThat(SessionPlaybackDuration.isPlayable(sessionDir, metadata!!)).isTrue()
+            assertThat(SessionPlaybackDuration.durationSec(sessionDir, metadata)).isGreaterThan(0.5f)
+
+            root.deleteRecursively()
         }
     }
 }
