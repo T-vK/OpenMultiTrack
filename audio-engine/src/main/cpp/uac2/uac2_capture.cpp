@@ -22,7 +22,7 @@ namespace openmultitrack::uac2 {
 
 namespace {
 
-constexpr int kNumUrbs = 128;
+constexpr int kNumUrbs = 512;
 constexpr int kOpenVerifyTimeoutMs = 1500;
 constexpr size_t kMinVerifyFrames = 48;
 
@@ -129,8 +129,8 @@ bool Uac2Capture::tryOpenLibusb(int usb_fd,
         return false;
     }
 
-    // Samsung tablets often accept IN isoch only with frame-sized micro-packets; try that first.
-    for (const bool micro_packets : {true, false}) {
+    // Prefer full-size isoch packets on hosts that accept them (higher throughput on some tablets).
+    for (const bool micro_packets : {false, true}) {
         if (ring_ != nullptr) {
             ring_->reset();
         }

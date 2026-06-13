@@ -2325,6 +2325,9 @@ class MixerSessionController(
             captureEngine.isUsbStreamHealthy() &&
             captureEngine.isNativeCaptureOwner()
         ) {
+            if (!captureEngine.isCaptureActive) {
+                captureEngine.ensureFanoutRunning(scope).getOrThrow()
+            }
             return Result.success(
                 captureEngine.activeChannelCount.coerceAtLeast(channelCountFromProbe(probe)),
             )
@@ -2333,6 +2336,9 @@ class MixerSessionController(
             captureEngine.isUsbStreamHealthy() &&
             captureEngine.isNativeCaptureOwner()
         ) {
+            if (!captureEngine.isCaptureActive) {
+                captureEngine.ensureFanoutRunning(scope).getOrThrow()
+            }
             return Result.success(captureEngine.activeChannelCount)
         }
         if (captureEngine.isCaptureActive && !captureEngine.isUsbDegraded && captureEngine.isNativeCaptureOwner()) {

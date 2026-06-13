@@ -61,6 +61,7 @@ class Flow8RecordingTimelineE2eTest {
         ctrl.startRecording()
         E2eWait.untilRecording(ctrl, timeoutMs = 60_000)
         E2eUiTransport.waitForContentDescription("Stop recording", timeoutMs = 10_000)
+        E2eWait.pollUntil(timeoutMs = 30_000) { ctrl.state.value.recordElapsedSec > 0.25f }
         val recordingWallStartMs = System.currentTimeMillis()
 
         val uiTimerStarted = E2eWait.pollUntil(timeoutMs = 20_000) {
