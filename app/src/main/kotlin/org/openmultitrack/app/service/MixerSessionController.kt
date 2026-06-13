@@ -824,7 +824,7 @@ class MixerSessionController(
         }
         trace?.mark("FLOW 8 USB playback torn down (stream closed)")
         OmtLog.i("MixerSession", "FLOW 8 USB playback torn down for $mixerId")
-        if (_state.value.appMode == AppMode.MULTITRACK_RECORD && vuCaptureDesired()) {
+        if (_state.value.appMode == AppMode.MULTITRACK_RECORD && captureStreamDesired()) {
             syncVuMeterCapture()
         }
     }
@@ -1499,9 +1499,10 @@ class MixerSessionController(
 
     /** Caller must hold [captureMutex]. */
     private suspend fun syncVuMeterCaptureWhileLocked() {
-        val want = vuCaptureDesired()
-        captureEngine.updateVuMetering(want)
-        if (want) {
+        val wantVu = vuCaptureDesired()
+        val wantCapture = captureStreamDesired()
+        captureEngine.updateVuMetering(wantVu)
+        if (wantCapture) {
             val descriptor = activeDescriptor ?: return
             val probe = activeProbe ?: return
             val recordMode = _state.value.appMode == AppMode.MULTITRACK_RECORD
@@ -2075,7 +2076,7 @@ class MixerSessionController(
     }
 
     private fun liveCaptureUiUpdatesDesired(): Boolean =
-        _state.value.isMonitoring || _state.value.isRecording || vuCaptureDesired()
+        _state.value.isMonitoring || _state.value.isRecording || captureStreamDesired()
 
     private fun ensureLiveCaptureUiUpdates() {
         if (!liveCaptureUiUpdatesDesired()) {
@@ -2091,9 +2092,9 @@ class MixerSessionController(
             while (isActive) {
                 if (liveCaptureUiUpdatesDesired()) {
                     if (!captureEngine.isCaptureActive) {
-                        if (vuCaptureDesired() && healTick++ % 25 == 0) {
+                        if (captureStreamDesired() && healTick++ % 25 == 0) {
                             captureMutex.withLock {
-                                if (vuCaptureDesired() && !captureEngine.isCaptureActive) {
+                                if (captureStreamDesired() && !captureEngine.isCaptureActive) {
                                     syncVuMeterCaptureWhileLocked()
                                 }
                             }
@@ -2191,7 +2192,7 @@ class MixerSessionController(
     }
 
     private fun stopWaveformUpdatesIfIdle() {
-        if (!_state.value.isMonitoring && !_state.value.isRecording && !vuCaptureDesired()) {
+        if (!_state.value.isMonitoring && !_state.value.isRecording && !captureStreamDesired()) {
             waveformJob?.cancel()
             waveformJob = null
             captureEngine.clearWaveforms()
@@ -2213,6 +2214,20 @@ class MixerSessionController(
             !isRecordingTransport() &&
             !_state.value.isPlaying
     }
+
+    /** Keep USB capture warm in record mode even when VU meters are hidden (e.g. E2E / low CPU). */
+    private fun recordModeCaptureDesired(): Boolean {
+        if (_state.value.appMode != AppMode.MULTITRACK_RECORD) return false
+        if (!isActiveMixer() || _state.value.isMonitoring || _state.value.isPlaying) return false
+        if (isRecordingTransport()) return false
+        val prof = profile
+        return activeProbe != null && (
+            activeDescriptor != null ||
+                (prof != null && VirtualMixer.isDemoMixer(prof))
+            )
+    }
+
+    private fun captureStreamDesired(): Boolean = vuCaptureDesired() || recordModeCaptureDesired()
 
     private fun acquireRecordingWakeLock() {
         val pm = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -2396,7 +2411,7 @@ class MixerSessionController(
         if (_state.value.appMode.isPlaybackMode && activeDescriptor != null) {
             if (!captureEngine.isRecording &&
                 !_state.value.isMonitoring &&
-                !vuCaptureDesired()
+                !captureStreamDesired()
             ) {
                 captureEngine.updateVuMetering(false)
                 withContext(Dispatchers.IO) { captureEngine.stopCapture() }
@@ -2406,7 +2421,7 @@ class MixerSessionController(
         if (!captureEngine.isRecording &&
             !_state.value.isMonitoring &&
             !_state.value.isPlaying &&
-            !vuCaptureDesired()
+            !captureStreamDesired()
         ) {
             captureEngine.updateVuMetering(false)
             withContext(Dispatchers.IO) { captureEngine.stopCapture() }

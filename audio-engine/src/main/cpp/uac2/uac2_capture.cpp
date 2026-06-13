@@ -22,7 +22,7 @@ namespace openmultitrack::uac2 {
 
 namespace {
 
-constexpr int kNumUrbs = 64;
+constexpr int kNumUrbs = 128;
 constexpr int kOpenVerifyTimeoutMs = 1500;
 constexpr size_t kMinVerifyFrames = 48;
 
@@ -368,7 +368,9 @@ void Uac2Capture::pcmFileWriterLoop() {
         const size_t frames =
             ring != nullptr ? ring->popPcmBytes(scratch.data(), max_frames) : 0;
         if (frames == 0) {
-            std::this_thread::sleep_for(std::chrono::microseconds(200));
+            if (file_ring_ != nullptr && file_ring_->availableFrames() == 0) {
+                std::this_thread::yield();
+            }
             continue;
         }
         FILE* file = file_handle_;
@@ -440,7 +442,7 @@ void Uac2Capture::libusbEventLoop() {
 #endif
     timeval tv{};
     tv.tv_sec = 0;
-    tv.tv_usec = 1'000;
+    tv.tv_usec = file_recording_.load() ? 0 : 1'000;
     while (running_.load()) {
         if (libusb_ctx_ == nullptr) {
             break;

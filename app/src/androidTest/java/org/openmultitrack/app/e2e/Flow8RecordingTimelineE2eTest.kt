@@ -47,6 +47,13 @@ class Flow8RecordingTimelineE2eTest {
         val h = E2eMixerHarness(appRule).also { harness = it }
         val ctrl = h.bindAndRegisterFlow8()
         h.syncUiWithHarnessMixer(h.mixerId, AppMode.MULTITRACK_RECORD)
+        runCatching { ctrl.syncVuMeterCapture() }
+        val captureReady = E2eWait.pollUntil(timeoutMs = 60_000) {
+            ctrl.debugRawMeterPeaksForTest().any { it > 0.0001f }
+        }
+        assertWithMessage("USB capture did not warm up before recording")
+            .that(captureReady)
+            .isTrue()
 
         val recordSeconds = 12
         val toleranceSec = E2eRecordingTimelineAssertions.RECORDING_TOLERANCE_SEC
