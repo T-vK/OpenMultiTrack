@@ -1516,6 +1516,7 @@ class MixerSessionController(
         val wantVu = vuCaptureDesired()
         val wantCapture = captureStreamDesired()
         captureEngine.updateVuMetering(wantVu)
+        captureEngine.setRecordModeWarmCapture(recordModeCaptureDesired())
         if (wantCapture) {
             val descriptor = activeDescriptor ?: return
             val probe = activeProbe ?: return
@@ -1566,6 +1567,7 @@ class MixerSessionController(
                 _state.update { it.copy(isVuMetering = wantVu, warningMessage = null) }
             }
         } else {
+            captureEngine.setRecordModeWarmCapture(false)
             _state.update { it.copy(isVuMetering = false) }
             stopWaveformUpdatesIfIdle()
             releaseCaptureIfIdleLocked()

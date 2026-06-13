@@ -150,6 +150,7 @@ class CaptureSessionEngine(
     private val lastRawPeaks = FloatArray(64)
     private val meterLock = Any()
     private val vuMeteringEnabled = AtomicBoolean(false)
+    private val recordModeWarmCapture = AtomicBoolean(false)
     private var waveformWindowSec = DEFAULT_WAVEFORM_WINDOW_SEC
     private var waveformPeaksPerSecond = DEFAULT_WAVEFORM_PEAKS_PER_SEC
     private var lastWaveformEmitNs = 0L
@@ -239,6 +240,10 @@ class CaptureSessionEngine(
         vuMeteringEnabled.set(enabled)
     }
 
+    fun setRecordModeWarmCapture(enabled: Boolean) {
+        recordModeWarmCapture.set(enabled)
+    }
+
     fun updateMonitor(config: MonitorMixConfig) {
         val prev = monitorConfig.getAndSet(config)
         if (!config.enabled) {
@@ -288,7 +293,11 @@ class CaptureSessionEngine(
             if (isRecording && nativePcmRecordingActive && isNativeCaptureOwner()) {
                 return Result.success(Unit)
             }
-            if (isNativeCaptureOwner() && isReceivingAudio(if (isRecording) 5_000 else 500)) {
+            if (isNativeCaptureOwner() && isNativeUsbCaptureRunning()) {
+                return Result.success(Unit)
+            }
+            val receiveWindowMs = if (isRecording) 5_000L else 2_000L
+            if (isNativeCaptureOwner() && isReceivingAudio(receiveWindowMs)) {
                 return Result.success(Unit)
             }
             if (isRecording) {
@@ -822,7 +831,7 @@ class CaptureSessionEngine(
                         if (!isRecording) {
                             decayMeterHoldForElapsed()
                         }
-                        val maxFramesThisPass = if (isRecording) {
+                        val maxFramesThisPass = if (isRecording || recordModeWarmCapture.get()) {
                             MAX_FRAMES_PER_FANOUT_PASS
                         } else {
                             framesPerChunk
