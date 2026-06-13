@@ -79,7 +79,7 @@ CaptureStatus Uac2Capture::open(int usb_fd, const Uac2AltSetting& alt, bool java
     channel_count_ = alt.format.channels;
     sample_rate_ = static_cast<int32_t>(alt.format.sample_rate_hz);
     ring_ = std::make_unique<openmultitrack::SpscPcmRing>(
-        144'000,
+        288'000,
         alt.format.channels,
         alt.format.subframe_bytes);
 

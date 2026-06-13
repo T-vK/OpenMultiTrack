@@ -628,6 +628,13 @@ class CaptureSessionEngine(
         if (status.sampleRate > 0) {
             sampleRate = status.sampleRate
         }
+        captureBytesPerFrame = route.pcmBytesPerFrame()
+        if (route.backend == AudioBackend.UAC2) {
+            val nativeBpf = AudioEngineRouter.capturePcmBytesPerFrame(route.backend)
+            if (nativeBpf > 0) {
+                captureBytesPerFrame = nativeBpf
+            }
+        }
         usbDegraded = false
         startFanoutLoop(scope, route.backend)
         return Result.success(Unit)
@@ -846,7 +853,7 @@ class CaptureSessionEngine(
         activeRecordingWriters = writers
         val executor = Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "capture-disk-write").apply {
-                priority = Thread.MAX_PRIORITY - 1
+                priority = Thread.NORM_PRIORITY
             }
         }
         diskWriteExecutor = executor

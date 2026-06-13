@@ -16,6 +16,7 @@ class WavWriter private constructor(
     val outputFile: File,
     private val channelCount: Int,
     private val sampleRate: Int,
+    private val bitsPerSample: Int,
     append: Boolean,
 ) : AutoCloseable {
     private val raf = RandomAccessFile(outputFile, "rw")
@@ -29,13 +30,17 @@ class WavWriter private constructor(
         file: File,
         channelCount: Int,
         sampleRate: Int,
-    ) : this(file, channelCount, sampleRate, append = false)
+        bitsPerSample: Int = 24,
+    ) : this(file, channelCount, sampleRate, bitsPerSample, append = false)
 
     init {
         require(channelCount in AudioConstants.MIN_CHANNELS..AudioConstants.MAX_CHANNELS) {
             "channelCount out of range: $channelCount"
         }
         require(sampleRate > 0) { "sampleRate must be positive" }
+        require(bitsPerSample == 24 || bitsPerSample == 32) {
+            "bitsPerSample must be 24 or 32: $bitsPerSample"
+        }
         if (append) {
             val format = WavReader.parseHeader(outputFile)
             require(format.channelCount == channelCount) {
@@ -79,13 +84,30 @@ class WavWriter private constructor(
         dataBytesWritten += byteLen
     }
 
-    /** Converts packed interleaved USB PCM (24- or 32-bit subframes) into 24-bit WAV PCM. */
+    /** Appends packed interleaved PCM when it already matches this writer's sample width. */
+    fun writeRawInterleavedPcm(samples: ByteArray, frames: Int, bytesPerFrame: Int) {
+        check(!closed) { "Writer closed" }
+        val bytesPerSample = bitsPerSample / 8
+        require(bytesPerFrame == channelCount * bytesPerSample) {
+            "bytesPerFrame mismatch: $bytesPerFrame expected ${channelCount * bytesPerSample}"
+        }
+        val byteLen = frames * bytesPerFrame
+        require(samples.size >= byteLen) { "samples too short: ${samples.size} < $byteLen" }
+        appendPcm(samples, byteLen)
+        dataBytesWritten += byteLen
+    }
+
+    /** Converts packed interleaved USB PCM (24- or 32-bit subframes) into WAV PCM. */
     fun writePackedInterleavedPcmAs24(
         samples: ByteArray,
         frames: Int,
         srcBytesPerFrame: Int,
     ) {
         check(!closed) { "Writer closed" }
+        if (bitsPerSample == 32 && srcBytesPerFrame == channelCount * 4) {
+            writeRawInterleavedPcm(samples, frames, srcBytesPerFrame)
+            return
+        }
         val wavByteLen = PcmFormatConversion.wav24ByteLength(frames, channelCount)
         if (pcmBytes.size < wavByteLen) {
             pcmBytes = ByteArray(wavByteLen)
@@ -129,7 +151,10 @@ class WavWriter private constructor(
     }
 
     val framesWritten: Long
-        get() = if (channelCount == 0) 0 else dataBytesWritten / (channelCount * 3)
+        get() {
+            val bytesPerFrame = channelCount * (bitsPerSample / 8)
+            return if (bytesPerFrame == 0) 0 else dataBytesWritten / bytesPerFrame
+        }
 
     private fun writePlaceholderHeader() {
         raf.setLength(0)
@@ -138,7 +163,7 @@ class WavWriter private constructor(
     }
 
     private fun finalizeHeader() {
-        val blockAlign = channelCount * 3
+        val blockAlign = channelCount * (bitsPerSample / 8)
         val byteRate = sampleRate * blockAlign
         val buf = ByteBuffer.allocate(RIFF_HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN)
         buf.put("RIFF".toByteArray())
@@ -151,7 +176,7 @@ class WavWriter private constructor(
         buf.putInt(sampleRate)
         buf.putInt(byteRate)
         buf.putShort(blockAlign.toShort())
-        buf.putShort(24)
+        buf.putShort(bitsPerSample.toShort())
         buf.put("data".toByteArray())
         buf.putInt(dataBytesWritten.toInt())
         buf.flip()
@@ -165,6 +190,6 @@ class WavWriter private constructor(
 
         /** Reopen an existing WAV and append PCM after any data already on disk. */
         fun openForAppend(file: File, channelCount: Int, sampleRate: Int): WavWriter =
-            WavWriter(file, channelCount, sampleRate, append = true)
+            WavWriter(file, channelCount, sampleRate, bitsPerSample = 24, append = true)
     }
 }

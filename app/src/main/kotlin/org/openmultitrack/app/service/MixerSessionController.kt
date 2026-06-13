@@ -876,7 +876,7 @@ class MixerSessionController(
     }
 
     /** Stop USB capture/playback so XR18 accepts OSC routing changes (verified on hardware). */
-    private suspend fun quiesceUsbBeforeRoutingLocked() {
+    private suspend fun quiesceUsbBeforeRoutingLocked(keepCaptureForFlow8Record: Boolean = false) {
         val t0 = System.nanoTime()
         if (player.isPlaying) {
             player.stopAndAwait()
@@ -887,11 +887,12 @@ class MixerSessionController(
         }
         captureEngine.updateVuMetering(false)
         _state.update { it.copy(isVuMetering = false) }
-        if (captureEngine.isCaptureActive && !_state.value.isRecording) {
+        val keepCapture = keepCaptureForFlow8Record && isFlow8Active()
+        if (captureEngine.isCaptureActive && !isRecordingTransport() && !keepCapture) {
             captureEngine.stopCapture()
         }
         org.openmultitrack.mixer.behringer.Xr18RoutingLog.info(
-            "quiesceUsb ${(System.nanoTime() - t0) / 1_000_000}ms",
+            "quiesceUsb ${(System.nanoTime() - t0) / 1_000_000}ms keepCapture=$keepCapture",
         )
     }
 
@@ -1254,7 +1255,7 @@ class MixerSessionController(
                     TransportTraceHub.mark(mixerId, "captureMutex acquired")
                     withContext(Dispatchers.IO) {
                         TransportTraceHub.mark(mixerId, "quiesceUsb")
-                        quiesceUsbBeforeRoutingLocked()
+                        quiesceUsbBeforeRoutingLocked(keepCaptureForFlow8Record = true)
                         TransportTraceHub.mark(mixerId, "routing.beforeRecord")
                         when (val routing = routingBeforeRecordLocked()) {
                             RoutingHookResult.Cancelled -> {

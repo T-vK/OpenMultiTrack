@@ -61,6 +61,7 @@ class ResilientSessionWriter private constructor(
                 File(primarySessionDir, INTERLEAVED_TMP_NAME),
                 captureChannelCount,
                 sampleRate,
+                bitsPerSample = 32,
             )
         } else {
             null
@@ -70,6 +71,7 @@ class ResilientSessionWriter private constructor(
                 File(spillSessionDir, INTERLEAVED_TMP_NAME),
                 captureChannelCount,
                 sampleRate,
+                bitsPerSample = 32,
             )
         } else {
             null
