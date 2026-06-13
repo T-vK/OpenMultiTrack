@@ -401,6 +401,10 @@ class AppSettingsStore(context: Context) {
         prefs.edit().putString(KEY_APP_MODES_BY_MIXER, root.toString()).apply()
     }
 
+    fun clearAllAppModes() {
+        prefs.edit().remove(KEY_APP_MODES_BY_MIXER).apply()
+    }
+
     fun routingAutomationForMixer(mixerId: String): MixerRoutingAutomationConfig {
         val json = prefs.getString(KEY_ROUTING_AUTOMATION_BY_MIXER, null) ?: return MixerRoutingAutomationConfig()
         return runCatching {

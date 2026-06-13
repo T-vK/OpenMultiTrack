@@ -840,7 +840,13 @@ class MixerSessionController(
                 OmtLog.i("MixerSession", "FLOW 8 playback stopped; keeping capture during recording")
                 return@withContext
             }
-            if (captureEngine.isCaptureActive && !captureEngine.isReceivingAudio()) {
+            if (captureEngine.isCaptureActive &&
+                captureEngine.isReceivingAudio(if (_state.value.appMode == AppMode.MULTITRACK_RECORD) 5_000 else 1_500)
+            ) {
+                OmtLog.i("MixerSession", "FLOW 8 capture already active — skip USB teardown")
+                return@withContext
+            }
+            if (captureEngine.isCaptureActive && !captureEngine.isReceivingAudio(5_000)) {
                 captureEngine.stopCapture()
             }
             AudioEngineRouter.stopAllRecording()
@@ -1498,17 +1504,24 @@ class MixerSessionController(
         if (want) {
             val descriptor = activeDescriptor ?: return
             val probe = activeProbe ?: return
+            val recordMode = _state.value.appMode == AppMode.MULTITRACK_RECORD
+            val receiveWindowMs = when {
+                isRecordingTransport() -> 5_000L
+                recordMode -> 5_000L
+                else -> 1_500L
+            }
             withContext(Dispatchers.IO) {
                 if (isRecordingTransport() && captureEngine.isCaptureActive) {
                     return@withContext
                 }
                 val needsCapture = !captureEngine.isCaptureActive ||
                     (!captureEngine.isSyntheticCapture() && !captureEngine.isNativeCaptureOwner()) ||
-                    (captureEngine.isCaptureActive && !captureEngine.isReceivingAudio())
+                    (captureEngine.isCaptureActive && !captureEngine.isReceivingAudio(receiveWindowMs))
                 if (needsCapture) {
                     if (captureEngine.isCaptureActive &&
-                        !captureEngine.isReceivingAudio() &&
-                        !isRecordingTransport()
+                        !captureEngine.isReceivingAudio(receiveWindowMs) &&
+                        !isRecordingTransport() &&
+                        !recordMode
                     ) {
                         OmtLog.w("VuMeter", "VU capture stalled for $mixerId — restarting")
                         captureEngine.stopCapture()
@@ -2253,8 +2266,21 @@ class MixerSessionController(
                 captureEngine.activeChannelCount
             }
         }
+        if (_state.value.appMode == AppMode.MULTITRACK_RECORD &&
+            captureEngine.isCaptureActive &&
+            captureEngine.isNativeCaptureOwner() &&
+            !isRecordingTransport()
+        ) {
+            return Result.success(
+                captureEngine.activeChannelCount.coerceAtLeast(channelCountFromProbe(probe)),
+            )
+        }
         if (captureEngine.isCaptureActive && !captureEngine.isUsbDegraded && captureEngine.isNativeCaptureOwner()) {
-            val receiveWindowMs = if (isRecordingTransport()) 5_000L else 1_500L
+            val receiveWindowMs = when {
+                isRecordingTransport() -> 5_000L
+                _state.value.appMode == AppMode.MULTITRACK_RECORD -> 5_000L
+                else -> 1_500L
+            }
             if (captureEngine.isReceivingAudio(receiveWindowMs)) {
                 val count = channelCountFromProbe(probe)
                 return Result.success(count)
@@ -2264,6 +2290,12 @@ class MixerSessionController(
                     "MixerSession",
                     "Capture stalled during recording for $mixerId — reconnecting stream",
                 )
+            } else if (_state.value.appMode == AppMode.MULTITRACK_RECORD) {
+                OmtLog.i(
+                    "MixerSession",
+                    "Capture active in record mode for $mixerId — keeping stream despite brief stall",
+                )
+                return Result.success(captureEngine.activeChannelCount)
             } else {
                 OmtLog.w("MixerSession", "Capture active but not receiving audio for $mixerId — reopening")
                 withContext(Dispatchers.IO) { captureEngine.stopCapture() }
@@ -2284,8 +2316,10 @@ class MixerSessionController(
         val device = enumerator.getUsbDevice(descriptor.deviceName)
             ?: return Result.failure(IllegalStateException("USB device not found"))
         if (isFlow8Active() && !isRecordingTransport()) {
-            if (!captureEngine.isCaptureActive || !captureEngine.isReceivingAudio()) {
-                prepareFlow8UsbForCaptureLocked()
+            val recordMode = _state.value.appMode == AppMode.MULTITRACK_RECORD
+            when {
+                !captureEngine.isCaptureActive -> prepareFlow8UsbForCaptureLocked()
+                !recordMode && !captureEngine.isReceivingAudio(5_000) -> prepareFlow8UsbForCaptureLocked()
             }
         }
         val stream = openStream(descriptor)

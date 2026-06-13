@@ -41,6 +41,12 @@ public:
     int32_t captureBytesPerFrame() const;
     uint64_t droppedFrames() const { return dropped_frames_.load(); }
 
+    /** Drains the capture ring to a raw interleaved PCM file on a native thread (high throughput). */
+    bool startPcmFileRecording(const std::string& path);
+    void stopPcmFileRecording();
+    uint64_t pcmFileFramesWritten() const { return file_frames_written_.load(); }
+    bool isPcmFileRecording() const { return file_recording_.load(); }
+
 private:
     enum class IoBackend { None, Libusb, Usbdevfs };
 
@@ -62,6 +68,8 @@ private:
     static void libusbCaptureCallback(struct libusb_transfer* transfer);
 
     void ingestPcmBytes(const uint8_t* bytes, size_t byte_count);
+    void pcmFileWriterLoop();
+    void stopPcmFileRecordingUnlocked();
 
     std::mutex mutex_;
     std::thread worker_;
@@ -84,6 +92,11 @@ private:
     std::vector<std::vector<uint8_t>> libusb_buffers_;
 
     std::unique_ptr<openmultitrack::SpscPcmRing> ring_;
+
+    std::atomic<bool> file_recording_{false};
+    std::atomic<uint64_t> file_frames_written_{0};
+    std::thread file_writer_;
+    FILE* file_handle_ = nullptr;
 };
 
 }  // namespace openmultitrack::uac2

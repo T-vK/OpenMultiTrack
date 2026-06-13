@@ -27,7 +27,12 @@ class Flow8E2eAppRule : ExternalResource(), E2eActivityHost {
     fun launchFresh() {
         scenario?.close()
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        AppSettingsStore(context).remoteRole = RemoteRole.OFF
+        AppSettingsStore(context).apply {
+            remoteRole = RemoteRole.OFF
+            clearActiveRecording()
+            clearAllAppModes()
+            showVuMeters = false
+        }
         MixerDeviceStore(context).listMixers()
             .filter {
                 it.vendorId != E2eConfig.FLOW8_VENDOR_ID ||

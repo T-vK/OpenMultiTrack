@@ -208,6 +208,25 @@ object AudioEngineRouter {
             AudioBackend.UAC2 -> NativeUac2Engine.captureDroppedFrames()
         }
 
+    fun startNativePcmFileRecording(path: String, backend: AudioBackend): Boolean =
+        when (backend) {
+            AudioBackend.UAC2 -> NativeUac2Engine.startPcmFileRecording(path)
+            AudioBackend.OBOE -> false
+        }
+
+    fun stopNativePcmFileRecording(backend: AudioBackend) {
+        when (backend) {
+            AudioBackend.UAC2 -> NativeUac2Engine.stopPcmFileRecording()
+            AudioBackend.OBOE -> Unit
+        }
+    }
+
+    fun nativePcmFileFramesWritten(backend: AudioBackend): Long =
+        when (backend) {
+            AudioBackend.UAC2 -> NativeUac2Engine.pcmFileFramesWritten()
+            AudioBackend.OBOE -> 0L
+        }
+
     fun startPlayback(route: PlaybackRoute, usbDevice: android.hardware.usb.UsbDevice? = null): NativeEngineStatus {
         val t0 = SystemClock.elapsedRealtime()
         fun mark(phase: String) {

@@ -111,6 +111,9 @@ class CaptureSessionEngine(
     private var captureBytesPerFrame: Int = 8
 
     @Volatile
+    private var nativePcmRecordingActive: Boolean = false
+
+    @Volatile
     private var framesWritten: Long = 0
 
     /** Frames received from USB/synthetic capture (timeline source of truth). */
@@ -360,6 +363,40 @@ class CaptureSessionEngine(
         lastMetadataPersistFrames = 0
 
         if (plan != null) {
+            var stagingFile = if (channelCount >= INTERLEAVED_LIVE_THRESHOLD) {
+                plan.liveCaptureStagingFile
+            } else {
+                null
+            }
+            var nativeActive = false
+            val captureBackend = activeRoute?.backend ?: activeBackend
+            if (stagingFile != null && captureBackend == AudioBackend.UAC2) {
+                stagingFile.parentFile?.mkdirs()
+                nativeActive = AudioEngineRouter.startNativePcmFileRecording(
+                    stagingFile.absolutePath,
+                    AudioBackend.UAC2,
+                )
+                if (nativeActive) {
+                    OmtLog.i(
+                        "CaptureSession",
+                        "native PCM recording started path=${stagingFile.absolutePath} ch=$channelCount",
+                    )
+                } else {
+                    OmtLog.w(
+                        "CaptureSession",
+                        "native PCM recording failed backend=$captureBackend path=${stagingFile.absolutePath}; " +
+                            "using JNI disk path",
+                    )
+                    stagingFile = null
+                }
+            } else if (stagingFile != null) {
+                OmtLog.w(
+                    "CaptureSession",
+                    "native PCM recording skipped backend=$captureBackend ch=$channelCount",
+                )
+                stagingFile = null
+            }
+            nativePcmRecordingActive = nativeActive
             sessionWriter = ResilientSessionWriter(
                 primarySessionDir = plan.primarySessionDir,
                 mirrorSessionDirs = plan.mirrorSessionDirs,
@@ -369,6 +406,7 @@ class CaptureSessionEngine(
                 minFreeBytes = plan.minFreeBytes,
                 primaryRoot = plan.primaryRoot,
                 captureChannelCount = channelCount,
+                liveCaptureStagingFile = if (nativeActive) stagingFile else null,
             )
             perChannelWriter = null
         } else {
@@ -382,7 +420,9 @@ class CaptureSessionEngine(
         if (activeBackend == AudioBackend.UAC2) {
             prewarmPcmWriteBuffers(framesPerChunk * captureBytesPerFrame)
         }
-        startRecordingWriteLoop()
+        if (!nativePcmRecordingActive) {
+            startRecordingWriteLoop()
+        }
 
         val armedCount = config.channelStrips.count { it.armed }
         Result.success(
@@ -452,6 +492,30 @@ class CaptureSessionEngine(
         closeRecordingWritersLocked(markComplete = true)
     }
 
+    private fun stopNativePcmRecordingIfActive(): Long {
+        if (!nativePcmRecordingActive) return 0L
+        val backend = activeBackend ?: AudioBackend.UAC2
+        AudioEngineRouter.stopNativePcmFileRecording(backend)
+        val frames = AudioEngineRouter.nativePcmFileFramesWritten(backend)
+        nativePcmRecordingActive = false
+        OmtLog.i("CaptureSession", "native PCM recording stopped frames=$frames")
+        return frames
+    }
+
+    private fun syncNativeRecordingProgress(backend: AudioBackend): Boolean {
+        val nativeFrames = AudioEngineRouter.nativePcmFileFramesWritten(backend)
+        if (nativeFrames <= framesCaptured) return false
+        framesCaptured = nativeFrames
+        framesWritten = nativeFrames
+        sessionWriter?.setLiveFramesWritten(nativeFrames)
+        lastFrameReceivedNs = System.nanoTime()
+        if (recordingMeterChunkCounter % 16 == 0) {
+            droppedFrames = AudioEngineRouter.recordingDroppedFrames(backend)
+        }
+        maybePersistTimelineAsync()
+        return true
+    }
+
     private suspend fun closeRecordingWritersLocked(markComplete: Boolean): RecordingSession? {
         val dir = sessionDir
         val config = recordingConfig
@@ -462,6 +526,12 @@ class CaptureSessionEngine(
         val legacy = legacyWavWriter
         acceptRecordingWrites = false
         stopRecordingWriteLoop()
+        val nativeFrames = stopNativePcmRecordingIfActive()
+        if (nativeFrames > 0L) {
+            resilient?.setLiveFramesWritten(nativeFrames)
+            framesCaptured = nativeFrames.coerceAtLeast(framesCaptured)
+            framesWritten = nativeFrames.coerceAtLeast(framesWritten)
+        }
         val recordedFrames = when {
             resilient != null -> resilient.totalFramesWritten()
             writer != null -> writer.totalFramesWritten()
@@ -488,9 +558,18 @@ class CaptureSessionEngine(
 
         if (dir != null && config != null) {
             buildSessionMetadata(config, rate, recordedFrames).writeTo(dir)
-            if (markComplete) {
+            val hasChannelWavs = dir.listFiles()?.any { file ->
+                file.isFile && file.extension.equals("wav", ignoreCase = true)
+            } == true
+            if (markComplete && hasChannelWavs) {
                 SessionMetadata.read(dir)?.markComplete(dir)
+            } else if (!markComplete) {
+                SessionMetadata.read(dir)?.copy(incomplete = true)?.writeTo(dir)
             } else {
+                OmtLog.e(
+                    "CaptureSession",
+                    "recording close produced no channel WAVs; leaving session incomplete",
+                )
                 SessionMetadata.read(dir)?.copy(incomplete = true)?.writeTo(dir)
             }
         }
@@ -511,6 +590,7 @@ class CaptureSessionEngine(
 
     suspend fun stopCapture() = lifecycleMutex.withLock {
         stopRecordingWriteLoop()
+        stopNativePcmRecordingIfActive()
         val resilient = sessionWriter
         sessionWriter = null
         resilient?.close()
@@ -698,6 +778,24 @@ class CaptureSessionEngine(
                         }
                         var framesThisPass = 0
                         var gotAnyFrames = false
+
+                        if (isRecording && nativePcmRecordingActive && backend == AudioBackend.UAC2 && synthetic == null) {
+                            recordingMeterChunkCounter++
+                            gotAnyFrames = syncNativeRecordingProgress(backend)
+                            if (!gotAnyFrames) {
+                                consecutiveEmptyReads++
+                                if (isRecording && usbDegraded) {
+                                    val advanced = catchUpTimelineToTarget(maxFramesPerPass = 65_536)
+                                    if (advanced > 0) continue
+                                }
+                                if (consecutiveEmptyReads > 32) {
+                                    Thread.sleep(1)
+                                }
+                            } else {
+                                consecutiveEmptyReads = 0
+                            }
+                            continue
+                        }
 
                         while (framesThisPass < maxFramesThisPass) {
                             val usePcmRecording =
@@ -1373,12 +1471,13 @@ class CaptureSessionEngine(
         private const val METER_OUTPUT_THRESHOLD = 1e-5f
         private const val WRITE_BUFFER_POOL_SIZE = 24
         private const val DISK_WRITE_QUEUE_CAPACITY = 64
+        private const val INTERLEAVED_LIVE_THRESHOLD = 8
         /** Drain up to ~680 ms of audio per fanout pass when the native ring has backlog. */
         private const val MAX_FRAMES_PER_FANOUT_PASS = 32_768
 
         private val captureFanoutDispatcher = Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "capture-fanout").apply {
-                priority = Thread.MAX_PRIORITY
+                priority = Thread.NORM_PRIORITY + 1
             }
         }.asCoroutineDispatcher()
 

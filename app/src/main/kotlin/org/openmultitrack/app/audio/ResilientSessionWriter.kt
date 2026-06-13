@@ -3,6 +3,7 @@ package org.openmultitrack.app.audio
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.channel.ChannelStripState
 import org.openmultitrack.sessionio.session.SessionMetadata
+import org.openmultitrack.sessionio.wav.InterleavedRawPcmSplitter
 import org.openmultitrack.sessionio.wav.InterleavedWavSplitter
 import org.openmultitrack.sessionio.wav.PerChannelWavWriter
 import org.openmultitrack.sessionio.wav.WavWriter
@@ -24,6 +25,8 @@ class ResilientSessionWriter private constructor(
     private val spill: PerChannelWavWriter?,
     private val livePrimary: WavWriter?,
     private val liveSpill: WavWriter?,
+    private val liveCaptureStagingFile: File?,
+    private val nativePcmBytesPerFrame: Int,
     private val mirrorSessionDirs: List<File>,
     private val spillSessionDir: File?,
     private val minFreeBytes: Long,
@@ -41,12 +44,15 @@ class ResilientSessionWriter private constructor(
         minFreeBytes: Long,
         primaryRoot: File,
         captureChannelCount: Int = channelStrips.maxOfOrNull { it.index }?.plus(1) ?: 1,
+        liveCaptureStagingFile: File? = null,
     ) : this(
         primarySessionDir = primarySessionDir,
         channelStrips = channelStrips,
         sampleRateHz = sampleRate,
         captureChannelCount = captureChannelCount,
-        primary = if (captureChannelCount >= INTERLEAVED_LIVE_THRESHOLD) {
+        primary = if (captureChannelCount >= INTERLEAVED_LIVE_THRESHOLD && liveCaptureStagingFile == null) {
+            null
+        } else if (captureChannelCount >= INTERLEAVED_LIVE_THRESHOLD) {
             null
         } else {
             PerChannelWavWriter(primarySessionDir, channelStrips, sampleRate)
@@ -56,7 +62,7 @@ class ResilientSessionWriter private constructor(
         } else {
             spillSessionDir?.let { PerChannelWavWriter(it, channelStrips, sampleRate) }
         },
-        livePrimary = if (captureChannelCount >= INTERLEAVED_LIVE_THRESHOLD) {
+        livePrimary = if (captureChannelCount >= INTERLEAVED_LIVE_THRESHOLD && liveCaptureStagingFile == null) {
             WavWriter(
                 File(primarySessionDir, INTERLEAVED_TMP_NAME),
                 captureChannelCount,
@@ -66,7 +72,10 @@ class ResilientSessionWriter private constructor(
         } else {
             null
         },
-        liveSpill = if (captureChannelCount >= INTERLEAVED_LIVE_THRESHOLD && spillSessionDir != null) {
+        liveSpill = if (captureChannelCount >= INTERLEAVED_LIVE_THRESHOLD &&
+            liveCaptureStagingFile == null &&
+            spillSessionDir != null
+        ) {
             WavWriter(
                 File(spillSessionDir, INTERLEAVED_TMP_NAME),
                 captureChannelCount,
@@ -75,6 +84,12 @@ class ResilientSessionWriter private constructor(
             )
         } else {
             null
+        },
+        liveCaptureStagingFile = liveCaptureStagingFile,
+        nativePcmBytesPerFrame = if (liveCaptureStagingFile != null) {
+            captureChannelCount * 4
+        } else {
+            0
         },
         mirrorSessionDirs = mirrorSessionDirs,
         spillSessionDir = spillSessionDir,
@@ -160,6 +175,10 @@ class ResilientSessionWriter private constructor(
 
     fun channelStrips(): List<ChannelStripState> = channelStrips
 
+    fun setLiveFramesWritten(frames: Long) {
+        liveFramesWritten = frames
+    }
+
     fun totalFramesWritten(): Long {
         if (liveFramesWritten > 0L) return liveFramesWritten
         val primaryFrames = primary?.totalFramesWritten() ?: 0L
@@ -175,20 +194,48 @@ class ResilientSessionWriter private constructor(
     override fun close() {
         livePrimary?.close()
         liveSpill?.close()
-        if (livePrimary != null) {
-            finalizeInterleavedLive(livePrimary, primarySessionDir)
-            liveSpill?.let { spillFile ->
-                if (spillSessionDir != null && !primaryHealthy) {
-                    finalizeInterleavedLive(spillFile, spillSessionDir)
-                } else {
-                    File(spillFile.outputFile.absolutePath).delete()
+        when {
+            liveCaptureStagingFile != null -> {
+                finalizeNativeStaging(liveCaptureStagingFile, primarySessionDir)
+            }
+            livePrimary != null -> {
+                finalizeInterleavedLive(livePrimary, primarySessionDir)
+                liveSpill?.let { spillFile ->
+                    if (spillSessionDir != null && !primaryHealthy) {
+                        finalizeInterleavedLive(spillFile, spillSessionDir)
+                    } else {
+                        File(spillFile.outputFile.absolutePath).delete()
+                    }
                 }
             }
-        } else {
-            primary?.close()
-            spill?.close()
+            else -> {
+                primary?.close()
+                spill?.close()
+            }
         }
         syncRedundantCopies()
+    }
+
+    private fun finalizeNativeStaging(raw: File, targetDir: File) {
+        val frames = liveFramesWritten
+        if (!raw.isFile || frames <= 0L) {
+            raw.delete()
+            return
+        }
+        runCatching {
+            InterleavedRawPcmSplitter.splitToPerChannel(
+                rawFile = raw,
+                sessionDir = targetDir,
+                channelStrips = channelStrips,
+                sourceChannelCount = captureChannelCount,
+                sampleRate = sampleRateHz,
+                bytesPerFrame = nativePcmBytesPerFrame,
+                frameCount = frames,
+            )
+        }.onFailure { e ->
+            OmtLog.e("ResilientWriter", "native staging split failed: ${e.message}")
+        }
+        raw.delete()
     }
 
     private fun finalizeInterleavedLive(writer: WavWriter, targetDir: File) {
@@ -267,6 +314,8 @@ class ResilientSessionWriter private constructor(
             spill = spillSessionDir?.let { PerChannelWavWriter.openForResume(it, metadata) },
             livePrimary = null,
             liveSpill = null,
+            liveCaptureStagingFile = null,
+            nativePcmBytesPerFrame = 0,
             mirrorSessionDirs = mirrorSessionDirs,
             spillSessionDir = spillSessionDir,
             minFreeBytes = minFreeBytes,

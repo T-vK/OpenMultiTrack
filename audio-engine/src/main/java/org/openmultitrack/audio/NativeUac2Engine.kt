@@ -26,6 +26,14 @@ object NativeUac2Engine {
 
     fun captureDroppedFrames(): Long = nativeCaptureDroppedFrames()
 
+    fun startPcmFileRecording(path: String): Boolean = nativeStartPcmFileRecording(path)
+
+    fun stopPcmFileRecording() {
+        nativeStopPcmFileRecording()
+    }
+
+    fun pcmFileFramesWritten(): Long = nativePcmFileFramesWritten()
+
     fun startPlayback(
         usbFd: Int,
         alt: NativeUac2AltSetting,
@@ -56,6 +64,12 @@ object NativeUac2Engine {
     private external fun nativeCaptureBytesPerFrame(): Int
 
     private external fun nativeCaptureDroppedFrames(): Long
+
+    private external fun nativeStartPcmFileRecording(path: String): Boolean
+
+    private external fun nativeStopPcmFileRecording()
+
+    private external fun nativePcmFileFramesWritten(): Long
 
     private external fun nativeStartPlayback(
         usbFd: Int,

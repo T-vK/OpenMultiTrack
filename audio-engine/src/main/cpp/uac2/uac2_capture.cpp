@@ -10,9 +10,11 @@
 
 #include <chrono>
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <future>
 #include <poll.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #include <vector>
 
@@ -20,7 +22,7 @@ namespace openmultitrack::uac2 {
 
 namespace {
 
-constexpr int kNumUrbs = 32;
+constexpr int kNumUrbs = 64;
 constexpr int kOpenVerifyTimeoutMs = 1500;
 constexpr size_t kMinVerifyFrames = 48;
 
@@ -79,7 +81,7 @@ CaptureStatus Uac2Capture::open(int usb_fd, const Uac2AltSetting& alt, bool java
     channel_count_ = alt.format.channels;
     sample_rate_ = static_cast<int32_t>(alt.format.sample_rate_hz);
     ring_ = std::make_unique<openmultitrack::SpscPcmRing>(
-        480'000,
+        960'000,
         alt.format.channels,
         alt.format.subframe_bytes);
 
@@ -231,6 +233,7 @@ void Uac2Capture::close() {
 }
 
 void Uac2Capture::closeUnlocked() {
+    stopPcmFileRecordingUnlocked();
     if (backend_ == IoBackend::None && libusb_handle_ == nullptr && usb_fd_ < 0) {
         return;
     }
@@ -300,6 +303,82 @@ int32_t Uac2Capture::captureBytesPerFrame() const {
     return static_cast<int32_t>(bytesPerFrame(alt_.format));
 }
 
+bool Uac2Capture::startPcmFileRecording(const std::string& path) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    stopPcmFileRecordingUnlocked();
+    if (ring_ == nullptr || !running_.load()) {
+        return false;
+    }
+    FILE* file = std::fopen(path.c_str(), "wb");
+    if (file == nullptr) {
+        OMT_LOGE("uac2 pcm file open failed: %s", std::strerror(errno));
+        return false;
+    }
+    static constexpr size_t kFileBufferBytes = 1u << 20;
+    if (std::setvbuf(file, nullptr, _IOFBF, kFileBufferBytes) != 0) {
+        OMT_LOGW("uac2 pcm file setvbuf failed for %s", path.c_str());
+    }
+    file_handle_ = file;
+    file_frames_written_.store(0);
+    file_recording_.store(true);
+    file_writer_ = std::thread(&Uac2Capture::pcmFileWriterLoop, this);
+    OMT_LOGI("uac2 pcm file recording started path=%s", path.c_str());
+    return true;
+}
+
+void Uac2Capture::stopPcmFileRecording() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    stopPcmFileRecordingUnlocked();
+}
+
+void Uac2Capture::stopPcmFileRecordingUnlocked() {
+    if (!file_recording_.load() && !file_writer_.joinable()) {
+        return;
+    }
+    file_recording_.store(false);
+    if (file_writer_.joinable()) {
+        file_writer_.join();
+    }
+    if (file_handle_ != nullptr) {
+        std::fflush(file_handle_);
+        std::fclose(file_handle_);
+        file_handle_ = nullptr;
+    }
+    OMT_LOGI("uac2 pcm file recording stopped frames=%llu",
+             static_cast<unsigned long long>(file_frames_written_.load()));
+}
+
+void Uac2Capture::pcmFileWriterLoop() {
+#if defined(__ANDROID__)
+    setpriority(PRIO_PROCESS, 0, -12);
+#endif
+    const size_t bpf = static_cast<size_t>(bytesPerFrame(alt_.format));
+    if (bpf == 0) {
+        return;
+    }
+    std::vector<uint8_t> scratch(524288);
+    const size_t max_frames = scratch.size() / bpf;
+    while (file_recording_.load()) {
+        const size_t frames = readPcmBytes(scratch.data(), max_frames);
+        if (frames == 0) {
+            std::this_thread::yield();
+            continue;
+        }
+        FILE* file = file_handle_;
+        if (file == nullptr) {
+            break;
+        }
+        const size_t byte_count = frames * bpf;
+        const size_t written = std::fwrite(scratch.data(), 1, byte_count, file);
+        if (written != byte_count) {
+            OMT_LOGE("uac2 pcm file fwrite short write %zu/%zu", written, byte_count);
+            file_recording_.store(false);
+            break;
+        }
+        file_frames_written_.fetch_add(frames);
+    }
+}
+
 void Uac2Capture::ingestPcmBytes(const uint8_t* bytes, size_t byte_count) {
     if (ring_ == nullptr || byte_count == 0) return;
     const size_t bpf = bytesPerFrame(alt_.format);
@@ -336,9 +415,12 @@ void Uac2Capture::freeLibusbTransfers() {
 }
 
 void Uac2Capture::libusbEventLoop() {
+#if defined(__ANDROID__)
+    setpriority(PRIO_PROCESS, 0, -10);
+#endif
     timeval tv{};
     tv.tv_sec = 0;
-    tv.tv_usec = 50'000;
+    tv.tv_usec = 1'000;
     while (running_.load()) {
         if (libusb_ctx_ == nullptr) {
             break;
@@ -446,6 +528,9 @@ void Uac2Capture::workerLoopLibusb(std::promise<bool> init_promise) {
 }
 
 void Uac2Capture::workerLoopUsbdevfs(std::promise<bool> init_promise) {
+#if defined(__ANDROID__)
+    setpriority(PRIO_PROCESS, 0, -10);
+#endif
     const IsoUrbLayout layout = urb_layout_;
 
     std::vector<UrbContext> contexts(kNumUrbs);

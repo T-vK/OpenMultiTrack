@@ -49,10 +49,12 @@ object SessionLibrary {
     private fun sessionSummaryIfComplete(dir: File, mixerId: String): SessionSummary? {
         val meta = SessionMetadata.read(dir) ?: return null
         if (meta.incomplete || meta.mixerId != mixerId) return null
+        val frames = durationFrames(dir, meta)
+        if (frames <= 0L) return null
         return SessionSummary(
             dir = dir,
             metadata = meta,
-            durationFrames = durationFrames(dir, meta),
+            durationFrames = frames,
         )
     }
 

@@ -11,6 +11,8 @@ data class RecordingWritePlan(
     val spillSessionDir: File?,
     val primaryRoot: File,
     val minFreeBytes: Long,
+    /** Fast internal-storage staging file for native UAC2 PCM capture (8+ ch). */
+    val liveCaptureStagingFile: File?,
 ) {
     companion object {
         fun create(
@@ -34,12 +36,18 @@ data class RecordingWritePlan(
             } else {
                 null
             }
+            val stagingDir = File(
+                resolver.localSpillRoot(),
+                "$mixerFolderName/${primarySessionDir.name}",
+            ).apply { mkdirs() }
+            val liveCaptureStagingFile = File(stagingDir, ".capture_interleaved.raw")
             return RecordingWritePlan(
                 primarySessionDir = primarySessionDir,
                 mirrorSessionDirs = mirrors,
                 spillSessionDir = spill,
                 primaryRoot = primaryRoot,
                 minFreeBytes = settings.minFreeStorageBytes,
+                liveCaptureStagingFile = liveCaptureStagingFile,
             )
         }
     }

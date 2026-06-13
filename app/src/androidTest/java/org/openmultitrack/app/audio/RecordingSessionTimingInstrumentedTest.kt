@@ -62,6 +62,7 @@ class RecordingSessionTimingInstrumentedTest {
             spillSessionDir = spillDir,
             primaryRoot = root,
             minFreeBytes = 0L,
+            liveCaptureStagingFile = null,
         )
 
         engine.startRecording(

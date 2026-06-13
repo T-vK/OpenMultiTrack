@@ -73,7 +73,7 @@ class WavReader(private val file: File) : AutoCloseable {
                 buf.short // align
                 val bits = buf.short.toInt()
                 require(audioFormat == 1) { "Only PCM supported, got $audioFormat" }
-                require(bits == 24) { "Only 24-bit supported, got $bits" }
+                require(bits == 24 || bits == 32) { "Only 24/32-bit supported, got $bits" }
                 val dataSize = r.length() - 44
                 return WavFormat(
                     channelCount = channels,
