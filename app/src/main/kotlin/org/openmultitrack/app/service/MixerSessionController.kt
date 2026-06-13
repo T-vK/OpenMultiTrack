@@ -1979,7 +1979,8 @@ class MixerSessionController(
                     lastPosSec >= 0f &&
                     durSec > 0f &&
                     posSec < durSec - 0.25f &&
-                    System.currentTimeMillis() - lastAdvanceMs > 2_500L
+                    System.currentTimeMillis() - lastAdvanceMs >
+                        if (isFlow8Active()) 4_500L else 2_500L
                 ) {
                     OmtLog.w("MixerSession", "playback stalled at ${posSec}s — stopping")
                     org.openmultitrack.app.util.AppLogBuffer.append(

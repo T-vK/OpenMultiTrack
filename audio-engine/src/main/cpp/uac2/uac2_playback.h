@@ -54,6 +54,7 @@ private:
     void libusbEventLoop();
     void freeLibusbTransfers();
     bool fillUrbBuffer(uint8_t* dest, size_t byte_capacity, size_t* frames_written);
+    bool resubmitLibusbTransfer(libusb_transfer* transfer);
 
     static void libusbPlaybackCallback(struct libusb_transfer* transfer);
 

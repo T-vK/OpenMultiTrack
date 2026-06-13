@@ -18,6 +18,10 @@
 #include <vector>
 #include <algorithm>
 
+#if defined(__ANDROID__)
+#include <sys/resource.h>
+#endif
+
 namespace openmultitrack::uac2 {
 
 namespace {
@@ -55,7 +59,7 @@ PlaybackStatus Uac2Playback::open(int usb_fd, const Uac2AltSetting& alt, bool ja
     java_interface_claimed_ = java_interface_claimed;
     channel_count_ = alt.format.channels;
     sample_rate_ = static_cast<int32_t>(alt.format.sample_rate_hz);
-    ring_ = std::make_unique<openmultitrack::SpscRingBuffer>(48'000, channel_count_);
+    ring_ = std::make_unique<openmultitrack::SpscRingBuffer>(96'000, channel_count_);
     urb_layout_ = layoutForAlt(alt, false);
 
     bool opened = tryOpenUsbdevfs(usb_fd, alt, java_interface_claimed);
@@ -320,15 +324,47 @@ void Uac2Playback::freeLibusbTransfers() {
 }
 
 void Uac2Playback::libusbEventLoop() {
+#if defined(__ANDROID__)
+    setpriority(PRIO_PROCESS, 0, -10);
+#endif
     timeval tv{};
     tv.tv_sec = 0;
-    tv.tv_usec = 50'000;
+    tv.tv_usec = 0;
     while (running_.load()) {
         if (libusb_ctx_ == nullptr) {
             break;
         }
         (void)libusb_handle_events_timeout_completed(libusb_ctx_, &tv, nullptr);
     }
+}
+
+bool Uac2Playback::resubmitLibusbTransfer(libusb_transfer* transfer) {
+    if (transfer == nullptr || !running_.load()) {
+        return false;
+    }
+
+    size_t frames = 0;
+    fillUrbBuffer(transfer->buffer, static_cast<size_t>(transfer->length), &frames);
+    prepareLibusbIsoOutTransfer(transfer);
+
+    for (int attempt = 0; attempt < 4 && running_.load(); ++attempt) {
+        const int r = libusb_submit_transfer(transfer);
+        if (r == 0) {
+            return true;
+        }
+        if (r == LIBUSB_ERROR_BUSY || r == LIBUSB_ERROR_NO_MEM || r == LIBUSB_ERROR_INTERRUPTED) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            continue;
+        }
+        if (r == LIBUSB_ERROR_IO && libusb_handle_ != nullptr) {
+            (void)libusb_clear_halt(libusb_handle_, alt_.endpoint_address);
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            continue;
+        }
+        OMT_LOGW("uac2 playback libusb resubmit failed: %s", libusb_error_name(r));
+        return false;
+    }
+    return false;
 }
 
 void Uac2Playback::LIBUSB_CALL Uac2Playback::libusbPlaybackCallback(struct libusb_transfer* transfer) {
@@ -351,20 +387,14 @@ void Uac2Playback::LIBUSB_CALL Uac2Playback::libusbPlaybackCallback(struct libus
 }
 
 void Uac2Playback::workerLoopLibusb(std::promise<bool> init_promise) {
+#if defined(__ANDROID__)
+    setpriority(PRIO_PROCESS, 0, -10);
+#endif
     const IsoUrbLayout layout = urb_layout_;
     const size_t bpf = bytesPerFrame(alt_.format);
     const int frames_per_urb =
         bpf > 0 ? layout.buffer_length / static_cast<int>(bpf) : 0;
     bool init_reported = false;
-
-    // Wait for the Kotlin read loop to prime the ring — otherwise isoch OUT drains silence.
-    const size_t min_prime = std::max<size_t>(static_cast<size_t>(sample_rate_ / 5), 2400);
-    for (int i = 0; i < 150 && running_.load(); ++i) {
-        if (ring_ != nullptr && ring_->availableFrames() >= min_prime) {
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
 
     libusb_transfers_.clear();
     libusb_buffers_.clear();
@@ -412,8 +442,17 @@ void Uac2Playback::workerLoopLibusb(std::promise<bool> init_promise) {
         init_reported = true;
     }
 
+    const size_t min_prime = std::max<size_t>(static_cast<size_t>(sample_rate_ / 10), 2'400);
+    for (int i = 0; i < 250 && running_.load(); ++i) {
+        if (ring_ != nullptr && ring_->availableFrames() >= min_prime) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+
     const int64_t pipeline_frames = static_cast<int64_t>(frames_per_urb) * kNumUrbs;
     const auto playback_start = std::chrono::steady_clock::now();
+    int io_error_streak = 0;
 
     while (running_.load()) {
         const auto elapsed = std::chrono::steady_clock::now() - playback_start;
@@ -443,23 +482,19 @@ void Uac2Playback::workerLoopLibusb(std::promise<bool> init_promise) {
             }
 
             libusb_transfer* transfer = libusb_transfers_[static_cast<size_t>(slot)];
-            size_t frames = 0;
-            fillUrbBuffer(transfer->buffer,
-                          static_cast<size_t>(transfer->length),
-                          &frames);
-            prepareLibusbIsoOutTransfer(transfer);
-
-            const int r = libusb_submit_transfer(transfer);
-            if (r != 0) {
-                OMT_LOGE("uac2 playback libusb SUBMIT failed: %s", libusb_error_name(r));
-                if (!init_reported) {
-                    init_promise.set_value(false);
-                    init_reported = true;
+            if (!resubmitLibusbTransfer(transfer)) {
+                ++io_error_streak;
+                if (io_error_streak % 4 == 0 && libusb_handle_ != nullptr) {
+                    (void)libusb_clear_halt(libusb_handle_, alt_.endpoint_address);
                 }
-                running_.store(false);
-                return;
+                libusb_submitted_frames_.store(
+                    std::max<int64_t>(0, submitted - frames_per_urb * 2),
+                    std::memory_order_relaxed);
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                break;
             }
 
+            io_error_streak = 0;
             libusb_in_flight_mask_.fetch_or(1u << static_cast<unsigned int>(slot));
             submitted += frames_per_urb;
             libusb_submitted_frames_.store(submitted, std::memory_order_relaxed);
