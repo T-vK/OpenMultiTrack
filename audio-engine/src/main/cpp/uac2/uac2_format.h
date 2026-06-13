@@ -14,6 +14,14 @@ void pcmFrameToFloat(const uint8_t* src,
                      uint8_t subframe_bytes,
                      uint8_t bit_resolution);
 
+/** Convert contiguous interleaved PCM bytes to float frames. Returns frames converted. */
+size_t pcmInterleavedToFloat(const uint8_t* src,
+                             size_t byte_count,
+                             float* dest,
+                             uint8_t channels,
+                             uint8_t subframe_bytes,
+                             uint8_t bit_resolution);
+
 /** Convert float interleaved frame to PCM for isoch OUT. */
 void floatFrameToPcm(const float* src,
                      uint8_t* dest,

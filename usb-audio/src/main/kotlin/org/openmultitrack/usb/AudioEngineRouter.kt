@@ -181,6 +181,12 @@ object AudioEngineRouter {
             AudioBackend.UAC2 -> NativeUac2Engine.readCapturedFrames(dest, maxFrames)
         }
 
+    fun readRecordedPcm(dest: ByteArray, maxFrames: Int, backend: AudioBackend): Int =
+        when (backend) {
+            AudioBackend.OBOE -> 0
+            AudioBackend.UAC2 -> NativeUac2Engine.readCapturedPcmBytes(dest, maxFrames)
+        }
+
     fun recordingDroppedFrames(backend: AudioBackend): Long =
         when (backend) {
             AudioBackend.OBOE -> NativeAudioEngine.recordingDroppedFrames()

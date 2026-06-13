@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../spsc_ring_buffer.h"
+#include "../spsc_pcm_ring.h"
 #include "uac2_types.h"
 #include "uac2_urb.h"
 
@@ -37,6 +37,7 @@ public:
     void close();
 
     size_t readFrames(float* dest, size_t max_frames);
+    size_t readPcmBytes(uint8_t* dest, size_t max_frames);
     uint64_t droppedFrames() const { return dropped_frames_.load(); }
 
 private:
@@ -59,6 +60,8 @@ private:
 
     static void libusbCaptureCallback(struct libusb_transfer* transfer);
 
+    void ingestPcmBytes(const uint8_t* bytes, size_t byte_count);
+
     std::mutex mutex_;
     std::thread worker_;
     std::thread libusb_event_thread_;
@@ -79,7 +82,7 @@ private:
     std::vector<libusb_transfer*> libusb_transfers_;
     std::vector<std::vector<uint8_t>> libusb_buffers_;
 
-    std::unique_ptr<openmultitrack::SpscRingBuffer> ring_;
+    std::unique_ptr<openmultitrack::SpscPcmRing> ring_;
 };
 
 }  // namespace openmultitrack::uac2

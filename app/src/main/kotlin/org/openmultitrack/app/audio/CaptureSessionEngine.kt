@@ -68,6 +68,14 @@ class CaptureSessionEngine(
             val returnToPool: Boolean = true,
         ) : RecordingWriteRequest
 
+        data class PcmFrames(
+            val samples: ByteArray,
+            val frameCount: Int,
+            val channelCount: Int,
+            val bytesPerFrame: Int,
+            val returnToPool: Boolean = true,
+        ) : RecordingWriteRequest
+
         data class Silence(val frameCount: Int) : RecordingWriteRequest
 
         data object Shutdown : RecordingWriteRequest
@@ -347,6 +355,7 @@ class CaptureSessionEngine(
                 sampleRate = sampleRate,
                 minFreeBytes = plan.minFreeBytes,
                 primaryRoot = plan.primaryRoot,
+                captureChannelCount = channelCount,
             )
             perChannelWriter = null
         } else {
@@ -355,7 +364,11 @@ class CaptureSessionEngine(
         }
 
         buildSessionMetadata(config, sampleRate, framesWritten).writeTo(dir)
-        prewarmWriteBuffers(SessionRecorder.chunkFramesForChannels(channelCount) * channelCount)
+        val framesPerChunk = SessionRecorder.chunkFramesForChannels(channelCount)
+        prewarmWriteBuffers(framesPerChunk * channelCount)
+        if (activeBackend == AudioBackend.UAC2) {
+            prewarmPcmWriteBuffers(framesPerChunk * channelCount * PCM_BYTES_PER_SAMPLE)
+        }
         startRecordingWriteLoop()
 
         val armedCount = config.channelStrips.count { it.armed }
@@ -444,7 +457,7 @@ class CaptureSessionEngine(
         OmtLog.i(
             "CaptureSession",
             "closeRecording captured=$capturedFrames queued=$framesWritten disk=$recordedFrames " +
-                "rate=$rate markComplete=$markComplete",
+                "dropped=$droppedFrames rate=$rate markComplete=$markComplete",
         )
         sessionWriter = null
         resilient?.close()
@@ -658,91 +671,140 @@ class CaptureSessionEngine(
                         if (!isRecording) {
                             decayMeterHoldForElapsed()
                         }
-                        val sampleCount = framesPerChunk * channelCount
-                        val recordBuf = if (isRecording && backend != null && synthetic == null) {
-                            acquireWriteBuffer(sampleCount)
+                        val maxFramesThisPass = if (isRecording) {
+                            MAX_FRAMES_PER_FANOUT_PASS
                         } else {
-                            null
+                            framesPerChunk
                         }
-                        val captureDest = recordBuf ?: scratch
-                        val rawFrames = when {
-                            synthetic != null -> synthetic.fill(scratch, framesPerChunk)
-                            usbDegraded -> 0
-                            backend != null -> AudioEngineRouter.readRecordedFrames(captureDest, framesPerChunk, backend)
-                            else -> 0
-                        }
-                        val frames = rawFrames.coerceIn(0, framesPerChunk)
+                        var framesThisPass = 0
+                        var gotAnyFrames = false
 
-                        if (frames <= 0) {
-                            recordBuf?.let { releaseWriteBuffer(it) }
+                        while (framesThisPass < maxFramesThisPass) {
+                            val usePcmRecording =
+                                isRecording && backend == AudioBackend.UAC2 && synthetic == null
+                            val frames: Int
+                            if (usePcmRecording) {
+                                val bytesPerFrame = channelCount * PCM_BYTES_PER_SAMPLE
+                                val byteCount = framesPerChunk * bytesPerFrame
+                                val recordPcmBuf = acquirePcmWriteBuffer(byteCount)
+                                val rawFrames = AudioEngineRouter.readRecordedPcm(
+                                    recordPcmBuf,
+                                    framesPerChunk,
+                                    backend,
+                                )
+                                frames = rawFrames.coerceIn(0, framesPerChunk)
+                                if (frames <= 0) {
+                                    releasePcmWriteBuffer(recordPcmBuf)
+                                    break
+                                }
+                                gotAnyFrames = true
+                                framesThisPass += frames
+                                consecutiveEmptyReads = 0
+                                lastFrameReceivedNs = System.nanoTime()
+                                framesCaptured += frames
+                                if (recordingMeterChunkCounter % 16 == 0) {
+                                    droppedFrames = AudioEngineRouter.recordingDroppedFrames(backend)
+                                }
+                                enqueueRecordingPcmFrames(recordPcmBuf, frames, channelCount, bytesPerFrame)
+                            } else {
+                                val sampleCount = framesPerChunk * channelCount
+                                val recordBuf = if (isRecording && backend != null && synthetic == null) {
+                                    acquireWriteBuffer(sampleCount)
+                                } else {
+                                    null
+                                }
+                                val captureDest = recordBuf ?: scratch
+                                val rawFrames = when {
+                                    synthetic != null -> synthetic.fill(scratch, framesPerChunk)
+                                    usbDegraded -> 0
+                                    backend != null -> AudioEngineRouter.readRecordedFrames(
+                                        captureDest,
+                                        framesPerChunk,
+                                        backend,
+                                    )
+                                    else -> 0
+                                }
+                                frames = rawFrames.coerceIn(0, framesPerChunk)
+
+                                if (frames <= 0) {
+                                    recordBuf?.let { releaseWriteBuffer(it) }
+                                    break
+                                }
+                                gotAnyFrames = true
+                                framesThisPass += frames
+                                consecutiveEmptyReads = 0
+                                lastFrameReceivedNs = System.nanoTime()
+                                framesCaptured += frames
+                                if (synthetic != null) {
+                                    throttleSyntheticToRealtime()
+                                }
+                                if (backend != null && (!isRecording || recordingMeterChunkCounter % 16 == 0)) {
+                                    droppedFrames = AudioEngineRouter.recordingDroppedFrames(backend)
+                                }
+
+                                if (isRecording) {
+                                    if (recordBuf != null) {
+                                        enqueueRecordingFrames(recordBuf, frames, channelCount)
+                                    } else {
+                                        writeRecordingFrames(scratch, frames, channelCount)
+                                    }
+                                } else {
+                                    recordBuf?.let { releaseWriteBuffer(it) }
+                                    accumulateWaveformPeaks(scratch, frames, channelCount)
+                                    maybeEmitWaveformPeaks()
+
+                                    val monitor = monitorConfig.get()
+                                    if (monitor.enabled && MonitorMixer.effectiveMonitorChannels(monitor).isNotEmpty()) {
+                                        ensureMonitorOutput(monitor.outputDeviceId)
+                                        val mixed = MonitorMixer.mixToStereo(
+                                            scratch,
+                                            frames,
+                                            channelCount,
+                                            monitor,
+                                            monitorScratch,
+                                        )
+                                        if (mixed > 0 && monitorOutputRunning.get()) {
+                                            NativeAudioMonitor.writeFrames(monitorScratch, mixed)
+                                        }
+                                    }
+
+                                    val virtualMic = virtualMicConfig.get()
+                                    if (virtualMic != null && virtualMic.enabled && virtualMic.selectedChannels.isNotEmpty()) {
+                                        ensureVirtualMicOutput(virtualMic)
+                                        val outCh = ChannelMixdown.outputChannelCount(
+                                            virtualMic.selectedChannels,
+                                            virtualMic.stereo,
+                                        )
+                                        val mixed = ChannelMixdown.mixToOutput(
+                                            scratch,
+                                            frames,
+                                            channelCount,
+                                            virtualMic.selectedChannels,
+                                            stereo = outCh == 2,
+                                            dest = virtualMicScratch,
+                                        )
+                                        if (mixed > 0 && virtualMicOutputRunning) {
+                                            NativeAudioEngine.writePlaybackFrames(virtualMicScratch, mixed)
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (!isRecording || frames < framesPerChunk) {
+                                break
+                            }
+                        }
+
+                        if (!gotAnyFrames) {
                             consecutiveEmptyReads++
                             if (isRecording && usbDegraded) {
                                 val advanced = catchUpTimelineToTarget(maxFramesPerPass = 65_536)
                                 if (advanced > 0) continue
                             }
-                            Thread.sleep(2)
-                            continue
-                        }
-                        consecutiveEmptyReads = 0
-                        lastFrameReceivedNs = System.nanoTime()
-                        framesCaptured += frames
-                        if (synthetic != null) {
-                            throttleSyntheticToRealtime()
-                        }
-                        if (backend != null && (!isRecording || recordingMeterChunkCounter % 16 == 0)) {
-                            droppedFrames = AudioEngineRouter.recordingDroppedFrames(backend)
-                        }
-
-                        if (isRecording) {
-                            if (recordBuf != null) {
-                                enqueueRecordingFrames(recordBuf, frames, channelCount)
+                            if (isRecording) {
+                                Thread.yield()
                             } else {
-                                writeRecordingFrames(scratch, frames, channelCount)
-                            }
-                            if (++recordingMeterChunkCounter % 8 == 0) {
-                                accumulateWaveformPeaksLight(captureDest, frames, channelCount)
-                                maybeEmitWaveformPeaks()
-                            }
-                        } else {
-                            recordBuf?.let { releaseWriteBuffer(it) }
-                            accumulateWaveformPeaks(scratch, frames, channelCount)
-                            maybeEmitWaveformPeaks()
-                        }
-
-                        if (!isRecording) {
-                            val monitor = monitorConfig.get()
-                            if (monitor.enabled && MonitorMixer.effectiveMonitorChannels(monitor).isNotEmpty()) {
-                                ensureMonitorOutput(monitor.outputDeviceId)
-                                val mixed = MonitorMixer.mixToStereo(
-                                    scratch,
-                                    frames,
-                                    channelCount,
-                                    monitor,
-                                    monitorScratch,
-                                )
-                                if (mixed > 0 && monitorOutputRunning.get()) {
-                                    NativeAudioMonitor.writeFrames(monitorScratch, mixed)
-                                }
-                            }
-
-                            val virtualMic = virtualMicConfig.get()
-                            if (virtualMic != null && virtualMic.enabled && virtualMic.selectedChannels.isNotEmpty()) {
-                                ensureVirtualMicOutput(virtualMic)
-                                val outCh = ChannelMixdown.outputChannelCount(
-                                    virtualMic.selectedChannels,
-                                    virtualMic.stereo,
-                                )
-                                val mixed = ChannelMixdown.mixToOutput(
-                                    scratch,
-                                    frames,
-                                    channelCount,
-                                    virtualMic.selectedChannels,
-                                    stereo = outCh == 2,
-                                    dest = virtualMicScratch,
-                                )
-                                if (mixed > 0 && virtualMicOutputRunning) {
-                                    NativeAudioEngine.writePlaybackFrames(virtualMicScratch, mixed)
-                                }
+                                Thread.sleep(2)
                             }
                         }
                     } catch (e: Exception) {
@@ -791,6 +853,31 @@ class CaptureSessionEngine(
                             framesWritten += frameCount
                             if (request.returnToPool) {
                                 releaseWriteBuffer(samples)
+                            }
+                        }
+                        is RecordingWriteRequest.PcmFrames -> {
+                            val samples = request.samples
+                            val frameCount = request.frameCount
+                            val channels = request.channelCount
+                            val bytesPerFrame = request.bytesPerFrame
+                            if (active.resilient != null) {
+                                active.resilient.writeInterleavedPcm24(
+                                    samples,
+                                    frameCount,
+                                    channels,
+                                    bytesPerFrame,
+                                )
+                            } else {
+                                active.perChannel?.writeInterleavedPcm24(
+                                    samples,
+                                    frameCount,
+                                    channels,
+                                    bytesPerFrame,
+                                )
+                            }
+                            framesWritten += frameCount
+                            if (request.returnToPool) {
+                                releasePcmWriteBuffer(samples)
                             }
                         }
                         is RecordingWriteRequest.Silence -> {
@@ -844,6 +931,23 @@ class CaptureSessionEngine(
         enqueueRecordingFrames(copy, toWrite, channels)
     }
 
+    private fun enqueueRecordingPcmFrames(
+        samples: ByteArray,
+        frameCount: Int,
+        channels: Int,
+        bytesPerFrame: Int,
+    ) {
+        if (!isRecording || !acceptRecordingWrites) {
+            releasePcmWriteBuffer(samples)
+            return
+        }
+        val request = RecordingWriteRequest.PcmFrames(samples, frameCount, channels, bytesPerFrame)
+        if (!enqueueRecordingWrite(request)) {
+            releasePcmWriteBuffer(samples)
+            OmtLog.w("CaptureSession", "disk queue saturated; dropped $frameCount recording pcm frames")
+        }
+    }
+
     private fun enqueueRecordingFrames(samples: FloatArray, frameCount: Int, channels: Int) {
         if (!isRecording || !acceptRecordingWrites) {
             releaseWriteBuffer(samples)
@@ -873,6 +977,9 @@ class CaptureSessionEngine(
             when (val evicted = diskWriteQueue.poll()) {
                 is RecordingWriteRequest.Frames -> if (evicted.returnToPool) {
                     releaseWriteBuffer(evicted.samples)
+                }
+                is RecordingWriteRequest.PcmFrames -> if (evicted.returnToPool) {
+                    releasePcmWriteBuffer(evicted.samples)
                 }
                 else -> Unit
             }
@@ -1052,6 +1159,13 @@ class CaptureSessionEngine(
         }
     }
 
+    private fun prewarmPcmWriteBuffers(byteCount: Int) {
+        pcmWriteBufferPool.clear()
+        repeat(WRITE_BUFFER_POOL_SIZE) {
+            pcmWriteBufferPool.offer(ByteArray(byteCount))
+        }
+    }
+
     private fun acquireWriteBuffer(sampleCount: Int): FloatArray {
         val pooled = writeBufferPool.poll()
         return if (pooled != null && pooled.size >= sampleCount) {
@@ -1063,6 +1177,19 @@ class CaptureSessionEngine(
 
     private fun releaseWriteBuffer(buffer: FloatArray) {
         writeBufferPool.offer(buffer)
+    }
+
+    private fun acquirePcmWriteBuffer(byteCount: Int): ByteArray {
+        val pooled = pcmWriteBufferPool.poll()
+        return if (pooled != null && pooled.size >= byteCount) {
+            pooled
+        } else {
+            ByteArray(byteCount)
+        }
+    }
+
+    private fun releasePcmWriteBuffer(buffer: ByteArray) {
+        pcmWriteBufferPool.offer(buffer)
     }
 
     private fun throttleSyntheticToRealtime() {
@@ -1099,6 +1226,39 @@ class CaptureSessionEngine(
                 meterHold[ch] *= factor
             }
         }
+    }
+
+    private fun accumulateWaveformPeaksFromPcm(
+        pcm: ByteArray,
+        frames: Int,
+        channels: Int,
+        bytesPerFrame: Int,
+    ) {
+        val stride = max(1, frames / 256)
+        val channelPeaks = FloatArray(channels)
+        synchronized(meterLock) {
+            for (ch in 0 until channels) {
+                var peak = 0f
+                var frame = 0
+                while (frame < frames) {
+                    val base = frame * bytesPerFrame + ch * PCM_BYTES_PER_SAMPLE
+                    val sample = pcm24ToFloat(pcm, base)
+                    peak = maxOf(peak, kotlin.math.abs(sample))
+                    frame += stride
+                }
+                channelPeaks[ch] = peak
+                pendingWaveformPeaks[ch] = maxOf(pendingWaveformPeaks[ch], peak)
+            }
+            absorbChannelPeaks(meterHold, lastRawPeaks, channelPeaks, channels)
+        }
+    }
+
+    private fun pcm24ToFloat(pcm: ByteArray, offset: Int): Float {
+        val v = pcm[offset].toInt() and 0xFF or
+            ((pcm[offset + 1].toInt() and 0xFF) shl 8) or
+            ((pcm[offset + 2].toInt() and 0xFF) shl 16)
+        val signed = if (v and 0x800000 != 0) v or -0x1000000 else v
+        return signed / 8_388_608f
     }
 
     private fun accumulateWaveformPeaksLight(scratch: FloatArray, frames: Int, channels: Int) {
@@ -1177,6 +1337,9 @@ class CaptureSessionEngine(
         private const val METER_OUTPUT_THRESHOLD = 1e-5f
         private const val WRITE_BUFFER_POOL_SIZE = 24
         private const val DISK_WRITE_QUEUE_CAPACITY = 32
+        private const val PCM_BYTES_PER_SAMPLE = 3
+        /** Drain up to ~340 ms of audio per fanout pass when the native ring has backlog. */
+        private const val MAX_FRAMES_PER_FANOUT_PASS = 32_768
 
         private val captureFanoutDispatcher = Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "capture-fanout").apply {
@@ -1185,6 +1348,7 @@ class CaptureSessionEngine(
         }.asCoroutineDispatcher()
 
         private val writeBufferPool = ArrayBlockingQueue<FloatArray>(WRITE_BUFFER_POOL_SIZE)
+        private val pcmWriteBufferPool = ArrayBlockingQueue<ByteArray>(WRITE_BUFFER_POOL_SIZE)
 
         /** Keep roughly constant peak count across window sizes so short windows stay sharp. */
         fun peaksPerSecondForWindow(windowSec: Float): Int = DEFAULT_WAVEFORM_PEAKS_PER_SEC

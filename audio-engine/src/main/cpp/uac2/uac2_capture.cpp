@@ -1,7 +1,7 @@
 #include "uac2_capture.h"
 
 #include "../audio_log.h"
-#include "../spsc_ring_buffer.h"
+#include "../spsc_pcm_ring.h"
 #include "android_usb_io.h"
 #include "libusb.h"
 #include "libusb_session.h"
@@ -20,7 +20,7 @@ namespace openmultitrack::uac2 {
 
 namespace {
 
-constexpr int kNumUrbs = 8;
+constexpr int kNumUrbs = 16;
 constexpr int kOpenVerifyTimeoutMs = 1500;
 constexpr size_t kMinVerifyFrames = 48;
 
@@ -78,7 +78,10 @@ CaptureStatus Uac2Capture::open(int usb_fd, const Uac2AltSetting& alt, bool java
     java_interface_claimed_ = java_interface_claimed;
     channel_count_ = alt.format.channels;
     sample_rate_ = static_cast<int32_t>(alt.format.sample_rate_hz);
-    ring_ = std::make_unique<openmultitrack::SpscRingBuffer>(144'000, channel_count_);
+    ring_ = std::make_unique<openmultitrack::SpscPcmRing>(
+        144'000,
+        alt.format.channels,
+        alt.format.subframe_bytes);
 
     // Prefer usbdevfs (emulator / hosts where SUBMITURB works). Fall back to libusb
     // when claim or isoch submit fails (e.g. XR18 on Samsung tablets).
@@ -285,7 +288,24 @@ void Uac2Capture::closeUnlocked() {
 
 size_t Uac2Capture::readFrames(float* dest, size_t max_frames) {
     if (ring_ == nullptr) return 0;
-    return ring_->popFrames(dest, max_frames);
+    return ring_->popFramesAsFloat(dest, max_frames, alt_.format.bit_resolution);
+}
+
+size_t Uac2Capture::readPcmBytes(uint8_t* dest, size_t max_frames) {
+    if (ring_ == nullptr) return 0;
+    return ring_->popPcmBytes(dest, max_frames);
+}
+
+void Uac2Capture::ingestPcmBytes(const uint8_t* bytes, size_t byte_count) {
+    if (ring_ == nullptr || byte_count == 0) return;
+    const size_t bpf = bytesPerFrame(alt_.format);
+    if (bpf == 0) return;
+    const size_t wholeBytes = (byte_count / bpf) * bpf;
+    if (wholeBytes == 0) return;
+    const size_t pushed = ring_->pushBytes(bytes, wholeBytes);
+    if (pushed < wholeBytes) {
+        dropped_frames_.fetch_add((wholeBytes - pushed) / bpf);
+    }
 }
 
 void Uac2Capture::freeLibusbTransfers() {
@@ -334,26 +354,11 @@ void Uac2Capture::LIBUSB_CALL Uac2Capture::libusbCaptureCallback(struct libusb_t
 
     if (transfer->status == LIBUSB_TRANSFER_COMPLETED) {
         auto* bytes = transfer->buffer;
-        const uint8_t channels = self->alt_.format.channels;
-        const uint8_t subframe = self->alt_.format.subframe_bytes;
-        const uint8_t bits = self->alt_.format.bit_resolution;
-        std::vector<float> frame(static_cast<size_t>(channels));
-
         size_t byte_offset = 0;
         for (int p = 0; p < transfer->num_iso_packets; ++p) {
             const int actual = transfer->iso_packet_desc[p].actual_length;
-            const size_t num_frames =
-                framesInBytes(static_cast<size_t>(actual), self->alt_.format);
-            for (size_t f = 0; f < num_frames; ++f) {
-                pcmFrameToFloat(
-                    bytes + byte_offset + f * bytesPerFrame(self->alt_.format),
-                    frame.data(),
-                    channels,
-                    subframe,
-                    bits);
-                if (self->ring_ != nullptr && !self->ring_->pushFrame(frame.data())) {
-                    self->dropped_frames_.fetch_add(1);
-                }
+            if (actual > 0) {
+                self->ingestPcmBytes(bytes + byte_offset, static_cast<size_t>(actual));
             }
             byte_offset += static_cast<size_t>(transfer->iso_packet_desc[p].length);
         }
@@ -438,12 +443,8 @@ void Uac2Capture::workerLoopLibusb(std::promise<bool> init_promise) {
 
 void Uac2Capture::workerLoopUsbdevfs(std::promise<bool> init_promise) {
     const IsoUrbLayout layout = urb_layout_;
-    const uint8_t channels = alt_.format.channels;
-    const uint8_t subframe = alt_.format.subframe_bytes;
-    const uint8_t bits = alt_.format.bit_resolution;
 
     std::vector<UrbContext> contexts(kNumUrbs);
-    std::vector<float> frame(static_cast<size_t>(channels));
     bool init_reported = false;
 
     for (int i = 0; i < kNumUrbs; ++i) {
@@ -486,17 +487,8 @@ void Uac2Capture::workerLoopUsbdevfs(std::promise<bool> init_promise) {
         size_t byte_offset = 0;
         for (int p = 0; p < reaped->number_of_packets; ++p) {
             const int actual = reaped->iso_frame_desc[p].actual_length;
-            const size_t num_frames = framesInBytes(static_cast<size_t>(actual), alt_.format);
-            for (size_t f = 0; f < num_frames; ++f) {
-                pcmFrameToFloat(
-                    bytes + byte_offset + f * bytesPerFrame(alt_.format),
-                    frame.data(),
-                    channels,
-                    subframe,
-                    bits);
-                if (ring_ != nullptr && !ring_->pushFrame(frame.data())) {
-                    dropped_frames_.fetch_add(1);
-                }
+            if (actual > 0) {
+                ingestPcmBytes(bytes + byte_offset, static_cast<size_t>(actual));
             }
             byte_offset += static_cast<size_t>(reaped->iso_frame_desc[p].length);
             reaped->iso_frame_desc[p].actual_length = 0;

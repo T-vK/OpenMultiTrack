@@ -81,11 +81,26 @@ Java_org_openmultitrack_audio_NativeUac2Engine_nativeReadCapturedFrames(
     jobject /*thiz*/,
     jfloatArray dest,
     jint maxFrames) {
-    jfloat* elements = env->GetFloatArrayElements(dest, nullptr);
+    jfloat* elements = static_cast<jfloat*>(env->GetPrimitiveArrayCritical(dest, nullptr));
     if (elements == nullptr) return 0;
     const size_t read = openmultitrack::uac2::Uac2Capture::instance().readFrames(
         elements, static_cast<size_t>(maxFrames));
-    env->ReleaseFloatArrayElements(dest, elements, 0);
+    env->ReleasePrimitiveArrayCritical(dest, elements, 0);
+    return static_cast<jint>(read);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_openmultitrack_audio_NativeUac2Engine_nativeReadCapturedPcmBytes(
+    JNIEnv* env,
+    jobject /*thiz*/,
+    jbyteArray dest,
+    jint maxFrames) {
+    jbyte* elements = env->GetByteArrayElements(dest, nullptr);
+    if (elements == nullptr) return 0;
+    const size_t read = openmultitrack::uac2::Uac2Capture::instance().readPcmBytes(
+        reinterpret_cast<uint8_t*>(elements),
+        static_cast<size_t>(maxFrames));
+    env->ReleaseByteArrayElements(dest, elements, 0);
     return static_cast<jint>(read);
 }
 

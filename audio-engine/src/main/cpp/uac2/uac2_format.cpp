@@ -72,6 +72,26 @@ void floatFrameToPcm(const float* src,
     }
 }
 
+size_t pcmInterleavedToFloat(const uint8_t* src,
+                             size_t byte_count,
+                             float* dest,
+                             uint8_t channels,
+                             uint8_t subframe_bytes,
+                             uint8_t bit_resolution) {
+    const size_t bpf = static_cast<size_t>(channels) * subframe_bytes;
+    if (bpf == 0 || byte_count < bpf) return 0;
+    const size_t frame_count = byte_count / bpf;
+    for (size_t f = 0; f < frame_count; ++f) {
+        pcmFrameToFloat(
+            src + f * bpf,
+            dest + f * static_cast<size_t>(channels),
+            channels,
+            subframe_bytes,
+            bit_resolution);
+    }
+    return frame_count;
+}
+
 size_t bytesPerFrame(const Uac2Format& format) {
     return static_cast<size_t>(format.channels) * format.subframe_bytes;
 }

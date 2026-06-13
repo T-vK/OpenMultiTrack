@@ -13,12 +13,12 @@ import kotlin.math.min
  * Header is finalized on [close].
  */
 class WavWriter private constructor(
-    private val file: File,
+    val outputFile: File,
     private val channelCount: Int,
     private val sampleRate: Int,
     append: Boolean,
 ) : AutoCloseable {
-    private val raf = RandomAccessFile(file, "rw")
+    private val raf = RandomAccessFile(outputFile, "rw")
     private var dataBytesWritten: Long = 0
     private var closed = false
     private var pcmBytes = ByteArray(0)
@@ -37,7 +37,7 @@ class WavWriter private constructor(
         }
         require(sampleRate > 0) { "sampleRate must be positive" }
         if (append) {
-            val format = WavReader.parseHeader(file)
+            val format = WavReader.parseHeader(outputFile)
             require(format.channelCount == channelCount) {
                 "channelCount mismatch: file=${format.channelCount} expected=$channelCount"
             }
@@ -68,6 +68,14 @@ class WavWriter private constructor(
             pcmBytes[bi++] = ((int24 shr 16) and 0xFF).toByte()
         }
         appendPcm(pcmBytes, byteLen)
+        dataBytesWritten += byteLen
+    }
+
+    fun writePcm24(samples: ByteArray, frames: Int) {
+        check(!closed) { "Writer closed" }
+        val byteLen = frames * channelCount * 3
+        require(samples.size >= byteLen) { "samples too short: ${samples.size} < $byteLen" }
+        appendPcm(samples, byteLen)
         dataBytesWritten += byteLen
     }
 

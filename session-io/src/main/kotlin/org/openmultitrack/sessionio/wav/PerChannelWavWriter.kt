@@ -16,7 +16,8 @@ class PerChannelWavWriter private constructor(
 ) : AutoCloseable {
     private data class ChannelWriter(val strip: ChannelStripState, val file: File, val writer: WavWriter)
 
-    private val scratch = FloatArray(4096)
+    private val channelScratch: List<FloatArray> = channelWriters.map { FloatArray(SCRATCH_FRAMES) }
+    private val channelPcmScratch: List<ByteArray> = channelWriters.map { ByteArray(SCRATCH_FRAMES * 3) }
     private var framesWritten: Long = initialFramesWritten
 
     constructor(
@@ -36,14 +37,43 @@ class PerChannelWavWriter private constructor(
         var remaining = frames
         var offset = 0
         while (remaining > 0) {
-            val n = remaining.coerceAtMost(scratch.size)
-            for (cw in channelWriters) {
-                val ch = cw.strip.index
-                if (ch >= sourceChannelCount) continue
-                for (f in 0 until n) {
-                    scratch[f] = samples[(offset + f) * sourceChannelCount + ch]
+            val n = remaining.coerceAtMost(SCRATCH_FRAMES)
+            for (f in 0 until n) {
+                val base = (offset + f) * sourceChannelCount
+                for (ci in channelWriters.indices) {
+                    val ch = channelWriters[ci].strip.index
+                    channelScratch[ci][f] = if (ch < sourceChannelCount) samples[base + ch] else 0f
                 }
-                cw.writer.writeInterleavedFloat(scratch, n)
+            }
+            for (ci in channelWriters.indices) {
+                channelWriters[ci].writer.writeInterleavedFloat(channelScratch[ci], n)
+            }
+            framesWritten += n
+            remaining -= n
+            offset += n
+        }
+    }
+
+    fun writeInterleavedPcm24(samples: ByteArray, frames: Int, sourceChannelCount: Int, bytesPerFrame: Int) {
+        var remaining = frames
+        var offset = 0
+        while (remaining > 0) {
+            val n = remaining.coerceAtMost(SCRATCH_FRAMES)
+            for (ci in channelWriters.indices) {
+                val ch = channelWriters[ci].strip.index
+                if (ch >= sourceChannelCount) {
+                    channelPcmScratch[ci].fill(0, 0, n * PCM_BYTES_PER_SAMPLE)
+                } else {
+                    var dst = 0
+                    val chOffset = ch * PCM_BYTES_PER_SAMPLE
+                    for (f in 0 until n) {
+                        val src = (offset + f) * bytesPerFrame + chOffset
+                        channelPcmScratch[ci][dst++] = samples[src]
+                        channelPcmScratch[ci][dst++] = samples[src + 1]
+                        channelPcmScratch[ci][dst++] = samples[src + 2]
+                    }
+                }
+                channelWriters[ci].writer.writePcm24(channelPcmScratch[ci], n)
             }
             framesWritten += n
             remaining -= n
@@ -54,10 +84,10 @@ class PerChannelWavWriter private constructor(
     fun writeSilence(frames: Int) {
         var remaining = frames
         while (remaining > 0) {
-            val n = remaining.coerceAtMost(scratch.size)
-            for (f in 0 until n) scratch[f] = 0f
-            for (cw in channelWriters) {
-                cw.writer.writeInterleavedFloat(scratch, n)
+            val n = remaining.coerceAtMost(SCRATCH_FRAMES)
+            for (ci in channelWriters.indices) {
+                channelScratch[ci].fill(0f, 0, n)
+                channelWriters[ci].writer.writeInterleavedFloat(channelScratch[ci], n)
             }
             framesWritten += n
             remaining -= n
@@ -75,6 +105,9 @@ class PerChannelWavWriter private constructor(
     fun totalFramesWritten(): Long = framesWritten
 
     companion object {
+        private const val SCRATCH_FRAMES = 4096
+        private const val PCM_BYTES_PER_SAMPLE = 3
+
         /** Reopen per-channel WAV files from an incomplete session and continue appending. */
         fun openForResume(sessionDir: File, metadata: SessionMetadata): PerChannelWavWriter {
             val writers = metadata.channels.map { ch ->
