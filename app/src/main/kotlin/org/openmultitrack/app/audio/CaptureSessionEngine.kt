@@ -107,6 +107,7 @@ class CaptureSessionEngine(
     private var recordingConfig: RecordingConfig? = null
     private var channelCount: Int = 2
     private var sampleRate: Int = 48_000
+    private var captureBytesPerFrame: Int = 8
 
     @Volatile
     private var framesWritten: Long = 0
@@ -258,12 +259,15 @@ class CaptureSessionEngine(
         usbDevice: UsbDevice?,
     ): Result<Unit> = lifecycleMutex.withLock {
         if (isCaptureActive && activeRoute?.backend == route.backend && !usbDegraded) {
-            if (isNativeCaptureOwner() && isReceivingAudio(500)) {
+            if (isNativeCaptureOwner() && isReceivingAudio(if (isRecording) 5_000 else 500)) {
                 return Result.success(Unit)
+            }
+            if (isRecording) {
+                return reconnectCaptureLocked(scope, route, usbDevice)
             }
             stopCaptureInternalLocked()
         }
-        if (isRecording && (usbDegraded || isCaptureActive)) {
+        if (isRecording && usbDegraded) {
             return reconnectCaptureLocked(scope, route, usbDevice)
         }
         stopCaptureInternalLocked()
@@ -280,6 +284,14 @@ class CaptureSessionEngine(
 
         channelCount = status.channelCount
         sampleRate = status.sampleRate
+        captureBytesPerFrame = route.pcmBytesPerFrame()
+        if (route.backend == AudioBackend.UAC2) {
+            val nativeBpf = AudioEngineRouter.capturePcmBytesPerFrame(route.backend)
+            if (nativeBpf > 0) {
+                captureBytesPerFrame = nativeBpf
+            }
+        }
+        OmtLog.i("CaptureSession", "capture pcmBytesPerFrame=$captureBytesPerFrame ch=$channelCount")
         usbDegraded = false
         lastFrameReceivedNs = 0L
         clearWaveforms()
@@ -367,7 +379,7 @@ class CaptureSessionEngine(
         val framesPerChunk = SessionRecorder.chunkFramesForChannels(channelCount)
         prewarmWriteBuffers(framesPerChunk * channelCount)
         if (activeBackend == AudioBackend.UAC2) {
-            prewarmPcmWriteBuffers(framesPerChunk * channelCount * PCM_BYTES_PER_SAMPLE)
+            prewarmPcmWriteBuffers(framesPerChunk * captureBytesPerFrame)
         }
         startRecordingWriteLoop()
 
@@ -684,7 +696,7 @@ class CaptureSessionEngine(
                                 isRecording && backend == AudioBackend.UAC2 && synthetic == null
                             val frames: Int
                             if (usePcmRecording) {
-                                val bytesPerFrame = channelCount * PCM_BYTES_PER_SAMPLE
+                                val bytesPerFrame = captureBytesPerFrame
                                 val byteCount = framesPerChunk * bytesPerFrame
                                 val recordPcmBuf = acquirePcmWriteBuffer(byteCount)
                                 val rawFrames = AudioEngineRouter.readRecordedPcm(
@@ -815,7 +827,11 @@ class CaptureSessionEngine(
             } catch (e: Exception) {
                 OmtLog.e("CaptureSession", "fanout loop failed", e)
             } finally {
-                OmtLog.i("CaptureSession", "fanout ended frames=$framesWritten")
+                OmtLog.i(
+                    "CaptureSession",
+                    "fanout ended framesWritten=$framesWritten framesCaptured=$framesCaptured " +
+                        "recording=$isRecording",
+                )
             }
         }
     }
@@ -1234,6 +1250,7 @@ class CaptureSessionEngine(
         channels: Int,
         bytesPerFrame: Int,
     ) {
+        val subframeBytes = bytesPerFrame / channels.coerceAtLeast(1)
         val stride = max(1, frames / 256)
         val channelPeaks = FloatArray(channels)
         synchronized(meterLock) {
@@ -1241,8 +1258,18 @@ class CaptureSessionEngine(
                 var peak = 0f
                 var frame = 0
                 while (frame < frames) {
-                    val base = frame * bytesPerFrame + ch * PCM_BYTES_PER_SAMPLE
-                    val sample = pcm24ToFloat(pcm, base)
+                    val base = frame * bytesPerFrame + ch * subframeBytes
+                    val sample = when (subframeBytes) {
+                        4 -> {
+                            val v = (pcm[base].toInt() and 0xFF) or
+                                ((pcm[base + 1].toInt() and 0xFF) shl 8) or
+                                ((pcm[base + 2].toInt() and 0xFF) shl 16) or
+                                ((pcm[base + 3].toInt() and 0xFF) shl 24)
+                            v.toFloat() / 2_147_483_648f
+                        }
+                        3 -> pcm24ToFloat(pcm, base)
+                        else -> 0f
+                    }
                     peak = maxOf(peak, kotlin.math.abs(sample))
                     frame += stride
                 }
@@ -1337,8 +1364,7 @@ class CaptureSessionEngine(
         private const val METER_OUTPUT_THRESHOLD = 1e-5f
         private const val WRITE_BUFFER_POOL_SIZE = 24
         private const val DISK_WRITE_QUEUE_CAPACITY = 32
-        private const val PCM_BYTES_PER_SAMPLE = 3
-        /** Drain up to ~340 ms of audio per fanout pass when the native ring has backlog. */
+        /** Drain up to ~680 ms of audio per fanout pass when the native ring has backlog. */
         private const val MAX_FRAMES_PER_FANOUT_PASS = 32_768
 
         private val captureFanoutDispatcher = Executors.newSingleThreadExecutor { runnable ->

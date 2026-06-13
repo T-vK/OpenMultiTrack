@@ -38,6 +38,7 @@ public:
 
     size_t readFrames(float* dest, size_t max_frames);
     size_t readPcmBytes(uint8_t* dest, size_t max_frames);
+    int32_t captureBytesPerFrame() const;
     uint64_t droppedFrames() const { return dropped_frames_.load(); }
 
 private:

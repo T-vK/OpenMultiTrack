@@ -22,6 +22,8 @@ object NativeUac2Engine {
     fun readCapturedPcmBytes(dest: ByteArray, maxFrames: Int): Int =
         nativeReadCapturedPcmBytes(dest, maxFrames)
 
+    fun captureBytesPerFrame(): Int = nativeCaptureBytesPerFrame()
+
     fun captureDroppedFrames(): Long = nativeCaptureDroppedFrames()
 
     fun startPlayback(
@@ -50,6 +52,8 @@ object NativeUac2Engine {
     private external fun nativeReadCapturedFrames(dest: FloatArray, maxFrames: Int): Int
 
     private external fun nativeReadCapturedPcmBytes(dest: ByteArray, maxFrames: Int): Int
+
+    private external fun nativeCaptureBytesPerFrame(): Int
 
     private external fun nativeCaptureDroppedFrames(): Long
 

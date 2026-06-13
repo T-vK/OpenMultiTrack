@@ -110,7 +110,9 @@ class ResilientSessionWriter private constructor(
                 if (minFreeBytes > 0 && primaryRoot.usableSpace < minFreeBytes) {
                     primaryHealthy = false
                 } else {
-                    val wrote = runCatching { primaryWriter.writePcm24(samples, frames) }
+                    val wrote = runCatching {
+                        primaryWriter.writePackedInterleavedPcmAs24(samples, frames, bytesPerFrame)
+                    }
                     if (wrote.isSuccess) {
                         liveFramesWritten += frames
                         return
@@ -118,7 +120,7 @@ class ResilientSessionWriter private constructor(
                     primaryHealthy = false
                 }
             }
-            runCatching { liveSpill?.writePcm24(samples, frames) }
+            runCatching { liveSpill?.writePackedInterleavedPcmAs24(samples, frames, bytesPerFrame) }
             return
         }
         if (primaryHealthy) {
@@ -140,8 +142,8 @@ class ResilientSessionWriter private constructor(
 
     fun writeSilence(frames: Int) {
         if (livePrimary != null) {
-            val silence = ByteArray(frames * captureChannelCount * 3)
-            writeInterleavedPcm24(silence, frames, captureChannelCount, captureChannelCount * 3)
+            val silence = ByteArray(frames * captureChannelCount * 4)
+            writeInterleavedPcm24(silence, frames, captureChannelCount, captureChannelCount * 4)
             return
         }
         if (primaryHealthy) {

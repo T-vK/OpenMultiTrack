@@ -79,6 +79,28 @@ class WavWriter private constructor(
         dataBytesWritten += byteLen
     }
 
+    /** Converts packed interleaved USB PCM (24- or 32-bit subframes) into 24-bit WAV PCM. */
+    fun writePackedInterleavedPcmAs24(
+        samples: ByteArray,
+        frames: Int,
+        srcBytesPerFrame: Int,
+    ) {
+        check(!closed) { "Writer closed" }
+        val wavByteLen = PcmFormatConversion.wav24ByteLength(frames, channelCount)
+        if (pcmBytes.size < wavByteLen) {
+            pcmBytes = ByteArray(wavByteLen)
+        }
+        PcmFormatConversion.interleavedToWav24(
+            samples,
+            frames,
+            channelCount,
+            srcBytesPerFrame,
+            pcmBytes,
+        )
+        appendPcm(pcmBytes, wavByteLen)
+        dataBytesWritten += wavByteLen
+    }
+
     private fun appendPcm(source: ByteArray, byteLen: Int) {
         if (pendingLen + byteLen > pendingPcm.size) {
             val grown = ByteArray(max(pendingPcm.size * 2, pendingLen + byteLen))

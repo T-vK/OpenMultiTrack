@@ -296,6 +296,10 @@ size_t Uac2Capture::readPcmBytes(uint8_t* dest, size_t max_frames) {
     return ring_->popPcmBytes(dest, max_frames);
 }
 
+int32_t Uac2Capture::captureBytesPerFrame() const {
+    return static_cast<int32_t>(bytesPerFrame(alt_.format));
+}
+
 void Uac2Capture::ingestPcmBytes(const uint8_t* bytes, size_t byte_count) {
     if (ring_ == nullptr || byte_count == 0) return;
     const size_t bpf = bytesPerFrame(alt_.format);

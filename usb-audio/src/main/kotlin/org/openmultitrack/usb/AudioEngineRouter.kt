@@ -18,7 +18,16 @@ data class CaptureRoute(
     val uac2Alt: NativeUac2AltSetting? = null,
     val channelCount: Int = 0,
     val sampleRate: Int = 48_000,
-)
+) {
+    /** Interleaved PCM bytes per audio frame on the USB wire (e.g. Flow 8 = 10ch × 4 = 40). */
+    fun pcmBytesPerFrame(): Int = when (backend) {
+        AudioBackend.UAC2 -> {
+            val alt = uac2Alt
+            if (alt != null) alt.channels * alt.subframeBytes else channelCount * 4
+        }
+        AudioBackend.OBOE -> channelCount * 4
+    }
+}
 
 data class PlaybackRoute(
     val backend: AudioBackend,
@@ -185,6 +194,12 @@ object AudioEngineRouter {
         when (backend) {
             AudioBackend.OBOE -> 0
             AudioBackend.UAC2 -> NativeUac2Engine.readCapturedPcmBytes(dest, maxFrames)
+        }
+
+    fun capturePcmBytesPerFrame(backend: AudioBackend): Int =
+        when (backend) {
+            AudioBackend.OBOE -> 0
+            AudioBackend.UAC2 -> NativeUac2Engine.captureBytesPerFrame()
         }
 
     fun recordingDroppedFrames(backend: AudioBackend): Long =

@@ -55,6 +55,8 @@ class PerChannelWavWriter private constructor(
     }
 
     fun writeInterleavedPcm24(samples: ByteArray, frames: Int, sourceChannelCount: Int, bytesPerFrame: Int) {
+        val subframeBytes = bytesPerFrame / sourceChannelCount.coerceAtLeast(1)
+        val channelPacked = ByteArray(SCRATCH_FRAMES * subframeBytes)
         var remaining = frames
         var offset = 0
         while (remaining > 0) {
@@ -62,16 +64,24 @@ class PerChannelWavWriter private constructor(
             for (ci in channelWriters.indices) {
                 val ch = channelWriters[ci].strip.index
                 if (ch >= sourceChannelCount) {
-                    channelPcmScratch[ci].fill(0, 0, n * PCM_BYTES_PER_SAMPLE)
+                    channelPcmScratch[ci].fill(0, 0, n * 3)
                 } else {
-                    var dst = 0
-                    val chOffset = ch * PCM_BYTES_PER_SAMPLE
                     for (f in 0 until n) {
-                        val src = (offset + f) * bytesPerFrame + chOffset
-                        channelPcmScratch[ci][dst++] = samples[src]
-                        channelPcmScratch[ci][dst++] = samples[src + 1]
-                        channelPcmScratch[ci][dst++] = samples[src + 2]
+                        System.arraycopy(
+                            samples,
+                            (offset + f) * bytesPerFrame + ch * subframeBytes,
+                            channelPacked,
+                            f * subframeBytes,
+                            subframeBytes,
+                        )
                     }
+                    PcmFormatConversion.interleavedToWav24(
+                        channelPacked,
+                        n,
+                        1,
+                        subframeBytes,
+                        channelPcmScratch[ci],
+                    )
                 }
                 channelWriters[ci].writer.writePcm24(channelPcmScratch[ci], n)
             }
@@ -106,7 +116,6 @@ class PerChannelWavWriter private constructor(
 
     companion object {
         private const val SCRATCH_FRAMES = 4096
-        private const val PCM_BYTES_PER_SAMPLE = 3
 
         /** Reopen per-channel WAV files from an incomplete session and continue appending. */
         fun openForResume(sessionDir: File, metadata: SessionMetadata): PerChannelWavWriter {
