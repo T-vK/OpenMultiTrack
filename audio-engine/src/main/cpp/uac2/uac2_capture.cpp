@@ -561,7 +561,7 @@ void Uac2Capture::workerLoopUsbdevfs(std::promise<bool> init_promise) {
 
     for (int i = 0; i < kNumUrbs; ++i) {
         usbdevfs_urb* urb = allocIsoUrb(layout, &contexts[static_cast<size_t>(i)]);
-        initIsoUrb(urb, layout, alt_.endpoint_address, &contexts[static_cast<size_t>(i)]);
+        initIsoUrb(urb, layout, alt_.endpoint_address, &contexts[static_cast<size_t>(i)], true);
         if (ioctl(usb_fd_, USBDEVFS_SUBMITURB, urb) < 0) {
             OMT_LOGE("uac2 capture SUBMITURB init failed: %s", std::strerror(errno));
             if (!init_reported) {

@@ -36,6 +36,7 @@ class E2eMixerHarness(
         client.bind()
         manager = withTimeout(20_000) { ready.await() }
         client.promoteForeground("FLOW 8 E2E test")
+        E2eWait.pollUntil(timeoutMs = 15_000) { client.isForeground() }
 
         releaseGlobalUsbCapture(manager, preserveActiveRecording)
 

@@ -66,7 +66,8 @@ inline usbdevfs_urb* allocIsoUrb(const IsoUrbLayout& layout, UrbContext* ctx) {
 inline void initIsoUrb(usbdevfs_urb* urb,
                        const IsoUrbLayout& layout,
                        uint8_t endpoint,
-                       void* usercontext) {
+                       void* usercontext,
+                       bool capture) {
     // allocIsoUrb sets buffer before init; memset must not leave SUBMITURB with a null buffer.
     void* buffer = urb->buffer;
     std::memset(urb, 0, sizeof(usbdevfs_urb));
@@ -80,7 +81,9 @@ inline void initIsoUrb(usbdevfs_urb* urb,
     urb->usercontext = usercontext;
     for (int p = 0; p < layout.num_packets; ++p) {
         urb->iso_frame_desc[p].length = static_cast<unsigned int>(layout.per_packet_bytes);
-        urb->iso_frame_desc[p].actual_length = 0;
+        // OUT isoch submit on some Android kernels requires actual_length set per packet.
+        urb->iso_frame_desc[p].actual_length =
+            capture ? 0u : static_cast<unsigned int>(layout.per_packet_bytes);
         urb->iso_frame_desc[p].status = 0;
     }
 }

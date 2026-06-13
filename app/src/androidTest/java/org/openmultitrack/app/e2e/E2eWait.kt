@@ -116,7 +116,13 @@ object E2eWait {
         timeoutMs: Long = 90_000,
     ) {
         untilPlaying(ctrl, timeoutMs)
-        val startPos = ctrl.state.value.playbackPositionSec
+        val moved = pollUntil(timeoutMs) {
+            ctrl.state.value.playbackPositionSec > 0.05f
+        }
+        check(moved) {
+            "Playhead did not advance from 0 (warning=${ctrl.state.value.warningMessage})"
+        }
+        val anchorPos = ctrl.state.value.playbackPositionSec
         val deadline = System.currentTimeMillis() + observeMs
         withTimeout(timeoutMs) {
             while (System.currentTimeMillis() < deadline) {
@@ -132,9 +138,9 @@ object E2eWait {
             }
         }
         val end = ctrl.state.value
-        check(end.playbackPositionSec >= startPos + minAdvanceSec) {
+        check(end.playbackPositionSec >= anchorPos + minAdvanceSec) {
             "Playhead only ${end.playbackPositionSec}s after ${observeMs}ms " +
-                "(need +${minAdvanceSec}s from ${startPos}s, warning=${end.warningMessage})"
+                "(need +${minAdvanceSec}s from ${anchorPos}s, warning=${end.warningMessage})"
         }
     }
 
