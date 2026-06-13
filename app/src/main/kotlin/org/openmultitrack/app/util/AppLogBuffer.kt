@@ -1,13 +1,14 @@
 package org.openmultitrack.app.util
 
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 object DevLogLevelMask {
     const val DEBUG = 1 shl 0
@@ -68,10 +69,15 @@ object AppLogBuffer {
     private var autoPersistEnabled = false
 
     private var appContext: Context? = null
-    private var flushHandler: Handler? = null
+    private val flushExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "app-log-flush").apply { isDaemon = true }
+    }
+    private var flushFuture: ScheduledFuture<*>? = null
     private val flushRunnable = Runnable {
-        appContext?.let(::flushAutoPersist)
-        if (autoPersistEnabled) scheduleAutoFlush()
+        val context = appContext ?: return@Runnable
+        if (!autoPersistEnabled) return@Runnable
+        flushAutoPersist(context)
+        scheduleAutoFlush()
     }
 
     fun lineCount(): Int = lines.size
@@ -82,7 +88,10 @@ object AppLogBuffer {
         if (enabled) {
             scheduleAutoFlush()
         } else {
-            flushHandler?.removeCallbacks(flushRunnable)
+            synchronized(this) {
+                flushFuture?.cancel(false)
+                flushFuture = null
+            }
         }
     }
 
@@ -330,9 +339,15 @@ object AppLogBuffer {
     }
 
     private fun scheduleAutoFlush() {
-        val handler = flushHandler ?: Handler(Looper.getMainLooper()).also { flushHandler = it }
-        handler.removeCallbacks(flushRunnable)
-        handler.postDelayed(flushRunnable, AUTO_FLUSH_MS)
+        if (!autoPersistEnabled) return
+        synchronized(this) {
+            flushFuture?.cancel(false)
+            flushFuture = flushExecutor.schedule(
+                flushRunnable,
+                AUTO_FLUSH_MS,
+                TimeUnit.MILLISECONDS,
+            )
+        }
     }
 
     private fun autoPersistFile(context: Context): File = File(logDir(context), AUTO_PERSIST_FILE)

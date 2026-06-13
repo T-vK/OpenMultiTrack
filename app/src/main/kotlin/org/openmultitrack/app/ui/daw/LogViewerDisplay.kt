@@ -10,6 +10,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -90,7 +91,6 @@ fun LogViewerLazyList(
     textStyle: TextStyle,
     wordWrap: Boolean,
     freezeUpdates: Boolean,
-    revision: Int,
     modifier: Modifier = Modifier,
     scrollToIndex: Int? = null,
 ) {
@@ -103,6 +103,7 @@ fun LogViewerLazyList(
     val listState = rememberLazyListState()
     var stickToBottom by remember { mutableStateOf(true) }
     var ignoreUserScrollUntilNs by remember { mutableLongStateOf(0L) }
+    var lastScrolledEntryCount by remember { mutableIntStateOf(0) }
     val freezeUpdatesState by rememberUpdatedState(freezeUpdates)
     val entriesState by rememberUpdatedState(entries)
     val density = LocalDensity.current
@@ -139,9 +140,15 @@ fun LogViewerLazyList(
             }
     }
 
-    LaunchedEffect(revision, stickToBottom, freezeUpdatesState) {
-        if (freezeUpdatesState || !stickToBottom) return@LaunchedEffect
-        scrollToTailIfNeeded()
+    LaunchedEffect(entries.size, stickToBottom, freezeUpdatesState) {
+        if (freezeUpdatesState || !stickToBottom) {
+            lastScrolledEntryCount = entries.size
+            return@LaunchedEffect
+        }
+        if (entries.size > lastScrolledEntryCount) {
+            scrollToTailIfNeeded()
+        }
+        lastScrolledEntryCount = entries.size
     }
 
     LaunchedEffect(scrollToIndex) {
@@ -175,7 +182,7 @@ fun LogViewerLazyList(
     ) {
         itemsIndexed(
             items = entries,
-            key = { index, entry -> "$index:${logEntryStableKey(entry)}" },
+            key = { _, entry -> logEntryStableKey(entry) },
         ) { _, entry ->
             val line = remember(
                 entry,

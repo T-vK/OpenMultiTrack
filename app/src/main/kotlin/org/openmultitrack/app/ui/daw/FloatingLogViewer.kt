@@ -632,7 +632,20 @@ private fun LogViewerContent(
     var maxDisplayLines by remember { mutableIntStateOf(settings.devLogMaxDisplayLines) }
     var searchQuery by remember { mutableStateOf("") }
     var searchMatchIndex by remember { mutableIntStateOf(0) }
-    var refreshTick by remember { mutableIntStateOf(AppLogBuffer.revision) }
+    val display = rememberLogViewerDisplayController(
+        context = context,
+        autoPersist = autoPersist,
+        levelFilterMask = levelFilterMask,
+        disabledTags = disabledTags,
+        customFilters = customFilters,
+        maxDisplayLines = maxDisplayLines,
+        searchQuery = searchQuery,
+        freezeUpdates = freezeLogUpdates,
+    )
+    val displaySnapshot = display.snapshot
+    val logEntries = displaySnapshot.entries
+    val allTags = displaySnapshot.allTags
+    val searchMatches = displaySnapshot.searchMatches
 
     LaunchedEffect(autoPersist) {
         settings.devLogAutoPersist = autoPersist
@@ -648,56 +661,17 @@ private fun LogViewerContent(
         settings.devLogMaxDisplayLines = maxDisplayLines
     }
 
-    val allTags = remember(refreshTick, autoPersist) {
-        AppLogBuffer.discoverTags(context, autoPersist)
-    }
-    val logEntries = remember(refreshTick, autoPersist, levelFilterMask, disabledTags, customFilters, maxDisplayLines) {
-        AppLogBuffer.collectDisplayEntries(
-            context = context,
-            includePersisted = autoPersist,
-            levelMask = levelFilterMask,
-            disabledTags = disabledTags,
-            customFilters = customFilters,
-            maxDisplayLines = maxDisplayLines,
-        )
-    }
-    val searchMatches = remember(logEntries, searchQuery) {
-        logSearchMatchIndices(logEntries, searchQuery)
-    }
     val searchMatchCount = searchMatches.size
-  LaunchedEffect(searchQuery, searchMatches) {
+    LaunchedEffect(searchQuery, searchMatches) {
         searchMatchIndex = if (searchMatches.isEmpty()) 0 else searchMatchIndex.coerceIn(0, searchMatches.lastIndex)
     }
     val scrollToSearchIndex = searchMatches.getOrNull(searchMatchIndex)
     val logText = remember(logEntries, hideTimestamps, coloredLevels) {
-        if (logEntries.isEmpty()) {
-            "(empty)"
-        } else {
-            logEntries.joinToString("\n") { entry ->
-                when (entry) {
-                    is LogDisplayEntry.Section -> entry.text
-                    is LogDisplayEntry.Line -> AppLogBuffer.formatPlainLine(
-                        parsed = entry.parsed,
-                        hideTimestamps = hideTimestamps,
-                        coloredLevels = coloredLevels,
-                    )
-                }
-            }
-        }
+        buildLogViewerPlainText(logEntries, hideTimestamps, coloredLevels)
     }
     val transformState = rememberTransformableState { zoomChange, _, _ ->
         if (zoomChange != 1f) {
             onTextScaleChange((textScale * zoomChange).coerceIn(0.5f, 4f))
-        }
-    }
-
-    val freezeLogUpdatesState by rememberUpdatedState(freezeLogUpdates)
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(500)
-            if (!freezeLogUpdatesState) {
-                refreshTick = AppLogBuffer.revision
-            }
         }
     }
 
@@ -780,7 +754,6 @@ private fun LogViewerContent(
                 onCopy = { clipboard.setText(AnnotatedString(logText)) },
                 onClear = {
                     AppLogBuffer.clearCurrentSession(context)
-                    refreshTick = AppLogBuffer.revision
                 },
                 onAutoPersistChange = { autoPersist = it },
                 onHideTimestampsChange = {
@@ -856,7 +829,6 @@ private fun LogViewerContent(
                     textStyle = logTextStyle,
                     wordWrap = wordWrap,
                     freezeUpdates = freezeLogUpdates,
-                    revision = refreshTick,
                     scrollToIndex = scrollToSearchIndex,
                     modifier = Modifier.fillMaxSize(),
                 )
