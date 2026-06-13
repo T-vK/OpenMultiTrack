@@ -95,23 +95,25 @@ Java_org_openmultitrack_audio_NativeUac2Engine_nativeReadCapturedPcmBytes(
     jobject /*thiz*/,
     jbyteArray dest,
     jint maxFrames) {
-    jbyte* elements = env->GetByteArrayElements(dest, nullptr);
+    jbyte* elements = static_cast<jbyte*>(env->GetPrimitiveArrayCritical(dest, nullptr));
     if (elements == nullptr) return 0;
     const int32_t bpf =
         static_cast<int32_t>(openmultitrack::uac2::Uac2Capture::instance().captureBytesPerFrame());
+    jint read = 0;
     if (bpf > 0) {
         const jsize required = static_cast<jsize>(
             static_cast<int64_t>(maxFrames) * static_cast<int64_t>(bpf));
         if (env->GetArrayLength(dest) < required) {
-            env->ReleaseByteArrayElements(dest, elements, JNI_ABORT);
+            env->ReleasePrimitiveArrayCritical(dest, elements, JNI_ABORT);
             return 0;
         }
     }
-    const size_t read = openmultitrack::uac2::Uac2Capture::instance().readPcmBytes(
+    const size_t frames = openmultitrack::uac2::Uac2Capture::instance().readPcmBytes(
         reinterpret_cast<uint8_t*>(elements),
         static_cast<size_t>(maxFrames));
-    env->ReleaseByteArrayElements(dest, elements, 0);
-    return static_cast<jint>(read);
+    read = static_cast<jint>(frames);
+    env->ReleasePrimitiveArrayCritical(dest, elements, 0);
+    return read;
 }
 
 extern "C" JNIEXPORT jint JNICALL
