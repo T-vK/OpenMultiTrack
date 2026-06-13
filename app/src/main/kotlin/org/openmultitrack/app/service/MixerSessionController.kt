@@ -2119,6 +2119,27 @@ class MixerSessionController(
         }
     }
 
+    private suspend fun refreshStorageEstimateOffMain() {
+        val root = storageRoot
+        if (!root.isDirectory) return
+        val armed = _state.value.channelStrips.count { it.armed }.coerceAtLeast(1)
+        val sampleRate = (_state.value.probe?.input?.sampleRate ?: 48_000).coerceAtLeast(1)
+        val bytesPerSec = sampleRate.toLong() * 3L * armed
+        val (freeBytes, estimateSec) = withContext(Dispatchers.IO) {
+            val free = runCatching {
+                StatFs(root.absolutePath).availableBytes
+            }.getOrDefault(0L)
+            val estimate = if (bytesPerSec > 0) free.toFloat() / bytesPerSec else 0f
+            free to estimate
+        }
+        _state.update {
+            it.copy(
+                storageFreeBytes = freeBytes,
+                storageRecordEstimateSec = estimateSec,
+            )
+        }
+    }
+
     private fun startCaptureUiUpdates() {
         ensureLiveCaptureUiUpdates()
     }
@@ -2134,49 +2155,64 @@ class MixerSessionController(
         if (waveformJob?.isActive == true) return
         waveformJob?.cancel()
         refreshStorageEstimate()
-        waveformJob = scope.launch {
+        waveformJob = scope.launch(Dispatchers.Default) {
             var storageTick = 0
             var healTick = 0
             while (isActive) {
-                if (liveCaptureUiUpdatesDesired()) {
-                    if (!captureEngine.isCaptureActive) {
-                        if (captureStreamDesired() && healTick++ % 25 == 0) {
+                if (!liveCaptureUiUpdatesDesired()) {
+                    withContext(Dispatchers.Main.immediate) {
+                        stopWaveformUpdatesIfIdle()
+                    }
+                    break
+                }
+                if (!captureEngine.isCaptureActive) {
+                    if (captureStreamDesired() && healTick++ % 25 == 0) {
+                        withContext(Dispatchers.IO) {
                             captureMutex.withLock {
                                 if (captureStreamDesired() && !captureEngine.isCaptureActive) {
                                     syncVuMeterCaptureWhileLocked()
                                 }
                             }
                         }
-                    } else {
-                        healTick = 0
-                        if (storageTick++ % 25 == 0) {
-                            refreshStorageEstimate()
-                        }
-                        val levels = captureEngine.captureMeterLevels()
+                    }
+                } else {
+                    healTick = 0
+                    if (storageTick++ % 25 == 0) {
+                        refreshStorageEstimateOffMain()
+                    }
+                    val levels = captureEngine.captureMeterLevels()
+                    val nowNs = System.nanoTime()
+                    if (nowNs - lastVuLogNs >= 2_000_000_000L) {
+                        lastVuLogNs = nowNs
                         val rawPeaks = captureEngine.debugRawMeterPeaks()
-                        val nowNs = System.nanoTime()
-                        if (nowNs - lastVuLogNs >= 2_000_000_000L) {
-                            lastVuLogNs = nowNs
-                            val ch1 = levels[0] ?: 0f
-                            val ch2 = levels[1] ?: 0f
-                            val raw1 = rawPeaks.getOrElse(0) { 0f }
-                            val raw2 = rawPeaks.getOrElse(1) { 0f }
-                            if (levels.isNotEmpty()) {
-                                OmtLog.i(
-                                    "VuMeter",
-                                    "ch1 vu=${"%.3f".format(ch1)} raw=${"%.4f".format(raw1)} " +
-                                        "ch2 vu=${"%.3f".format(ch2)} raw=${"%.4f".format(raw2)} " +
-                                        "vuOnly=${_state.value.isVuMetering} " +
-                                        "monitoring=${_state.value.isMonitoring}",
-                                )
-                            }
+                        val ch1 = levels[0] ?: 0f
+                        val ch2 = levels[1] ?: 0f
+                        val raw1 = rawPeaks.getOrElse(0) { 0f }
+                        val raw2 = rawPeaks.getOrElse(1) { 0f }
+                        if (levels.isNotEmpty()) {
+                            OmtLog.d(
+                                "VuMeter",
+                                "ch1 vu=${"%.3f".format(ch1)} raw=${"%.4f".format(raw1)} " +
+                                    "ch2 vu=${"%.3f".format(ch2)} raw=${"%.4f".format(raw2)} " +
+                                    "vuOnly=${_state.value.isVuMetering} " +
+                                    "monitoring=${_state.value.isMonitoring}",
+                            )
                         }
+                    }
+                    val recording = _state.value.isRecording
+                    val monitoring = _state.value.isMonitoring
+                    val waveforms = if (recording) {
+                        captureEngine.waveformSnapshots(normalize = false)
+                    } else {
+                        emptyMap()
+                    }
+                    val elapsed = if (recording) captureEngine.recordElapsedSec() else 0f
+                    withContext(Dispatchers.Main.immediate) {
                         _state.update { s ->
                             when {
-                                s.isRecording -> {
-                                    val elapsed = captureEngine.recordElapsedSec()
+                                recording -> {
                                     val updated = withRecordViewFollowPlayhead(s, elapsed).copy(
-                                        waveformPeaks = captureEngine.waveformSnapshots(normalize = false),
+                                        waveformPeaks = waveforms,
                                         recordElapsedSec = elapsed,
                                         captureMeterLevels = levels,
                                     )
@@ -2187,7 +2223,7 @@ class MixerSessionController(
                                     }
                                     updated
                                 }
-                                s.isMonitoring -> s.copy(
+                                monitoring -> s.copy(
                                     captureMeterLevels = levels,
                                     waveformPeaks = emptyMap(),
                                     recordElapsedSec = 0f,
@@ -2196,9 +2232,6 @@ class MixerSessionController(
                             }
                         }
                     }
-                } else {
-                    stopWaveformUpdatesIfIdle()
-                    break
                 }
                 delay(40)
             }
