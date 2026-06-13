@@ -404,7 +404,6 @@ void Uac2Capture::ingestPcmBytes(const uint8_t* bytes, size_t byte_count) {
             if (pushed < wholeBytes) {
                 dropped_frames_.fetch_add((wholeBytes - pushed) / bpf);
             }
-            return;
         }
     }
 

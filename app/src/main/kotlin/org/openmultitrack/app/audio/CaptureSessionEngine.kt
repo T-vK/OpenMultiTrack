@@ -898,8 +898,21 @@ class CaptureSessionEngine(
 
                         if (isRecording && nativePcmRecordingActive && backend == AudioBackend.UAC2 && synthetic == null) {
                             recordingMeterChunkCounter++
-                            gotAnyFrames = syncNativeRecordingProgress(backend)
-                            if (!gotAnyFrames) {
+                            if (nativeTimelineBaselineReady) {
+                                gotAnyFrames = syncNativeRecordingProgress(backend)
+                            }
+                            val meterFrames = AudioEngineRouter.readRecordedFrames(
+                                scratch,
+                                minOf(framesPerChunk, 2_048),
+                                backend,
+                            )
+                            if (meterFrames > 0) {
+                                gotAnyFrames = true
+                                consecutiveEmptyReads = 0
+                                lastFrameReceivedNs = System.nanoTime()
+                                accumulateWaveformPeaks(scratch, meterFrames, channelCount)
+                                maybeEmitWaveformPeaks()
+                            } else if (!gotAnyFrames) {
                                 consecutiveEmptyReads++
                                 if (isRecording && usbDegraded) {
                                     val advanced = catchUpTimelineToTarget(maxFramesPerPass = 65_536)
@@ -941,6 +954,8 @@ class CaptureSessionEngine(
                                     droppedFrames = AudioEngineRouter.recordingDroppedFrames(backend)
                                 }
                                 enqueueRecordingPcmFrames(recordPcmBuf, frames, channelCount, bytesPerFrame)
+                                accumulateWaveformPeaksFromPcm(recordPcmBuf, frames, channelCount, bytesPerFrame)
+                                maybeEmitWaveformPeaks()
                             } else {
                                 val sampleCount = framesPerChunk * channelCount
                                 val recordBuf = if (isRecording && backend != null && synthetic == null) {
@@ -982,6 +997,11 @@ class CaptureSessionEngine(
                                         enqueueRecordingFrames(recordBuf, frames, channelCount)
                                     } else {
                                         writeRecordingFrames(scratch, frames, channelCount)
+                                    }
+                                    if (++recordingMeterChunkCounter % 8 == 0) {
+                                        val peakSource = recordBuf ?: scratch
+                                        accumulateWaveformPeaksLight(peakSource, frames, channelCount)
+                                        maybeEmitWaveformPeaks()
                                     }
                                 } else {
                                     recordBuf?.let { releaseWriteBuffer(it) }
