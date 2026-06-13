@@ -124,6 +124,14 @@ class WavWriter private constructor(
     }
 
     private fun appendPcm(source: ByteArray, byteLen: Int) {
+        if (byteLen <= 0) return
+        if (pendingLen > 0) {
+            flushPendingPcm()
+        }
+        if (byteLen >= DIRECT_WRITE_BYTES) {
+            raf.write(source, 0, byteLen)
+            return
+        }
         if (pendingLen + byteLen > pendingPcm.size) {
             val grown = ByteArray(max(pendingPcm.size * 2, pendingLen + byteLen))
             System.arraycopy(pendingPcm, 0, grown, 0, pendingLen)
@@ -187,6 +195,8 @@ class WavWriter private constructor(
     companion object {
         private const val RIFF_HEADER_SIZE = 44
         private const val FLUSH_THRESHOLD_BYTES = 262_144
+        /** Chunks at least this large bypass the pending buffer (Flow 8 ≈ 327 KB @ 8192 frames). */
+        private const val DIRECT_WRITE_BYTES = 65_536
 
         /** Reopen an existing WAV and append PCM after any data already on disk. */
         fun openForAppend(file: File, channelCount: Int, sampleRate: Int): WavWriter =

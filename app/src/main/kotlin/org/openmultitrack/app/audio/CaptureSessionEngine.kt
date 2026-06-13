@@ -381,7 +381,9 @@ class CaptureSessionEngine(
         if (activeBackend == AudioBackend.UAC2) {
             prewarmPcmWriteBuffers(framesPerChunk * captureBytesPerFrame)
         }
-        startRecordingWriteLoop()
+        if (!usesSyncUac2PcmDiskWrites()) {
+            startRecordingWriteLoop()
+        }
 
         val armedCount = config.channelStrips.count { it.armed }
         Result.success(
@@ -954,6 +956,9 @@ class CaptureSessionEngine(
         enqueueRecordingFrames(copy, toWrite, channels)
     }
 
+    private fun usesSyncUac2PcmDiskWrites(): Boolean =
+        activeBackend == AudioBackend.UAC2 && sessionWriter != null
+
     private fun enqueueRecordingPcmFrames(
         samples: ByteArray,
         frameCount: Int,
@@ -964,10 +969,30 @@ class CaptureSessionEngine(
             releasePcmWriteBuffer(samples)
             return
         }
+        if (usesSyncUac2PcmDiskWrites()) {
+            writePcmFramesSync(samples, frameCount, channels, bytesPerFrame)
+            releasePcmWriteBuffer(samples)
+            maybePersistTimelineAsync()
+            return
+        }
         val request = RecordingWriteRequest.PcmFrames(samples, frameCount, channels, bytesPerFrame)
         if (!enqueueRecordingWrite(request)) {
             releasePcmWriteBuffer(samples)
             OmtLog.w("CaptureSession", "disk queue saturated; dropped $frameCount recording pcm frames")
+        }
+    }
+
+    private fun writePcmFramesSync(
+        samples: ByteArray,
+        frameCount: Int,
+        channels: Int,
+        bytesPerFrame: Int,
+    ) {
+        val writer = sessionWriter ?: return
+        try {
+            writer.writeInterleavedPcm24(samples, frameCount, channels, bytesPerFrame)
+            framesWritten += frameCount
+        } catch (_: IllegalStateException) {
         }
     }
 
@@ -1163,13 +1188,13 @@ class CaptureSessionEngine(
 
     private fun maybePersistTimelineAsync() {
         val now = System.nanoTime()
-        if (now - lastMetadataPersistNs < 500_000_000L) return
+        if (now - lastMetadataPersistNs < 2_000_000_000L) return
         val dir = sessionDir ?: return
         val config = recordingConfig ?: return
         val diskFrames = sessionWriter?.totalFramesWritten()
             ?: perChannelWriter?.totalFramesWritten()
             ?: framesWritten
-        if (diskFrames - lastMetadataPersistFrames < sampleRate / 2) return
+        if (diskFrames - lastMetadataPersistFrames < sampleRate) return
         lastMetadataPersistFrames = diskFrames
         lastMetadataPersistNs = now
         buildSessionMetadata(config, sampleRate, diskFrames).writeTo(dir)
@@ -1370,7 +1395,7 @@ class CaptureSessionEngine(
         private const val METER_DECAY_TAU_MS = 250f
         private const val METER_OUTPUT_THRESHOLD = 1e-5f
         private const val WRITE_BUFFER_POOL_SIZE = 24
-        private const val DISK_WRITE_QUEUE_CAPACITY = 32
+        private const val DISK_WRITE_QUEUE_CAPACITY = 64
         /** Drain up to ~680 ms of audio per fanout pass when the native ring has backlog. */
         private const val MAX_FRAMES_PER_FANOUT_PASS = 32_768
 
