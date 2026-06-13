@@ -1294,6 +1294,29 @@ class MainViewModel(
         sessionClient.withManager { it.getOrCreate(mixerId).stopMonitoring() }
     }
 
+    fun toggleUsbTestTone(mixerId: String, usbChannelIndex: Int) {
+        if (isRemoteClient()) {
+            remoteCommand(
+                "toggle_usb_test_tone",
+                JSONObject().put("mixerId", mixerId).put("channel", usbChannelIndex),
+            )
+            return
+        }
+        if (!sessionClient.promoteForeground("USB test tone")) {
+            showStatus("Could not start USB test tone — check USB connection.", mixerId)
+            return
+        }
+        sessionClient.withManager { it.getOrCreate(mixerId).toggleUsbTestTone(usbChannelIndex) }
+    }
+
+    fun stopUsbTestTone(mixerId: String) {
+        if (isRemoteClient()) {
+            remoteCommand("stop_usb_test_tone", JSONObject().put("mixerId", mixerId))
+            return
+        }
+        sessionClient.withManager { it.getOrCreate(mixerId).stopUsbTestTone() }
+    }
+
     fun startRecord(mixerId: String) {
         if (isRemoteClient()) {
             remoteCommand("start_record", JSONObject().put("mixerId", mixerId))

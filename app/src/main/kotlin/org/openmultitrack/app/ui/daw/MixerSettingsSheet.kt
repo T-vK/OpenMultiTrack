@@ -31,6 +31,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -56,6 +57,8 @@ import org.openmultitrack.domain.session.AppMode
 import org.openmultitrack.mixer.behringer.MixingStationIcons
 import org.openmultitrack.mixer.behringer.ScribbleStripLabel
 import org.openmultitrack.usb.LabeledAudioDevice
+import androidx.compose.ui.platform.testTag
+import org.openmultitrack.app.audio.UsbPlaybackToneGenerator
 
 private sealed interface MixerSettingsPage {
     data object Menu : MixerSettingsPage
@@ -64,6 +67,7 @@ private sealed interface MixerSettingsPage {
     data object OutputMatrix : MixerSettingsPage
     data object HiddenSoundcheck : MixerSettingsPage
     data object HiddenRecord : MixerSettingsPage
+    data object UsbTestTones : MixerSettingsPage
 }
 
 private val LabelColumnWidth = 112.dp
@@ -87,6 +91,12 @@ fun MixerSettingsScreen(
     onStartMonitor: () -> Unit,
     onStopMonitor: () -> Unit,
     onSetMonitorOutput: (Int) -> Unit,
+    usbTestToneActiveChannel: Int? = null,
+    usbTestToneEnabled: Boolean = true,
+    isRecording: Boolean = false,
+    isSoundcheckPlaying: Boolean = false,
+    onToggleUsbTestTone: (Int) -> Unit = {},
+    onStopUsbTestTone: () -> Unit = {},
     onDismiss: () -> Unit,
     onSave: (MixerRoutingConfig) -> Unit,
 ) {
@@ -153,6 +163,7 @@ fun MixerSettingsScreen(
                     onMonitor = { page = MixerSettingsPage.Monitor },
                     onInputMatrix = { page = MixerSettingsPage.InputMatrix },
                     onOutputMatrix = { page = MixerSettingsPage.OutputMatrix },
+                    onUsbTestTones = { page = MixerSettingsPage.UsbTestTones },
                     onHiddenSoundcheck = { page = MixerSettingsPage.HiddenSoundcheck },
                     onHiddenRecord = { page = MixerSettingsPage.HiddenRecord },
                 )
@@ -197,6 +208,14 @@ fun MixerSettingsScreen(
                     hidden = draft.hiddenRecord,
                     onChange = { hidden -> persist(draft.copy(hiddenRecord = hidden)) },
                 )
+                MixerSettingsPage.UsbTestTones -> UsbTestTonesPage(
+                    usbChannelCount = usbOutputCount,
+                    activeChannel = usbTestToneActiveChannel,
+                    enabled = usbTestToneEnabled && !isRecording,
+                    isSoundcheckPlaying = isSoundcheckPlaying,
+                    onToggleChannel = onToggleUsbTestTone,
+                    onStopAll = onStopUsbTestTone,
+                )
             }
         }
     }
@@ -209,6 +228,7 @@ private fun pageTitle(page: MixerSettingsPage): String = when (page) {
     MixerSettingsPage.OutputMatrix -> "Output matrix"
     MixerSettingsPage.HiddenSoundcheck -> "Hidden channels (soundcheck)"
     MixerSettingsPage.HiddenRecord -> "Hidden channels (recording mode)"
+    MixerSettingsPage.UsbTestTones -> "USB test tones"
 }
 
 @Composable
@@ -216,6 +236,7 @@ private fun SettingsMenu(
     onMonitor: () -> Unit,
     onInputMatrix: () -> Unit,
     onOutputMatrix: () -> Unit,
+    onUsbTestTones: () -> Unit,
     onHiddenSoundcheck: () -> Unit,
     onHiddenRecord: () -> Unit,
 ) {
@@ -223,6 +244,7 @@ private fun SettingsMenu(
         SettingsMenuItem("Monitor output", onMonitor)
         SettingsMenuItem("Input matrix", onInputMatrix)
         SettingsMenuItem("Output matrix", onOutputMatrix)
+        SettingsMenuItem("USB test tones", onUsbTestTones)
         SettingsMenuItem("Hidden channels (soundcheck)", onHiddenSoundcheck)
         SettingsMenuItem("Hidden channels (recording mode)", onHiddenRecord)
     }
@@ -308,6 +330,97 @@ private fun MonitorSettingsPage(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun UsbTestTonesPage(
+    usbChannelCount: Int,
+    activeChannel: Int?,
+    enabled: Boolean,
+    isSoundcheckPlaying: Boolean,
+    onToggleChannel: (Int) -> Unit,
+    onStopAll: () -> Unit,
+) {
+    Text(
+        "Play a sine tone to each USB return (U01–U04 on Flow 8). " +
+            "Tap a channel to start; tap again to stop. Only one channel plays at a time.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(vertical = 12.dp),
+    )
+    if (!enabled) {
+        Text(
+            "Connect the mixer and stop recording before using USB test tones.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+    }
+    if (isSoundcheckPlaying) {
+        Text(
+            "Soundcheck playback will stop when you start a test tone.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+    }
+    val channels = usbChannelCount.coerceAtLeast(1)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (ch in 0 until channels) {
+            val isActive = activeChannel == ch
+            val freqHz = UsbPlaybackToneGenerator.frequencyHz(ch).toInt()
+            val label = "U${formatUsbColumn(ch + 1)}"
+            val modifier = Modifier
+                .fillMaxWidth()
+                .testTag("usb_test_tone_$label")
+            if (isActive) {
+                Button(
+                    onClick = { onToggleChannel(ch) },
+                    enabled = enabled,
+                    modifier = modifier,
+                ) {
+                    UsbTestToneButtonLabel(label, freqHz, active = true)
+                }
+            } else {
+                OutlinedButton(
+                    onClick = { onToggleChannel(ch) },
+                    enabled = enabled,
+                    modifier = modifier,
+                ) {
+                    UsbTestToneButtonLabel(label, freqHz, active = false)
+                }
+            }
+        }
+        if (activeChannel != null) {
+            OutlinedButton(
+                onClick = onStopAll,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("usb_test_tone_stop_all"),
+            ) {
+                Text("Stop all test tones")
+            }
+        }
+    }
+}
+
+@Composable
+private fun UsbTestToneButtonLabel(label: String, freqHz: Int, active: Boolean) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            if (active) "Stop $label" else "Play $label",
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            "$freqHz Hz sine",
+            style = MaterialTheme.typography.labelSmall,
+            color = if (active) {
+                MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
     }
 }
 

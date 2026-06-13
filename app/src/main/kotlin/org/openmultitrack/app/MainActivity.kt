@@ -204,6 +204,8 @@ class MainActivity : ComponentActivity() {
                         onSetMonitorOutput = viewModel::setMonitorOutput,
                         onStartMonitor = viewModel::startMonitor,
                         onStopMonitor = viewModel::stopMonitor,
+                        onToggleUsbTestTone = viewModel::toggleUsbTestTone,
+                        onStopUsbTestTone = viewModel::stopUsbTestTone,
                         onStartRecord = viewModel::startRecord,
                         onStopRecord = viewModel::stopRecord,
                         onSetAppMode = viewModel::setAppMode,

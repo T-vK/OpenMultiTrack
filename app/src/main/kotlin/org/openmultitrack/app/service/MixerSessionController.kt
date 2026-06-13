@@ -27,6 +27,7 @@ import org.openmultitrack.app.audio.PlaybackMixContext
 import org.openmultitrack.app.audio.SessionPlayer
 import org.openmultitrack.app.audio.TransportTrace
 import org.openmultitrack.app.audio.TransportTraceHub
+import org.openmultitrack.app.audio.UsbTestTonePlayer
 import org.openmultitrack.app.routing.RoutingAutomationBridge
 import org.openmultitrack.app.routing.RoutingHookResult
 import org.openmultitrack.app.routing.SoundcheckTrackChannels
@@ -124,6 +125,8 @@ data class MixerSessionUiState(
     val soundcheckLoopEnabled: Boolean = false,
     val soundcheckLoopSelecting: Boolean = false,
     val soundcheckMeterLevels: Map<Int, Float> = emptyMap(),
+    /** Active USB return test tone (0-based index), or null when off. */
+    val usbTestToneActiveChannel: Int? = null,
     val trackmarks: List<SessionTrackmark> = emptyList(),
 )
 
@@ -138,6 +141,7 @@ class MixerSessionController(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val captureEngine = CaptureSessionEngine(mixerId)
     private val player = SessionPlayer()
+    private val testTonePlayer = UsbTestTonePlayer()
     private val captureMutex = Mutex()
     private var usbStream: UsbAudioStreamHandle? = null
     private var activeProbe: FullUsbProbeResult? = null
@@ -925,6 +929,10 @@ class MixerSessionController(
         captureEngine.updateVuMetering(false)
         _state.update { it.copy(isVuMetering = false) }
         withContext(Dispatchers.IO) {
+            if (testTonePlayer.isPlaying) {
+                testTonePlayer.stopAndAwait()
+                _state.update { it.copy(usbTestToneActiveChannel = null) }
+            }
             if (player.isPlaying) {
                 player.stopAndAwait()
             }
@@ -943,6 +951,9 @@ class MixerSessionController(
         captureEngine.updateVuMetering(false)
         _state.update { it.copy(isVuMetering = false) }
         withContext(Dispatchers.IO) {
+            if (testTonePlayer.isPlaying) {
+                testTonePlayer.stopAndAwait()
+            }
             if (player.isPlaying) {
                 player.stopAndAwait()
             }
@@ -1012,6 +1023,9 @@ class MixerSessionController(
         captureEngine.updateVuMetering(false)
         _state.update { it.copy(isVuMetering = false) }
         withContext(Dispatchers.IO) {
+            if (testTonePlayer.isPlaying) {
+                testTonePlayer.stopAndAwait()
+            }
             if (player.isPlaying) {
                 player.stopAndAwait()
             }
@@ -1027,6 +1041,10 @@ class MixerSessionController(
     /** Stop USB capture/playback so XR18 accepts OSC routing changes (verified on hardware). */
     private suspend fun quiesceUsbBeforeRoutingLocked(keepCaptureForFlow8Record: Boolean = false) {
         val t0 = System.nanoTime()
+        if (testTonePlayer.isPlaying) {
+            testTonePlayer.stopAndAwait()
+            _state.update { it.copy(usbTestToneActiveChannel = null) }
+        }
         if (player.isPlaying) {
             player.stopAndAwait()
         }
@@ -1069,6 +1087,10 @@ class MixerSessionController(
         }
         val clampedStart = startFrame.coerceIn(0L, (durationFrames - 1).coerceAtLeast(0L))
         withContext(Dispatchers.IO) {
+            if (testTonePlayer.isPlaying) {
+                testTonePlayer.stopAndAwait()
+                _state.update { it.copy(usbTestToneActiveChannel = null) }
+            }
             if (isFlow8Active()) {
                 trace?.mark("preparing FLOW 8 USB for playback")
                 prepareFlow8UsbForPlaybackLocked()
@@ -1356,6 +1378,98 @@ class MixerSessionController(
         _state.update { it.copy(isMonitoring = false, statusMessage = "Monitor off") }
         syncVuMeterCapture()
         AudioSessionBridge.rebuildNotification()
+    }
+
+    fun toggleUsbTestTone(usbChannelIndex: Int) {
+        scope.launch {
+            captureMutex.withLock {
+                try {
+                    if (_state.value.usbTestToneActiveChannel == usbChannelIndex) {
+                        stopUsbTestToneLocked()
+                    } else {
+                        startUsbTestToneLocked(usbChannelIndex)
+                    }
+                } catch (e: Exception) {
+                    OmtLog.e("MixerSession", "toggleUsbTestTone failed", e)
+                    stopUsbTestToneLocked()
+                    _state.update {
+                        it.copy(
+                            usbTestToneActiveChannel = null,
+                            warningMessage = e.message ?: "USB test tone failed",
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun stopUsbTestTone() {
+        scope.launch {
+            captureMutex.withLock { stopUsbTestToneLocked() }
+        }
+    }
+
+    private suspend fun stopUsbTestToneLocked() {
+        if (!testTonePlayer.isPlaying && _state.value.usbTestToneActiveChannel == null) return
+        withContext(Dispatchers.IO) {
+            testTonePlayer.stopAndAwait()
+            if (isFlow8Active()) {
+                teardownFlow8UsbPlaybackLocked()
+            } else {
+                AudioEngineRouter.stopPlayback()
+            }
+        }
+        _state.update {
+            it.copy(
+                usbTestToneActiveChannel = null,
+                statusMessage = "USB test tone off",
+            )
+        }
+        AudioSessionBridge.rebuildNotification()
+        OmtLog.i("MixerSession", "USB test tone stopped for $mixerId")
+    }
+
+    private suspend fun startUsbTestToneLocked(usbChannelIndex: Int) {
+        val descriptor = activeDescriptor
+            ?: throw IllegalStateException("Mixer not connected — reconnect USB")
+        val probe = activeProbe
+            ?: throw IllegalStateException("Mixer not ready — wait for probe to finish")
+        if (_state.value.isRecording) {
+            throw IllegalStateException("Stop recording before USB test tones")
+        }
+        if (isSoundcheckTransportActive()) {
+            stopSoundcheckLocked(releaseNative = isFlow8Active(), restoreRouting = false)
+        }
+        stopUsbTestToneLocked()
+        withContext(Dispatchers.IO) {
+            if (isFlow8Active()) {
+                prepareFlow8UsbForPlaybackLocked()
+            } else {
+                prepareUsbForPlaybackLocked()
+            }
+            val usbOutputs = maxPlaybackChannelsFromProbe(probe).coerceAtLeast(1)
+            if (usbChannelIndex !in 0 until usbOutputs) {
+                throw IllegalArgumentException("USB channel ${usbChannelIndex + 1} not available")
+            }
+            val route = ensurePlaybackLocked(descriptor, probe, usbOutputs).getOrThrow()
+            testTonePlayer.start(
+                scope = scope,
+                route = route,
+                usbDevice = activeUsbDevice,
+                usbChannelIndex = usbChannelIndex,
+            ).getOrThrow()
+        }
+        val freq = org.openmultitrack.app.audio.UsbPlaybackToneGenerator.frequencyHz(usbChannelIndex).toInt()
+        _state.update {
+            it.copy(
+                usbTestToneActiveChannel = usbChannelIndex,
+                statusMessage = "USB test tone U${usbChannelIndex + 1} (${freq} Hz)",
+                warningMessage = null,
+                isMonitoring = false,
+            )
+        }
+        AudioSessionBridge.rebuildNotification()
+        OmtLog.i("MixerSession", "USB test tone U${usbChannelIndex + 1} started for $mixerId")
     }
 
     fun canStartRecording(): Boolean {
@@ -1822,7 +1936,10 @@ class MixerSessionController(
         player.stop()
         scope.launch {
             captureMutex.withLock {
-                withContext(Dispatchers.IO) { captureEngine.stopCapture() }
+                withContext(Dispatchers.IO) {
+                    testTonePlayer.stopAndAwait()
+                    captureEngine.stopCapture()
+                }
             }
             usbStream?.close()
             usbStream = null
