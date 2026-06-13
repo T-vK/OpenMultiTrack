@@ -75,6 +75,13 @@ Java_org_openmultitrack_audio_NativeUac2Engine_nativeStopCapture(
     openmultitrack::uac2::Uac2Capture::instance().close();
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_openmultitrack_audio_NativeUac2Engine_nativeIsCaptureRunning(
+    JNIEnv* /*env*/,
+    jobject /*thiz*/) {
+    return openmultitrack::uac2::Uac2Capture::instance().isRunning() ? JNI_TRUE : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_org_openmultitrack_audio_NativeUac2Engine_nativeReadCapturedFrames(
     JNIEnv* env,

@@ -170,6 +170,15 @@ class CaptureSessionEngine(
 
     /** True when the fanout loop has read USB frames recently (used to heal stale capture). */
     fun isReceivingAudio(withinMs: Long = 1_500): Boolean {
+        if (nativePcmRecordingActive) {
+            val backend = activeBackend
+            if (backend != null) {
+                val nativeFrames = AudioEngineRouter.nativePcmFileFramesWritten(backend)
+                if (nativeFrames > framesCaptured) {
+                    lastFrameReceivedNs = System.nanoTime()
+                }
+            }
+        }
         val last = lastFrameReceivedNs
         if (last <= 0L) return false
         return System.nanoTime() - last <= withinMs * 1_000_000L
@@ -180,6 +189,8 @@ class CaptureSessionEngine(
         val backend = activeBackend ?: return false
         return NativeAudioCaptureRegistry.isOwner(ownerId, backend)
     }
+
+    fun isNativePcmRecording(): Boolean = nativePcmRecordingActive
 
     fun isSyntheticCapture(): Boolean = syntheticGenerator != null
 
@@ -263,16 +274,30 @@ class CaptureSessionEngine(
         usbDevice: UsbDevice?,
     ): Result<Unit> = lifecycleMutex.withLock {
         if (isCaptureActive && activeRoute?.backend == route.backend && !usbDegraded) {
+            if (isRecording && nativePcmRecordingActive && isNativeCaptureOwner()) {
+                return Result.success(Unit)
+            }
             if (isNativeCaptureOwner() && isReceivingAudio(if (isRecording) 5_000 else 500)) {
                 return Result.success(Unit)
             }
             if (isRecording) {
-                return reconnectCaptureLocked(scope, route, usbDevice)
+                OmtLog.w(
+                    "CaptureSession",
+                    "startCapture: keeping active capture during recording (no reconnect)",
+                )
+                return Result.success(Unit)
             }
             stopCaptureInternalLocked()
         }
-        if (isRecording && usbDegraded) {
+        if (isRecording && usbDegraded && !nativePcmRecordingActive) {
             return reconnectCaptureLocked(scope, route, usbDevice)
+        }
+        if (isRecording && usbDegraded) {
+            OmtLog.w(
+                "CaptureSession",
+                "startCapture: recording degraded with native PCM — keeping stream",
+            )
+            return Result.success(Unit)
         }
         stopCaptureInternalLocked()
         activeBackend = route.backend

@@ -318,6 +318,10 @@ bool Uac2Capture::startPcmFileRecording(const std::string& path) {
     if (std::setvbuf(file, nullptr, _IOFBF, kFileBufferBytes) != 0) {
         OMT_LOGW("uac2 pcm file setvbuf failed for %s", path.c_str());
     }
+    file_ring_ = std::make_unique<openmultitrack::SpscPcmRing>(
+        960'000,
+        alt_.format.channels,
+        alt_.format.subframe_bytes);
     file_handle_ = file;
     file_frames_written_.store(0);
     file_recording_.store(true);
@@ -344,6 +348,7 @@ void Uac2Capture::stopPcmFileRecordingUnlocked() {
         std::fclose(file_handle_);
         file_handle_ = nullptr;
     }
+    file_ring_.reset();
     OMT_LOGI("uac2 pcm file recording stopped frames=%llu",
              static_cast<unsigned long long>(file_frames_written_.load()));
 }
@@ -359,9 +364,11 @@ void Uac2Capture::pcmFileWriterLoop() {
     std::vector<uint8_t> scratch(524288);
     const size_t max_frames = scratch.size() / bpf;
     while (file_recording_.load()) {
-        const size_t frames = readPcmBytes(scratch.data(), max_frames);
+        openmultitrack::SpscPcmRing* ring = file_ring_.get();
+        const size_t frames =
+            ring != nullptr ? ring->popPcmBytes(scratch.data(), max_frames) : 0;
         if (frames == 0) {
-            std::this_thread::yield();
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
             continue;
         }
         FILE* file = file_handle_;
@@ -380,11 +387,24 @@ void Uac2Capture::pcmFileWriterLoop() {
 }
 
 void Uac2Capture::ingestPcmBytes(const uint8_t* bytes, size_t byte_count) {
-    if (ring_ == nullptr || byte_count == 0) return;
+    if (byte_count == 0) return;
     const size_t bpf = bytesPerFrame(alt_.format);
     if (bpf == 0) return;
     const size_t wholeBytes = (byte_count / bpf) * bpf;
     if (wholeBytes == 0) return;
+
+    if (file_recording_.load()) {
+        openmultitrack::SpscPcmRing* fileRing = file_ring_.get();
+        if (fileRing != nullptr) {
+            const size_t pushed = fileRing->pushBytes(bytes, wholeBytes);
+            if (pushed < wholeBytes) {
+                dropped_frames_.fetch_add((wholeBytes - pushed) / bpf);
+            }
+            return;
+        }
+    }
+
+    if (ring_ == nullptr) return;
     const size_t pushed = ring_->pushBytes(bytes, wholeBytes);
     if (pushed < wholeBytes) {
         dropped_frames_.fetch_add((wholeBytes - pushed) / bpf);

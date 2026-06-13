@@ -32,6 +32,18 @@ object NativeAudioCaptureRegistry {
                 errorMessage = null,
             )
         }
+        if (holder == ownerId && route.backend == AudioBackend.UAC2 && NativeUac2Engine.isCaptureRunning()) {
+            activeRoutes[slot] = route
+            OmtLog.i("CaptureRegistry", "reuse running UAC2 capture for $ownerId key=${slot.deviceKey}")
+            return NativeEngineStatus(
+                active = true,
+                channelCount = route.channelCount.coerceAtLeast(activeRoutes[slot]?.channelCount ?: 0),
+                sampleRate = route.sampleRate.takeIf { it > 0 }
+                    ?: activeRoutes[slot]?.sampleRate
+                    ?: 48_000,
+                errorMessage = null,
+            )
+        }
         if (route.backend == AudioBackend.UAC2) {
             val other = owners.entries.firstOrNull { (key, id) ->
                 key.backend == AudioBackend.UAC2 && key != slot && id != ownerId

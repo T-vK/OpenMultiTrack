@@ -46,6 +46,7 @@ public:
     void stopPcmFileRecording();
     uint64_t pcmFileFramesWritten() const { return file_frames_written_.load(); }
     bool isPcmFileRecording() const { return file_recording_.load(); }
+    bool isRunning() const { return running_.load(); }
 
 private:
     enum class IoBackend { None, Libusb, Usbdevfs };
@@ -92,6 +93,8 @@ private:
     std::vector<std::vector<uint8_t>> libusb_buffers_;
 
     std::unique_ptr<openmultitrack::SpscPcmRing> ring_;
+    /** Dedicated drain path for native file recording (avoids competing with JNI/VU reads). */
+    std::unique_ptr<openmultitrack::SpscPcmRing> file_ring_;
 
     std::atomic<bool> file_recording_{false};
     std::atomic<uint64_t> file_frames_written_{0};

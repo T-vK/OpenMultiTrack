@@ -34,6 +34,8 @@ object NativeUac2Engine {
 
     fun pcmFileFramesWritten(): Long = nativePcmFileFramesWritten()
 
+    fun isCaptureRunning(): Boolean = nativeIsCaptureRunning()
+
     fun startPlayback(
         usbFd: Int,
         alt: NativeUac2AltSetting,
@@ -70,6 +72,8 @@ object NativeUac2Engine {
     private external fun nativeStopPcmFileRecording()
 
     private external fun nativePcmFileFramesWritten(): Long
+
+    private external fun nativeIsCaptureRunning(): Boolean
 
     private external fun nativeStartPlayback(
         usbFd: Int,

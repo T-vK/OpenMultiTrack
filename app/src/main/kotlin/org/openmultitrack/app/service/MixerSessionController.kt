@@ -2268,12 +2268,17 @@ class MixerSessionController(
         }
         if (_state.value.appMode == AppMode.MULTITRACK_RECORD &&
             captureEngine.isCaptureActive &&
-            captureEngine.isNativeCaptureOwner() &&
-            !isRecordingTransport()
+            captureEngine.isNativeCaptureOwner()
         ) {
             return Result.success(
                 captureEngine.activeChannelCount.coerceAtLeast(channelCountFromProbe(probe)),
             )
+        }
+        if (isRecordingTransport() &&
+            captureEngine.isCaptureActive &&
+            captureEngine.isNativeCaptureOwner()
+        ) {
+            return Result.success(captureEngine.activeChannelCount)
         }
         if (captureEngine.isCaptureActive && !captureEngine.isUsbDegraded && captureEngine.isNativeCaptureOwner()) {
             val receiveWindowMs = when {
@@ -2285,12 +2290,14 @@ class MixerSessionController(
                 val count = channelCountFromProbe(probe)
                 return Result.success(count)
             }
-            if (isRecordingTransport()) {
-                OmtLog.w(
+            if (isRecordingTransport() || captureEngine.isNativePcmRecording()) {
+                OmtLog.i(
                     "MixerSession",
-                    "Capture stalled during recording for $mixerId — reconnecting stream",
+                    "Capture active during recording for $mixerId — keeping stream",
                 )
-            } else if (_state.value.appMode == AppMode.MULTITRACK_RECORD) {
+                return Result.success(captureEngine.activeChannelCount)
+            }
+            if (_state.value.appMode == AppMode.MULTITRACK_RECORD) {
                 OmtLog.i(
                     "MixerSession",
                     "Capture active in record mode for $mixerId — keeping stream despite brief stall",
@@ -2315,6 +2322,9 @@ class MixerSessionController(
         val requested = channelCountFromProbe(probe)
         val device = enumerator.getUsbDevice(descriptor.deviceName)
             ?: return Result.failure(IllegalStateException("USB device not found"))
+        if (isRecordingTransport() && captureEngine.isCaptureActive && captureEngine.isNativeCaptureOwner()) {
+            return Result.success(captureEngine.activeChannelCount)
+        }
         if (isFlow8Active() && !isRecordingTransport()) {
             val recordMode = _state.value.appMode == AppMode.MULTITRACK_RECORD
             when {
