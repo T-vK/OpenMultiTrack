@@ -156,7 +156,7 @@ class SessionRecorder {
             val targetSamples = 262_144
             val byChannels = targetSamples / max(1, channelCount)
             val maxFrames = when {
-                channelCount >= 8 -> 8_192
+                channelCount >= 8 -> 2_048
                 channelCount >= 4 -> 4_096
                 else -> 8_192
             }

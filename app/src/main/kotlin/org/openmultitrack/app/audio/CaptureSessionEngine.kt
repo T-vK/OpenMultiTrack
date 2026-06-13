@@ -36,7 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
 import kotlin.math.min
 import java.util.concurrent.atomic.AtomicReference
-import androidx.annotation.VisibleForTesting
+import android.os.Process
 
 /**
  * Single USB capture stream shared by recording, live monitor, and optional root virtual mic.
@@ -381,9 +381,7 @@ class CaptureSessionEngine(
         if (activeBackend == AudioBackend.UAC2) {
             prewarmPcmWriteBuffers(framesPerChunk * captureBytesPerFrame)
         }
-        if (!usesSyncUac2PcmDiskWrites()) {
-            startRecordingWriteLoop()
-        }
+        startRecordingWriteLoop()
 
         val armedCount = config.channelStrips.count { it.armed }
         Result.success(
@@ -822,10 +820,10 @@ class CaptureSessionEngine(
                                 val advanced = catchUpTimelineToTarget(maxFramesPerPass = 65_536)
                                 if (advanced > 0) continue
                             }
-                            if (isRecording) {
-                                Thread.yield()
-                            } else {
+                            if (!isRecording && consecutiveEmptyReads > 2) {
                                 Thread.sleep(2)
+                            } else if (isRecording && consecutiveEmptyReads > 32) {
+                                Thread.sleep(1)
                             }
                         }
                     } catch (e: Exception) {
@@ -860,6 +858,7 @@ class CaptureSessionEngine(
         }
         diskWriteExecutor = executor
         diskWriteFuture = executor.submit {
+            Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
             try {
                 while (true) {
                     val request = diskWriteQueue.take()
@@ -956,9 +955,6 @@ class CaptureSessionEngine(
         enqueueRecordingFrames(copy, toWrite, channels)
     }
 
-    private fun usesSyncUac2PcmDiskWrites(): Boolean =
-        activeBackend == AudioBackend.UAC2 && sessionWriter != null
-
     private fun enqueueRecordingPcmFrames(
         samples: ByteArray,
         frameCount: Int,
@@ -969,30 +965,10 @@ class CaptureSessionEngine(
             releasePcmWriteBuffer(samples)
             return
         }
-        if (usesSyncUac2PcmDiskWrites()) {
-            writePcmFramesSync(samples, frameCount, channels, bytesPerFrame)
-            releasePcmWriteBuffer(samples)
-            maybePersistTimelineAsync()
-            return
-        }
         val request = RecordingWriteRequest.PcmFrames(samples, frameCount, channels, bytesPerFrame)
         if (!enqueueRecordingWrite(request)) {
             releasePcmWriteBuffer(samples)
             OmtLog.w("CaptureSession", "disk queue saturated; dropped $frameCount recording pcm frames")
-        }
-    }
-
-    private fun writePcmFramesSync(
-        samples: ByteArray,
-        frameCount: Int,
-        channels: Int,
-        bytesPerFrame: Int,
-    ) {
-        val writer = sessionWriter ?: return
-        try {
-            writer.writeInterleavedPcm24(samples, frameCount, channels, bytesPerFrame)
-            framesWritten += frameCount
-        } catch (_: IllegalStateException) {
         }
     }
 

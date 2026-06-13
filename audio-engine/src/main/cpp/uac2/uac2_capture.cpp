@@ -20,7 +20,7 @@ namespace openmultitrack::uac2 {
 
 namespace {
 
-constexpr int kNumUrbs = 16;
+constexpr int kNumUrbs = 32;
 constexpr int kOpenVerifyTimeoutMs = 1500;
 constexpr size_t kMinVerifyFrames = 48;
 
@@ -79,7 +79,7 @@ CaptureStatus Uac2Capture::open(int usb_fd, const Uac2AltSetting& alt, bool java
     channel_count_ = alt.format.channels;
     sample_rate_ = static_cast<int32_t>(alt.format.sample_rate_hz);
     ring_ = std::make_unique<openmultitrack::SpscPcmRing>(
-        288'000,
+        480'000,
         alt.format.channels,
         alt.format.subframe_bytes);
 
