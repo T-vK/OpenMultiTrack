@@ -30,11 +30,11 @@ inline IsoUrbLayout layoutForAlt(const Uac2AltSetting& alt,
     layout.per_packet_bytes = max_packet;
     layout.buffer_length = max_packet;
 
-    if (!capture || !micro_packets) {
+    if (!micro_packets) {
         return layout;
     }
 
-    // Some hosts accept IN isoch only when split into frame-sized micro-packets.
+    // Some Android hosts need frame-sized micro-packets for isoch IN and OUT.
     const size_t bpf =
         static_cast<size_t>(alt.format.channels) * alt.format.subframe_bytes;
     if (bpf > 0 && max_packet >= static_cast<int>(bpf) && (max_packet % bpf) == 0) {
@@ -67,7 +67,10 @@ inline void initIsoUrb(usbdevfs_urb* urb,
                        const IsoUrbLayout& layout,
                        uint8_t endpoint,
                        void* usercontext) {
+    // allocIsoUrb sets buffer before init; memset must not leave SUBMITURB with a null buffer.
+    void* buffer = urb->buffer;
     std::memset(urb, 0, sizeof(usbdevfs_urb));
+    urb->buffer = buffer;
     urb->type = USBDEVFS_URB_TYPE_ISO;
     urb->endpoint = endpoint;
     urb->flags = USBDEVFS_URB_ISO_ASAP;

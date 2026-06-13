@@ -16,6 +16,7 @@
 #include <poll.h>
 #include <unistd.h>
 #include <vector>
+#include <algorithm>
 
 namespace openmultitrack::uac2 {
 
@@ -90,26 +91,38 @@ bool Uac2Playback::tryOpenLibusb(int usb_fd,
         return false;
     }
 
-    std::promise<bool> init_promise;
-    std::future<bool> init_future = init_promise.get_future();
-    running_.store(true);
-    libusb_event_thread_ = std::thread(&Uac2Playback::libusbEventLoop, this);
-    worker_ = std::thread(&Uac2Playback::workerLoopLibusb, this, std::move(init_promise));
+    for (const bool micro_packets : {false, true}) {
+        if (ring_ != nullptr) {
+            ring_->reset();
+        }
+        urb_layout_ = layoutForAlt(alt, false, micro_packets);
+        OMT_LOGI("uac2 playback libusb trying layout micro=%d urbs=%d x %d",
+                 micro_packets ? 1 : 0,
+                 urb_layout_.num_packets,
+                 urb_layout_.per_packet_bytes);
 
-    if (init_future.wait_for(std::chrono::seconds(2)) == std::future_status::ready &&
-        init_future.get()) {
-        backend_ = IoBackend::Libusb;
-        return true;
+        std::promise<bool> init_promise;
+        std::future<bool> init_future = init_promise.get_future();
+        running_.store(true);
+        libusb_event_thread_ = std::thread(&Uac2Playback::libusbEventLoop, this);
+        worker_ = std::thread(&Uac2Playback::workerLoopLibusb, this, std::move(init_promise));
+
+        if (init_future.wait_for(std::chrono::seconds(2)) == std::future_status::ready &&
+            init_future.get()) {
+            backend_ = IoBackend::Libusb;
+            return true;
+        }
+
+        running_.store(false);
+        if (worker_.joinable()) {
+            worker_.join();
+        }
+        if (libusb_event_thread_.joinable()) {
+            libusb_event_thread_.join();
+        }
+        freeLibusbTransfers();
     }
 
-    running_.store(false);
-    if (worker_.joinable()) {
-        worker_.join();
-    }
-    if (libusb_event_thread_.joinable()) {
-        libusb_event_thread_.join();
-    }
-    freeLibusbTransfers();
     libusbReleaseStreaming(libusb_handle_, alt.interface_number, libusb_owns_interface_);
     libusb_handle_ = nullptr;
     libusb_owns_interface_ = false;
@@ -133,21 +146,33 @@ bool Uac2Playback::tryOpenUsbdevfs(int usb_fd,
         return false;
     }
 
-    std::promise<bool> init_promise;
-    std::future<bool> init_future = init_promise.get_future();
-    running_.store(true);
-    worker_ = std::thread(&Uac2Playback::workerLoopUsbdevfs, this, std::move(init_promise));
+    for (const bool micro_packets : {true, false}) {
+        if (ring_ != nullptr) {
+            ring_->reset();
+        }
+        urb_layout_ = layoutForAlt(alt, false, micro_packets);
+        OMT_LOGI("uac2 playback usbdevfs trying layout micro=%d urbs=%d x %d",
+                 micro_packets ? 1 : 0,
+                 urb_layout_.num_packets,
+                 urb_layout_.per_packet_bytes);
 
-    if (init_future.wait_for(std::chrono::seconds(2)) == std::future_status::ready &&
-        init_future.get()) {
-        backend_ = IoBackend::Usbdevfs;
-        return true;
+        std::promise<bool> init_promise;
+        std::future<bool> init_future = init_promise.get_future();
+        running_.store(true);
+        worker_ = std::thread(&Uac2Playback::workerLoopUsbdevfs, this, std::move(init_promise));
+
+        if (init_future.wait_for(std::chrono::seconds(2)) == std::future_status::ready &&
+            init_future.get()) {
+            backend_ = IoBackend::Usbdevfs;
+            return true;
+        }
+
+        running_.store(false);
+        if (worker_.joinable()) {
+            worker_.join();
+        }
     }
 
-    running_.store(false);
-    if (worker_.joinable()) {
-        worker_.join();
-    }
     if (!java_interface_claimed) {
         releaseInterface(usb_fd, alt.interface_number);
     }
@@ -331,6 +356,15 @@ void Uac2Playback::workerLoopLibusb(std::promise<bool> init_promise) {
     const IsoUrbLayout layout = urb_layout_;
     bool init_reported = false;
 
+    // Wait for the Kotlin read loop to prime the ring — otherwise isoch OUT drains silence.
+    const size_t min_prime = std::max<size_t>(static_cast<size_t>(sample_rate_ / 5), 2400);
+    for (int i = 0; i < 150 && running_.load(); ++i) {
+        if (ring_ != nullptr && ring_->availableFrames() >= min_prime) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+
     libusb_transfers_.clear();
     libusb_buffers_.clear();
     libusb_transfers_.reserve(kNumUrbs);
@@ -398,9 +432,9 @@ void Uac2Playback::workerLoopUsbdevfs(std::promise<bool> init_promise) {
 
     for (int i = 0; i < kNumUrbs; ++i) {
         usbdevfs_urb* urb = allocIsoUrb(layout, &contexts[static_cast<size_t>(i)]);
+        initIsoUrb(urb, layout, alt_.endpoint_address, &contexts[static_cast<size_t>(i)]);
         size_t frames = 0;
         fillUrbBuffer(static_cast<uint8_t*>(urb->buffer), static_cast<size_t>(layout.buffer_length), &frames);
-        initIsoUrb(urb, layout, alt_.endpoint_address, &contexts[static_cast<size_t>(i)]);
         if (ioctl(usb_fd_, USBDEVFS_SUBMITURB, urb) < 0) {
             OMT_LOGE("uac2 playback SUBMITURB init failed: %s", std::strerror(errno));
             if (!init_reported) {

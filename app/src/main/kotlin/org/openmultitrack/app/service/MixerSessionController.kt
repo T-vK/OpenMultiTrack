@@ -147,6 +147,7 @@ class MixerSessionController(
     private var usbDetachJob: Job? = null
     private var waveformJob: Job? = null
     private var soundcheckWaveformJob: Job? = null
+    private var soundcheckSelectJob: Job? = null
     private var playbackStatusJob: Job? = null
     private var profile: MixerProfile? = null
     private var lastVuLogNs = 0L
@@ -166,8 +167,12 @@ class MixerSessionController(
 
     init {
         AudioEngineRouter.suppressGlobalCaptureTeardown = {
-            isRecordingTransport() ||
-                (_state.value.appMode == AppMode.MULTITRACK_RECORD && captureEngine.isUsbStreamHealthy())
+            if (_state.value.appMode.isPlaybackMode) {
+                false
+            } else {
+                isRecordingTransport() ||
+                    (_state.value.appMode == AppMode.MULTITRACK_RECORD && captureEngine.isUsbStreamHealthy())
+            }
         }
     }
 
@@ -246,7 +251,7 @@ class MixerSessionController(
         if (_state.value.appMode.isPlaybackMode) {
             scope.launch {
                 captureMutex.withLock {
-                    if (_state.value.appMode.isPlaybackMode) {
+                    if (_state.value.appMode.isPlaybackMode && !isSoundcheckTransportActive()) {
                         warmPlaybackRouteLocked()
                     }
                 }
@@ -375,11 +380,24 @@ class MixerSessionController(
     fun selectSoundcheckSession(sessionDir: String) {
         val item = _state.value.soundcheckSessions.firstOrNull { it.sessionDir == sessionDir }
         TransportTraceHub.mark(mixerId, "selectSoundcheckSession ${File(sessionDir).name}")
-        scope.launch {
-            captureMutex.withLock {
-                TransportTraceHub.mark(mixerId, "selectSoundcheck stop prior playback")
-                stopSoundcheckLocked()
-                soundcheckWaveformJob?.cancel()
+        soundcheckSelectJob?.cancel()
+        soundcheckSelectJob = scope.launch {
+            val switchingSession = _state.value.selectedSoundcheckDir != sessionDir
+            val alreadyLoaded = !switchingSession &&
+                cachedSoundcheckDir == sessionDir &&
+                cachedSoundcheckMetadata != null &&
+                _state.value.playbackDurationSec > 0f
+            if (alreadyLoaded && isSoundcheckTransportActive()) {
+                TransportTraceHub.mark(mixerId, "selectSoundcheck skip — same session playing")
+                TransportTraceHub.finish(mixerId, "soundcheck session already playing")
+                return@launch
+            }
+            if (switchingSession) {
+                captureMutex.withLock {
+                    TransportTraceHub.mark(mixerId, "selectSoundcheck stop prior playback")
+                    stopSoundcheckLocked()
+                    soundcheckWaveformJob?.cancel()
+                }
             }
             val dir = File(sessionDir)
             TransportTraceHub.mark(mixerId, "selectSoundcheck read metadata")
@@ -391,6 +409,11 @@ class MixerSessionController(
             }
             val durationSec = item?.durationSec?.takeIf { it > 0f }
                 ?: withContext(Dispatchers.IO) { SessionPlaybackDuration.durationSec(dir, metadata) }
+            if (alreadyLoaded && isSoundcheckTransportActive()) {
+                TransportTraceHub.mark(mixerId, "selectSoundcheck skip UI reload — transport became active")
+                TransportTraceHub.finish(mixerId, "soundcheck session load skipped (playing)")
+                return@launch
+            }
             TransportTraceHub.mark(mixerId, "selectSoundcheck prepare UI duration=${durationSec}s ch=${metadata.channels.size}")
             prepareSoundcheckSessionUi(sessionDir, metadata, durationSec)
             TransportTraceHub.mark(mixerId, "selectSoundcheck UI ready (waveforms loading async)")
@@ -403,11 +426,74 @@ class MixerSessionController(
         }
     }
 
+    /**
+     * Atomically switch to soundcheck, release Flow 8 capture USB, and load a freshly recorded session.
+     * Avoids racing [setAppMode] and [selectSoundcheckSession] when post-record auto-load runs.
+     */
+    fun loadRecordingIntoSoundcheck(sessionDir: String) {
+        TransportTraceHub.mark(mixerId, "loadRecordingIntoSoundcheck ${File(sessionDir).name}")
+        scope.launch {
+            captureMutex.withLock {
+                if (_state.value.appMode != AppMode.VIRTUAL_SOUNDCHECK) {
+                    _state.update {
+                        it.copy(
+                            appMode = AppMode.VIRTUAL_SOUNDCHECK,
+                            isVuMetering = false,
+                            waveformPeaks = emptyMap(),
+                            recordElapsedSec = 0f,
+                        )
+                    }
+                    captureEngine.updateVuMetering(false)
+                    captureEngine.setRecordModeWarmCapture(false)
+                }
+                withContext(Dispatchers.IO) {
+                    if (isFlow8Active()) {
+                        prepareFlow8UsbForPlaybackLocked()
+                    } else {
+                        prepareUsbForPlaybackLocked()
+                    }
+                }
+                TransportTraceHub.mark(mixerId, "loadRecordingIntoSoundcheck stop prior playback")
+                stopSoundcheckLocked()
+                soundcheckWaveformJob?.cancel()
+                val dir = File(sessionDir)
+                val metadata = withContext(Dispatchers.IO) {
+                    SessionMetadata.read(dir)?.withResolvedChannels(dir)
+                } ?: run {
+                    TransportTraceHub.finish(mixerId, "loadRecordingIntoSoundcheck failed: no metadata")
+                    return@withLock
+                }
+                val durationSec = withContext(Dispatchers.IO) {
+                    SessionPlaybackDuration.durationSec(dir, metadata)
+                }
+                prepareSoundcheckSessionUi(sessionDir, metadata, durationSec)
+                loadSoundcheckWaveformsBackground(dir, metadata)
+                warmPlaybackRouteLocked()
+            }
+            refreshSoundcheckLibrary()
+            TransportTraceHub.finish(mixerId, "loadRecordingIntoSoundcheck done")
+        }
+    }
+
+    private fun isSoundcheckTransportActive(): Boolean =
+        player.isPlaying || _state.value.isPlaying
+
     private suspend fun warmPlaybackRouteLocked() {
         if (!_state.value.appMode.isPlaybackMode) return
+        if (isSoundcheckTransportActive()) {
+            OmtLog.d("MixerSession", "warmPlaybackRoute skipped — soundcheck transport active")
+            return
+        }
         val trace = TransportTrace("warmPlaybackRoute")
         val descriptor = activeDescriptor ?: return
         val probe = activeProbe ?: return
+        if (isFlow8Active()) {
+            trace.mark("FLOW 8 capture release before warmup")
+            withContext(Dispatchers.IO) {
+                releaseFlow8CaptureForPlaybackHandoffLocked()
+                delay(Flow8UsbPlaybackProfile.PRE_PLAYBACK_DELAY_MS)
+            }
+        }
         val usbOutputs = maxPlaybackChannelsFromProbe(probe).coerceAtLeast(1)
         val route = runCatching { ensurePlaybackLocked(descriptor, probe, usbOutputs).getOrThrow() }
             .onFailure { e ->
@@ -416,10 +502,6 @@ class MixerSessionController(
             }
             .getOrNull() ?: return
         trace.mark("usbStream open fd=${usbStream?.fd} backend=${route.backend}")
-        if (route.backend == org.openmultitrack.usb.AudioBackend.UAC2) {
-            AudioEngineRouter.preclaimPlaybackRoute(route, activeUsbDevice)
-            trace.mark("UAC2 playback interface preclaimed")
-        }
         trace.mark("done")
     }
 
@@ -693,6 +775,7 @@ class MixerSessionController(
                 }
             }
         } else {
+            soundcheckSelectJob?.cancel()
             _state.update {
                 it.copy(
                     isPlaying = true,
@@ -753,6 +836,7 @@ class MixerSessionController(
 
     fun playSoundcheckPlayback() {
         val trace = TransportTraceHub.start(mixerId, "SOUNDCHECK-PLAY")
+        soundcheckSelectJob?.cancel()
         _state.update {
             it.copy(
                 isPlaying = true,
@@ -801,6 +885,30 @@ class MixerSessionController(
     private fun isFlow8Active(): Boolean =
         activeDescriptor?.let { Flow8UsbPlaybackProfile.isFlow8(it) } == true
 
+    /**
+     * FLOW 8 firmware requires the capture isoch stream to be fully released before playback.
+     * Native UAC2 capture can outlive the Kotlin fanout ([isNativeUsbCaptureRunning]).
+     */
+    private suspend fun releaseFlow8CaptureForPlaybackHandoffLocked() {
+        // UI may set isPlaying before native playback starts; only skip when audio is actually streaming.
+        if (player.isPlaying) {
+            OmtLog.d("MixerSession", "FLOW 8 capture handoff skipped — player transport active")
+            return
+        }
+        captureEngine.setRecordModeWarmCapture(false)
+        captureEngine.updateVuMetering(false)
+        if (!_state.value.isRecording) {
+            if (captureEngine.isCaptureActive ||
+                captureEngine.isNativeUsbCaptureRunning() ||
+                captureEngine.isUsbStreamHealthy()
+            ) {
+                OmtLog.i("MixerSession", "FLOW 8 releasing capture for playback handoff")
+                captureEngine.stopCapture()
+            }
+        }
+        AudioEngineRouter.forceStopAllRecording()
+    }
+
     /** UI state can lag [CaptureSessionEngine.isRecording] briefly after transport start. */
     private fun isRecordingTransport(): Boolean =
         _state.value.isRecording || captureEngine.isRecording
@@ -839,10 +947,9 @@ class MixerSessionController(
                 player.stopAndAwait()
             }
             AudioEngineRouter.stopPlayback()
-            if (captureEngine.isCaptureActive && !_state.value.isRecording) {
-                captureEngine.stopCapture()
+            if (!_state.value.isRecording) {
+                releaseFlow8CaptureForPlaybackHandoffLocked()
             }
-            AudioEngineRouter.stopAllRecording()
             usbStream?.close()
             usbStream = null
             delay(Flow8UsbPlaybackProfile.POST_PLAYBACK_STOP_DELAY_MS)
@@ -856,6 +963,10 @@ class MixerSessionController(
 
     /** Quiesce FLOW 8 playback USB before opening the capture stream (VU / record). */
     private suspend fun prepareFlow8UsbForCaptureLocked() {
+        if (_state.value.appMode.isPlaybackMode && isSoundcheckTransportActive()) {
+            OmtLog.i("MixerSession", "FLOW 8 skip capture USB prepare during soundcheck playback")
+            return
+        }
         withContext(Dispatchers.IO) {
             if (player.isPlaying) {
                 player.stopAndAwait()
@@ -905,10 +1016,7 @@ class MixerSessionController(
                 player.stopAndAwait()
             }
             AudioEngineRouter.stopPlayback()
-            if (captureEngine.isCaptureActive && !_state.value.isRecording) {
-                captureEngine.stopCapture()
-            }
-            AudioEngineRouter.stopAllRecording()
+            releaseFlow8CaptureForPlaybackHandoffLocked()
             usbStream?.close()
             usbStream = null
             delay(Flow8UsbPlaybackProfile.PRE_PLAYBACK_DELAY_MS)
@@ -1708,6 +1816,8 @@ class MixerSessionController(
         releaseRecordingWakeLock()
         waveformJob?.cancel()
         waveformJob = null
+        soundcheckSelectJob?.cancel()
+        soundcheckSelectJob = null
         stopPlaybackStatusUpdates()
         player.stop()
         scope.launch {
@@ -2427,7 +2537,7 @@ class MixerSessionController(
         if (isRecordingTransport() && captureEngine.isCaptureActive && captureEngine.isNativeCaptureOwner()) {
             return Result.success(captureEngine.activeChannelCount)
         }
-        if (isFlow8Active() && !isRecordingTransport()) {
+        if (isFlow8Active() && !isRecordingTransport() && !_state.value.appMode.isPlaybackMode) {
             val recordMode = _state.value.appMode == AppMode.MULTITRACK_RECORD
             when {
                 !captureEngine.isCaptureActive -> prepareFlow8UsbForCaptureLocked()

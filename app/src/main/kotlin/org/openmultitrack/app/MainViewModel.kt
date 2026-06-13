@@ -929,9 +929,9 @@ class MainViewModel(
 
     private fun loadRecordingIntoSoundcheckLocal(mixerId: String, sessionDir: String) {
         org.openmultitrack.app.audio.TransportTraceHub.mark(mixerId, "ViewModel loadIntoSoundcheck")
-        setAppMode(mixerId, AppMode.VIRTUAL_SOUNDCHECK)
-        selectSoundcheckSession(mixerId, sessionDir)
-        refreshSoundcheckLibrary(mixerId)
+        sessionClient.withManager { manager ->
+            manager.getOrCreate(mixerId).loadRecordingIntoSoundcheck(sessionDir)
+        }
     }
 
     private fun loadRecordingIntoSimplePlayLocal(mixerId: String, sessionDir: String) {

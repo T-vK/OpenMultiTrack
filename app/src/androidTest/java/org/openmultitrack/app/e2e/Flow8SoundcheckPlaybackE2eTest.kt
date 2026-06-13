@@ -57,7 +57,7 @@ class Flow8SoundcheckPlaybackE2eTest {
         assertThat(ctrl.state.value.playbackDurationSec).isGreaterThan(1f)
 
         clearAppLogcat()
-        startPlayViaUiOrController(ctrl)
+        ctrl.playSoundcheckPlayback()
         assertPlayStarted(ctrl)
 
         Log.i(TAG, "first play: sustaining ${E2eConfig.FLOW8_PLAYBACK_OBSERVE_MS}ms")
@@ -69,7 +69,7 @@ class Flow8SoundcheckPlaybackE2eTest {
         val firstPos = ctrl.state.value.playbackPositionSec
         Log.i(TAG, "first play sustained to ${firstPos}s")
 
-        stopPlayViaUiOrController(ctrl)
+        ctrl.stopSoundcheck()
         E2eWait.untilNotPlaying(ctrl, timeoutMs = 60_000)
         delay(1_000)
 
@@ -77,7 +77,7 @@ class Flow8SoundcheckPlaybackE2eTest {
         E2eLogcat.assertNoPlaybackFaults(afterStopLog)
 
         clearAppLogcat()
-        startPlayViaUiOrController(ctrl)
+        ctrl.playSoundcheckPlayback()
         assertPlayStarted(ctrl)
 
         Log.i(TAG, "second play: sustaining from near 0s")
@@ -89,7 +89,7 @@ class Flow8SoundcheckPlaybackE2eTest {
         val secondPos = ctrl.state.value.playbackPositionSec
         Log.i(TAG, "second play sustained to ${secondPos}s")
 
-        stopPlayViaUiOrController(ctrl)
+        ctrl.stopSoundcheck()
         E2eWait.untilNotPlaying(ctrl, timeoutMs = 60_000)
 
         val finalLog = E2eLogcat.dumpRecent(600, TAG, "MixerSession", "Player", "OmtE2e")
@@ -112,27 +112,6 @@ class Flow8SoundcheckPlaybackE2eTest {
             .that(ctrl.state.value.warningMessage)
             .isNull()
         assertThat(ctrl.state.value.isPlaying).isTrue()
-    }
-
-    private fun startPlayViaUiOrController(ctrl: org.openmultitrack.app.service.MixerSessionController) {
-        if (runCatching { E2eUiTransport.clickContentDescription("Play", timeoutMs = 5_000) }.isSuccess) {
-            Log.i(TAG, "transport: UI Play")
-        } else {
-            Log.i(TAG, "transport: controller playSoundcheckPlayback")
-            ctrl.playSoundcheckPlayback()
-        }
-    }
-
-    private fun stopPlayViaUiOrController(ctrl: org.openmultitrack.app.service.MixerSessionController) {
-        if (runCatching {
-                E2eUiTransport.clickContentDescription("Stop playback", timeoutMs = 5_000)
-            }.isSuccess
-        ) {
-            Log.i(TAG, "transport: UI Stop playback")
-        } else {
-            Log.i(TAG, "transport: controller stopSoundcheck")
-            ctrl.stopSoundcheck()
-        }
     }
 
     private companion object {

@@ -288,6 +288,7 @@ class SessionPlayer {
         val backend = activeBackend ?: return
         val outScratch = FloatArray(2048 * outputChannels)
         val chunkScratch = FloatArray(2048 * outputChannels)
+        primeUac2RingMixed(wav, inputChannels, outputChannels, scratch, mixContext, outScratch, chunkScratch, onFramesSubmitted)
         while (playbackJob?.isActive == true) {
             val frames = synchronized(readerLock) {
                 when (wav) {
@@ -328,6 +329,7 @@ class SessionPlayer {
     ) {
         val backend = activeBackend ?: return
         val chunkScratch = FloatArray(2048 * channels)
+        primeUac2Ring(wav, channels, scratch, chunkScratch, onFramesSubmitted)
         while (playbackJob?.isActive == true) {
             val frames = synchronized(readerLock) {
                 when (wav) {
@@ -356,6 +358,92 @@ class SessionPlayer {
                 throttleUac2PlaybackIfAhead()
                 maybeLoopRewind()
             }
+        }
+    }
+
+    private fun primeUac2Ring(
+        wav: Any,
+        channels: Int,
+        scratch: FloatArray,
+        chunkScratch: FloatArray,
+        onFramesSubmitted: (Int) -> Unit,
+    ) {
+        if (activeBackend != AudioBackend.UAC2 || paceSampleRate <= 0) return
+        val target = (paceSampleRate / 5).coerceIn(4_800, 9_600)
+        var primed = 0
+        while (primed < target && playbackJob?.isActive == true) {
+            val frames = synchronized(readerLock) {
+                when (wav) {
+                    is WavReader -> wav.readInterleavedFloat(scratch, 2048)
+                    is PerChannelWavReader -> wav.readInterleavedFloat(scratch, 2048)
+                    else -> 0
+                }
+            }
+            if (frames <= 0) break
+            var submitted = 0
+            while (submitted < frames && playbackJob?.isActive == true) {
+                val framesLeft = frames - submitted
+                val sampleStart = submitted * channels
+                val sampleCount = framesLeft * channels
+                System.arraycopy(scratch, sampleStart, chunkScratch, 0, sampleCount)
+                val written = AudioEngineRouter.writePlaybackFrames(chunkScratch, framesLeft, AudioBackend.UAC2)
+                if (written <= 0) {
+                    Thread.sleep(1)
+                    continue
+                }
+                submitted += written
+                primed += written
+                onFramesSubmitted(written)
+                status = status.copy(positionFrames = status.positionFrames + written)
+            }
+        }
+        if (primed > 0) {
+            resetUac2PaceAnchor(status.positionFrames)
+        }
+    }
+
+    private fun primeUac2RingMixed(
+        wav: Any,
+        inputChannels: Int,
+        outputChannels: Int,
+        scratch: FloatArray,
+        mixContext: PlaybackMixContext,
+        outScratch: FloatArray,
+        chunkScratch: FloatArray,
+        onFramesSubmitted: (Int) -> Unit,
+    ) {
+        if (activeBackend != AudioBackend.UAC2 || paceSampleRate <= 0) return
+        val target = (paceSampleRate / 5).coerceIn(4_800, 9_600)
+        var primed = 0
+        while (primed < target && playbackJob?.isActive == true) {
+            val frames = synchronized(readerLock) {
+                when (wav) {
+                    is WavReader -> wav.readInterleavedFloat(scratch, 2048)
+                    is PerChannelWavReader -> wav.readInterleavedFloat(scratch, 2048)
+                    else -> 0
+                }
+            }
+            if (frames <= 0) break
+            mixContext.mixInterleaved(scratch, frames, inputChannels, outScratch)
+            var submitted = 0
+            while (submitted < frames && playbackJob?.isActive == true) {
+                val framesLeft = frames - submitted
+                val sampleStart = submitted * outputChannels
+                val sampleCount = framesLeft * outputChannels
+                System.arraycopy(outScratch, sampleStart, chunkScratch, 0, sampleCount)
+                val written = AudioEngineRouter.writePlaybackFrames(chunkScratch, framesLeft, AudioBackend.UAC2)
+                if (written <= 0) {
+                    Thread.sleep(1)
+                    continue
+                }
+                submitted += written
+                primed += written
+                onFramesSubmitted(written)
+                status = status.copy(positionFrames = status.positionFrames + written)
+            }
+        }
+        if (primed > 0) {
+            resetUac2PaceAnchor(status.positionFrames)
         }
     }
 

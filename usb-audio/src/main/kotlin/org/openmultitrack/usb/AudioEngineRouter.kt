@@ -191,6 +191,11 @@ object AudioEngineRouter {
         NativeAudioCaptureRegistry.releaseAll()
     }
 
+    /** Bypasses [suppressGlobalCaptureTeardown] — required before Flow 8 UAC2 playback. */
+    fun forceStopAllRecording() {
+        NativeAudioCaptureRegistry.releaseAll()
+    }
+
     fun readRecordedFrames(dest: FloatArray, maxFrames: Int, backend: AudioBackend): Int =
         when (backend) {
             AudioBackend.OBOE -> NativeAudioEngine.readRecordedFrames(dest, maxFrames)
@@ -251,10 +256,10 @@ object AudioEngineRouter {
             AudioBackend.UAC2 -> {
                 val stream = route.usbStream ?: return failed("missing usb stream")
                 val alt = route.uac2Alt ?: return failed("missing uac2 alt")
-                mark("claiming UAC2 iface=${alt.interfaceNumber} alt=${alt.alternateSetting} fd=${stream.fd}")
-                val javaClaimed = claimUac2Interface(stream, usbDevice, alt)
-                mark("claim done javaClaimed=$javaClaimed, starting native UAC2")
-                val status = NativeUac2Engine.startPlayback(stream.fd, alt, javaClaimed)
+                mark("starting native UAC2 fd=${stream.fd} iface=${alt.interfaceNumber} (usbdevfs claim)")
+                // Java UsbManager.claimInterface breaks USBDEVFS_SUBMITURB on hardware tablets;
+                // native usbdevfs claim is required for reliable isoch OUT (Flow 8 playback).
+                val status = NativeUac2Engine.startPlayback(stream.fd, alt, javaInterfaceClaimed = false)
                 mark("UAC2 start active=${status.active}")
                 status
             }
