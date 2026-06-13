@@ -361,7 +361,7 @@ void Uac2Capture::pcmFileWriterLoop() {
     if (bpf == 0) {
         return;
     }
-    std::vector<uint8_t> scratch(524288);
+    std::vector<uint8_t> scratch(2u << 20);
     const size_t max_frames = scratch.size() / bpf;
     while (file_recording_.load()) {
         openmultitrack::SpscPcmRing* ring = file_ring_.get();

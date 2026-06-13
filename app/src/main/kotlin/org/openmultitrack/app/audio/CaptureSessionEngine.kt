@@ -17,6 +17,7 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import org.openmultitrack.audio.NativeAudioEngine
 import org.openmultitrack.audio.NativeAudioMonitor
+import org.openmultitrack.audio.NativeUac2Engine
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.channel.ChannelStripState
 import org.openmultitrack.domain.session.RecordingSession
@@ -178,6 +179,8 @@ class CaptureSessionEngine(
                     lastFrameReceivedNs = System.nanoTime()
                 }
             }
+        } else if (isNativeUsbCaptureRunning() && !isCaptureActive) {
+            return true
         }
         val last = lastFrameReceivedNs
         if (last <= 0L) return false
@@ -191,6 +194,14 @@ class CaptureSessionEngine(
     }
 
     fun isNativePcmRecording(): Boolean = nativePcmRecordingActive
+
+    fun isNativeUsbCaptureRunning(): Boolean {
+        if (syntheticGenerator != null) return isCaptureActive
+        if (activeBackend != AudioBackend.UAC2) return isCaptureActive
+        return NativeUac2Engine.isCaptureRunning() && isNativeCaptureOwner()
+    }
+
+    fun isUsbStreamHealthy(): Boolean = isCaptureActive || isNativeUsbCaptureRunning()
 
     fun isSyntheticCapture(): Boolean = syntheticGenerator != null
 
@@ -339,6 +350,21 @@ class CaptureSessionEngine(
             "startCapture primed=$primed ch=$channelCount backend=${route.backend}",
         )
         startFanoutLoop(scope, route.backend)
+        Result.success(Unit)
+    }
+
+    /** Restarts the Kotlin fanout loop when native USB capture is still running. */
+    suspend fun ensureFanoutRunning(scope: CoroutineScope): Result<Unit> = lifecycleMutex.withLock {
+        if (isCaptureActive) {
+            return Result.success(Unit)
+        }
+        val backend = activeBackend
+            ?: return Result.failure(IllegalStateException("No active capture backend"))
+        if (!isNativeUsbCaptureRunning()) {
+            return Result.failure(IllegalStateException("Native USB capture is not running"))
+        }
+        OmtLog.i("CaptureSession", "ensureFanoutRunning backend=$backend")
+        startFanoutLoop(scope, backend)
         Result.success(Unit)
     }
 

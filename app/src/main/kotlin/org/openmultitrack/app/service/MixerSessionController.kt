@@ -840,7 +840,13 @@ class MixerSessionController(
                 OmtLog.i("MixerSession", "FLOW 8 playback stopped; keeping capture during recording")
                 return@withContext
             }
-            if (captureEngine.isCaptureActive &&
+            if (_state.value.appMode == AppMode.MULTITRACK_RECORD &&
+                captureEngine.isUsbStreamHealthy()
+            ) {
+                OmtLog.i("MixerSession", "FLOW 8 record mode — keeping warm USB capture")
+                return@withContext
+            }
+            if ((captureEngine.isCaptureActive || captureEngine.isNativeUsbCaptureRunning()) &&
                 captureEngine.isReceivingAudio(if (_state.value.appMode == AppMode.MULTITRACK_RECORD) 5_000 else 1_500)
             ) {
                 OmtLog.i("MixerSession", "FLOW 8 capture already active — skip USB teardown")
@@ -1275,13 +1281,21 @@ class MixerSessionController(
                             }
                             else -> TransportTraceHub.mark(mixerId, "routing.beforeRecord → $routing")
                         }
-                        if (!captureEngine.isCaptureActive) {
-                            TransportTraceHub.mark(mixerId, "ensureCapture")
-                            ensureCapture(descriptor, probe).getOrThrow()
-                            TransportTraceHub.mark(mixerId, "ensureCapture ok ch=${captureEngine.activeChannelCount}")
-                        } else {
-                            TransportTraceHub.mark(mixerId, "capture already active")
-                            syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
+                        when {
+                            captureEngine.isCaptureActive -> {
+                                TransportTraceHub.mark(mixerId, "capture already active")
+                                syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
+                            }
+                            captureEngine.isNativeUsbCaptureRunning() -> {
+                                TransportTraceHub.mark(mixerId, "restart fanout on warm native capture")
+                                captureEngine.ensureFanoutRunning(scope).getOrThrow()
+                                syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
+                            }
+                            else -> {
+                                TransportTraceHub.mark(mixerId, "ensureCapture")
+                                ensureCapture(descriptor, probe).getOrThrow()
+                                TransportTraceHub.mark(mixerId, "ensureCapture ok ch=${captureEngine.activeChannelCount}")
+                            }
                         }
                         val writePlan = org.openmultitrack.app.data.RecordingWritePlan.create(
                             storageResolver,
@@ -1549,7 +1563,7 @@ class MixerSessionController(
             if (!captureEngine.isCaptureActive) {
                 _state.update { it.copy(isVuMetering = false) }
             } else {
-                _state.update { it.copy(isVuMetering = true, warningMessage = null) }
+                _state.update { it.copy(isVuMetering = wantVu, warningMessage = null) }
             }
         } else {
             _state.update { it.copy(isVuMetering = false) }
@@ -2282,7 +2296,7 @@ class MixerSessionController(
             }
         }
         if (_state.value.appMode == AppMode.MULTITRACK_RECORD &&
-            captureEngine.isCaptureActive &&
+            captureEngine.isUsbStreamHealthy() &&
             captureEngine.isNativeCaptureOwner()
         ) {
             return Result.success(
@@ -2290,7 +2304,7 @@ class MixerSessionController(
             )
         }
         if (isRecordingTransport() &&
-            captureEngine.isCaptureActive &&
+            captureEngine.isUsbStreamHealthy() &&
             captureEngine.isNativeCaptureOwner()
         ) {
             return Result.success(captureEngine.activeChannelCount)
