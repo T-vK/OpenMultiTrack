@@ -37,6 +37,7 @@ import kotlin.math.max
 import kotlin.math.min
 import java.util.concurrent.atomic.AtomicReference
 import android.os.Process
+import androidx.annotation.VisibleForTesting
 
 /**
  * Single USB capture stream shared by recording, live monitor, and optional root virtual mic.
