@@ -80,6 +80,12 @@ class UsbTestTonePlayer {
                             Thread.sleep(2)
                             continue
                         }
+                        if (submittedFrames == 0L) {
+                            OmtLog.i(
+                                "UsbTestTone",
+                                "first frames written=$written backend=$backend ch=$usbChannelIndex/$channelCount",
+                            )
+                        }
                         submitted += written
                         submittedFrames += written
                         throttleUac2PlaybackIfAhead()

@@ -11,7 +11,7 @@ class UsbPlaybackToneGenerator(
     private val channelCount: Int,
     private val activeChannel: Int,
     val sampleRate: Int,
-    private val amplitude: Float = 0.25f,
+    private val amplitude: Float = 0.5f,
 ) {
     private var frameIndex: Long = 0L
 

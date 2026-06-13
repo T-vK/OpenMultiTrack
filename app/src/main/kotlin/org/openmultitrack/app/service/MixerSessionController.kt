@@ -1409,7 +1409,7 @@ class MixerSessionController(
         }
     }
 
-    private suspend fun stopUsbTestToneLocked() {
+    private suspend fun stopUsbTestToneLocked(restoreRouting: Boolean = true) {
         if (!testTonePlayer.isPlaying && _state.value.usbTestToneActiveChannel == null) return
         withContext(Dispatchers.IO) {
             testTonePlayer.stopAndAwait()
@@ -1425,8 +1425,12 @@ class MixerSessionController(
                 statusMessage = "USB test tone off",
             )
         }
+        if (restoreRouting) {
+            quiesceUsbBeforeRoutingLocked()
+            RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
+        }
         AudioSessionBridge.rebuildNotification()
-        OmtLog.i("MixerSession", "USB test tone stopped for $mixerId")
+        OmtLog.i("MixerSession", "USB test tone stopped for $mixerId restoreRouting=$restoreRouting")
     }
 
     private suspend fun startUsbTestToneLocked(usbChannelIndex: Int) {
@@ -1440,8 +1444,16 @@ class MixerSessionController(
         if (isSoundcheckTransportActive()) {
             stopSoundcheckLocked(releaseNative = isFlow8Active(), restoreRouting = false)
         }
-        stopUsbTestToneLocked()
+        stopUsbTestToneLocked(restoreRouting = false)
         withContext(Dispatchers.IO) {
+            quiesceUsbBeforeRoutingLocked()
+            when (val routing = routingBeforeUsbTestToneLocked(usbChannelIndex)) {
+                RoutingHookResult.Cancelled ->
+                    throw IllegalStateException("USB test tone routing cancelled")
+                is RoutingHookResult.Failed ->
+                    throw IllegalStateException(routing.message)
+                else -> Unit
+            }
             if (isFlow8Active()) {
                 prepareFlow8UsbForPlaybackLocked()
             } else {
@@ -1452,6 +1464,17 @@ class MixerSessionController(
                 throw IllegalArgumentException("USB channel ${usbChannelIndex + 1} not available")
             }
             val route = ensurePlaybackLocked(descriptor, probe, usbOutputs).getOrThrow()
+            OmtLog.i(
+                "MixerSession",
+                "USB test tone route backend=${route.backend} ch=${route.channelCount} sr=${route.sampleRate}",
+            )
+            when (val routingRetry = routingAfterUsbTestToneStartedLocked()) {
+                RoutingHookResult.Cancelled ->
+                    throw IllegalStateException("USB test tone routing cancelled")
+                is RoutingHookResult.Failed ->
+                    throw IllegalStateException(routingRetry.message)
+                else -> Unit
+            }
             testTonePlayer.start(
                 scope = scope,
                 route = route,
@@ -2003,6 +2026,18 @@ class MixerSessionController(
     }
 
     private suspend fun routingAfterSoundcheckPlaybackStartedLocked(): RoutingHookResult {
+        val prof = profile ?: return RoutingHookResult.Skipped
+        return RoutingAutomationBridge.hooks?.afterSoundcheckPlaybackStarted(prof)
+            ?: RoutingHookResult.Skipped
+    }
+
+    private suspend fun routingBeforeUsbTestToneLocked(usbChannelIndex: Int): RoutingHookResult {
+        val prof = profile ?: return RoutingHookResult.Skipped
+        return RoutingAutomationBridge.hooks?.beforeSoundcheckApply(prof, setOf(usbChannelIndex))
+            ?: RoutingHookResult.Skipped
+    }
+
+    private suspend fun routingAfterUsbTestToneStartedLocked(): RoutingHookResult {
         val prof = profile ?: return RoutingHookResult.Skipped
         return RoutingAutomationBridge.hooks?.afterSoundcheckPlaybackStarted(prof)
             ?: RoutingHookResult.Skipped

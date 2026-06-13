@@ -349,6 +349,20 @@ private fun UsbTestTonesPage(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(vertical = 12.dp),
     )
+    Text(
+        "XR18: routing automation switches mixer channel N to USB return U(N+1). " +
+            "Enable it in Settings → Routing automation, or route manually on the desk.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(bottom = 8.dp),
+    )
+    Text(
+        "Flow 8: USB returns are fixed in the mixer — assign the channel you monitor " +
+            "(e.g. Ch1 → USB1) in the Flow 8 app, then solo that channel and raise its fader.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(bottom = 8.dp),
+    )
     if (!enabled) {
         Text(
             "Connect the mixer and stop recording before using USB test tones.",
