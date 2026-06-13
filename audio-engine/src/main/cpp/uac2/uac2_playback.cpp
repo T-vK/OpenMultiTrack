@@ -47,6 +47,7 @@ PlaybackStatus Uac2Playback::open(int usb_fd, const Uac2AltSetting& alt, bool ja
     closeUnlocked();
 
     underrun_frames_.store(0);
+    libusb_error_streak_.store(0);
 
     if (usb_fd < 0 || !alt.format.valid) {
         PlaybackStatus status;
@@ -344,6 +345,7 @@ bool Uac2Playback::resubmitLibusbTransfer(libusb_transfer* transfer) {
     }
 
     size_t frames = 0;
+    std::memset(transfer->buffer, 0, static_cast<size_t>(transfer->length));
     fillUrbBuffer(transfer->buffer, static_cast<size_t>(transfer->length), &frames);
     prepareLibusbIsoOutTransfer(transfer);
 
@@ -373,9 +375,15 @@ void Uac2Playback::LIBUSB_CALL Uac2Playback::libusbPlaybackCallback(struct libus
     }
     auto* self = static_cast<Uac2Playback*>(transfer->user_data);
 
-    if (transfer->status != LIBUSB_TRANSFER_COMPLETED && transfer->status != LIBUSB_TRANSFER_CANCELLED &&
-        self->running_.load()) {
+    if (transfer->status == LIBUSB_TRANSFER_COMPLETED) {
+        self->libusb_error_streak_.store(0);
+    } else if (transfer->status != LIBUSB_TRANSFER_CANCELLED && self->running_.load()) {
         OMT_LOGW("uac2 playback libusb transfer status=%d", transfer->status);
+        const uint32_t streak = self->libusb_error_streak_.fetch_add(1) + 1;
+        if (streak >= 3) {
+            OMT_LOGE("uac2 playback libusb stopping after %u transfer errors", streak);
+            self->running_.store(false);
+        }
     }
 
     for (size_t i = 0; i < self->libusb_transfers_.size(); ++i) {
@@ -464,11 +472,6 @@ void Uac2Playback::workerLoopLibusb(std::promise<bool> init_promise) {
 
         bool submitted_any = false;
         while (submitted < due_frames && running_.load()) {
-            if (ring_ == nullptr ||
-                ring_->availableFrames() < static_cast<size_t>(frames_per_urb)) {
-                break;
-            }
-
             int slot = -1;
             const uint32_t in_flight = libusb_in_flight_mask_.load(std::memory_order_acquire);
             for (int i = 0; i < kNumUrbs; ++i) {
@@ -484,6 +487,11 @@ void Uac2Playback::workerLoopLibusb(std::promise<bool> init_promise) {
             libusb_transfer* transfer = libusb_transfers_[static_cast<size_t>(slot)];
             if (!resubmitLibusbTransfer(transfer)) {
                 ++io_error_streak;
+                if (io_error_streak >= 8) {
+                    OMT_LOGE("uac2 playback libusb stopping after repeated submit failures");
+                    running_.store(false);
+                    break;
+                }
                 if (io_error_streak % 4 == 0 && libusb_handle_ != nullptr) {
                     (void)libusb_clear_halt(libusb_handle_, alt_.endpoint_address);
                 }
@@ -556,6 +564,7 @@ void Uac2Playback::workerLoopUsbdevfs(std::promise<bool> init_promise) {
         if (reaped == nullptr) continue;
 
         size_t frames = 0;
+        std::memset(static_cast<uint8_t*>(reaped->buffer), 0, static_cast<size_t>(reaped->buffer_length));
         fillUrbBuffer(static_cast<uint8_t*>(reaped->buffer),
                       static_cast<size_t>(reaped->buffer_length),
                       &frames);

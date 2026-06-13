@@ -152,6 +152,7 @@ class MixerSessionController(
     private var waveformJob: Job? = null
     private var soundcheckWaveformJob: Job? = null
     private var soundcheckSelectJob: Job? = null
+    private var usbTestToneBurstJob: Job? = null
     private var playbackStatusJob: Job? = null
     private var profile: MixerProfile? = null
     private var lastVuLogNs = 0L
@@ -1410,6 +1411,8 @@ class MixerSessionController(
     }
 
     private suspend fun stopUsbTestToneLocked(restoreRouting: Boolean = true) {
+        usbTestToneBurstJob?.cancel()
+        usbTestToneBurstJob = null
         if (!testTonePlayer.isPlaying && _state.value.usbTestToneActiveChannel == null) return
         withContext(Dispatchers.IO) {
             testTonePlayer.stopAndAwait()
@@ -1493,6 +1496,23 @@ class MixerSessionController(
         }
         AudioSessionBridge.rebuildNotification()
         OmtLog.i("MixerSession", "USB test tone U${usbChannelIndex + 1} started for $mixerId")
+        scheduleUsbTestToneBurstStop(usbChannelIndex)
+    }
+
+    private fun scheduleUsbTestToneBurstStop(usbChannelIndex: Int) {
+        if (!isFlow8Active()) return
+        usbTestToneBurstJob?.cancel()
+        usbTestToneBurstJob = scope.launch {
+            delay(Flow8UsbPlaybackProfile.TEST_TONE_BURST_MS)
+            captureMutex.withLock {
+                if (_state.value.usbTestToneActiveChannel == usbChannelIndex) {
+                    stopUsbTestToneLocked()
+                    _state.update {
+                        it.copy(statusMessage = "USB test tone burst ended — tap to play again")
+                    }
+                }
+            }
+        }
     }
 
     fun canStartRecording(): Boolean {
@@ -1955,6 +1975,8 @@ class MixerSessionController(
         waveformJob = null
         soundcheckSelectJob?.cancel()
         soundcheckSelectJob = null
+        usbTestToneBurstJob?.cancel()
+        usbTestToneBurstJob = null
         stopPlaybackStatusUpdates()
         player.stop()
         scope.launch {

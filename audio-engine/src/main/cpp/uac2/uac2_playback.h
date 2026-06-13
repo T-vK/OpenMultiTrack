@@ -79,6 +79,7 @@ private:
     std::vector<std::vector<uint8_t>> libusb_buffers_;
     std::atomic<uint32_t> libusb_in_flight_mask_{0};
     std::atomic<int64_t> libusb_submitted_frames_{0};
+    std::atomic<uint32_t> libusb_error_streak_{0};
 
     std::unique_ptr<openmultitrack::SpscRingBuffer> ring_;
 };

@@ -15,6 +15,8 @@ object Flow8UsbPlaybackProfile {
     const val USB_PLAYBACK_CHANNELS = 4
     const val PRE_PLAYBACK_DELAY_MS = 120L
     const val POST_PLAYBACK_STOP_DELAY_MS = 80L
+    /** Limit continuous isoch OUT — Flow 8 firmware wedges on sustained bad/gapped streams. */
+    const val TEST_TONE_BURST_MS = 3_000L
 
     fun isFlow8(usb: UsbAudioDeviceDescriptor): Boolean =
         usb.vendorId == BehringerUsbIdentifiers.VENDOR_ID_BEHINGER &&

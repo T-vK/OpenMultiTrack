@@ -358,7 +358,8 @@ private fun UsbTestTonesPage(
     )
     Text(
         "Flow 8: USB returns are fixed in the mixer — assign the channel you monitor " +
-            "(e.g. Ch1 → USB1) in the Flow 8 app, then solo that channel and raise its fader.",
+            "(e.g. Ch1 → USB1) in the Flow 8 app, then solo that channel and raise its fader. " +
+            "Test tones play a 3 second burst to avoid wedging the mixer.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(bottom = 8.dp),
