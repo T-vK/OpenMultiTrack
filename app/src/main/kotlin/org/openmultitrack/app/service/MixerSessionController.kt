@@ -199,6 +199,24 @@ class MixerSessionController(
         val chCount = probe.uac2Caps?.maxCaptureChannels?.takeIf { it > 0 }
             ?: probe.input?.takeIf { it.isSuccess }?.channelCount
             ?: 0
+        if (_state.value.appMode == AppMode.MULTITRACK_RECORD && captureEngine.isUsbStreamHealthy()) {
+            val strips = if (_state.value.channelStrips.isEmpty() && chCount > 0) {
+                (0 until chCount).map { ChannelStripState(index = it) }
+            } else {
+                _state.value.channelStrips
+            }
+            _state.update {
+                it.copy(
+                    usbDescriptor = descriptor,
+                    probe = probe,
+                    probing = false,
+                    captureChannelCount = chCount,
+                    playbackChannelCount = playbackCh,
+                    channelStrips = strips,
+                )
+            }
+            return
+        }
         val strips = if (_state.value.channelStrips.isEmpty() && chCount > 0) {
             (0 until chCount).map { ChannelStripState(index = it) }
         } else {
@@ -838,6 +856,10 @@ class MixerSessionController(
             AudioEngineRouter.stopPlayback()
             if (isRecordingTransport()) {
                 OmtLog.i("MixerSession", "FLOW 8 playback stopped; keeping capture during recording")
+                return@withContext
+            }
+            if (_state.value.appMode == AppMode.MULTITRACK_RECORD) {
+                OmtLog.i("MixerSession", "FLOW 8 record mode — skip capture teardown for USB prepare")
                 return@withContext
             }
             if (_state.value.appMode == AppMode.MULTITRACK_RECORD &&
@@ -1576,6 +1598,8 @@ class MixerSessionController(
     }
 
     internal fun debugRawMeterPeaksForTest(): FloatArray = captureEngine.debugRawMeterPeaks()
+
+    fun isUsbCaptureWarm(): Boolean = captureEngine.isUsbStreamHealthy()
 
     fun onUsbDetached(deviceName: String?) {
         val desc = activeDescriptor ?: return

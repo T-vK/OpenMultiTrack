@@ -58,7 +58,7 @@ class Flow8RecordingTimelineE2eTest {
         val recordSeconds = 12
         val toleranceSec = E2eRecordingTimelineAssertions.RECORDING_TOLERANCE_SEC
 
-        E2eUiTransport.clickContentDescription("Record", timeoutMs = 60_000)
+        ctrl.startRecording()
         E2eWait.untilRecording(ctrl, timeoutMs = 60_000)
         E2eUiTransport.waitForContentDescription("Stop recording", timeoutMs = 10_000)
         val recordingWallStartMs = System.currentTimeMillis()

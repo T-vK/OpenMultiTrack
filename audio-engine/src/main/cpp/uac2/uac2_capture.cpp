@@ -349,8 +349,9 @@ void Uac2Capture::stopPcmFileRecordingUnlocked() {
         file_handle_ = nullptr;
     }
     file_ring_.reset();
-    OMT_LOGI("uac2 pcm file recording stopped frames=%llu",
-             static_cast<unsigned long long>(file_frames_written_.load()));
+    OMT_LOGI("uac2 pcm file recording stopped frames=%llu dropped=%llu",
+             static_cast<unsigned long long>(file_frames_written_.load()),
+             static_cast<unsigned long long>(dropped_frames_.load()));
 }
 
 void Uac2Capture::pcmFileWriterLoop() {
@@ -442,7 +443,7 @@ void Uac2Capture::libusbEventLoop() {
 #endif
     timeval tv{};
     tv.tv_sec = 0;
-    tv.tv_usec = file_recording_.load() ? 0 : 1'000;
+    tv.tv_usec = backend_ == IoBackend::Libusb ? 0 : 1'000;
     while (running_.load()) {
         if (libusb_ctx_ == nullptr) {
             break;

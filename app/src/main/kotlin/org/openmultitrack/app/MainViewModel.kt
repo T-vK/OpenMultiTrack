@@ -2200,6 +2200,13 @@ class MainViewModel(
             refreshInterruptedRecording(profile.id, manager)
             return
         }
+        val session = manager.getOrCreate(profile.id).state.value
+        if (session.appMode == AppMode.MULTITRACK_RECORD &&
+            manager.getOrCreate(profile.id).isUsbCaptureWarm()
+        ) {
+            refreshInterruptedRecording(profile.id, manager)
+            return
+        }
         val usb = resolveUsbDevice(profile, usbDevices)
         if (usb == null) {
             OmtLog.w("ViewModel", "USB device not found for ${profile.displayName} (vid=${profile.vendorId} pid=${profile.productId})")
