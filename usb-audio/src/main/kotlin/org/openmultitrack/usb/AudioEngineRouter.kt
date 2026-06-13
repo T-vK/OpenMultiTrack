@@ -42,6 +42,9 @@ data class PlaybackRoute(
  * Picks Oboe vs UAC2 isoch based on probe results and requested channel count.
  */
 object AudioEngineRouter {
+    @Volatile
+    var suppressGlobalCaptureTeardown: (() -> Boolean)? = null
+
     fun resolveCaptureRoute(
         probe: FullUsbProbeResult,
         stream: UsbAudioStreamHandle?,
@@ -181,6 +184,10 @@ object AudioEngineRouter {
     }
 
     fun stopAllRecording() {
+        if (suppressGlobalCaptureTeardown?.invoke() == true) {
+            OmtLog.w("Router", "stopAllRecording suppressed — capture session active")
+            return
+        }
         NativeAudioCaptureRegistry.releaseAll()
     }
 

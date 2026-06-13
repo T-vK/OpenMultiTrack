@@ -164,6 +164,13 @@ class MixerSessionController(
     private val _state = MutableStateFlow(MixerSessionUiState(mixerId = mixerId))
     val state: StateFlow<MixerSessionUiState> = _state.asStateFlow()
 
+    init {
+        AudioEngineRouter.suppressGlobalCaptureTeardown = {
+            isRecordingTransport() ||
+                (_state.value.appMode == AppMode.MULTITRACK_RECORD && captureEngine.isUsbStreamHealthy())
+        }
+    }
+
     fun setProfile(mixer: MixerProfile) {
         profile = mixer
         _state.update { it.copy(mixerProfile = mixer) }

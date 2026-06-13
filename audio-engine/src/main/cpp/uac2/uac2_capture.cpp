@@ -309,6 +309,7 @@ bool Uac2Capture::startPcmFileRecording(const std::string& path) {
     if (ring_ == nullptr || !running_.load()) {
         return false;
     }
+    ring_->reset();
     FILE* file = std::fopen(path.c_str(), "wb");
     if (file == nullptr) {
         OMT_LOGE("uac2 pcm file open failed: %s", std::strerror(errno));
