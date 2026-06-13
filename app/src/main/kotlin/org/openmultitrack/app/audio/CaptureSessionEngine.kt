@@ -116,6 +116,10 @@ class CaptureSessionEngine(
 
     private var nativeFramesBaselineAtRecordingStart: Long = 0L
 
+    /** False until USB backlog at record start is measured and timeline counters are anchored. */
+    @Volatile
+    private var nativeTimelineBaselineReady: Boolean = false
+
     @Volatile
     private var framesWritten: Long = 0
 
@@ -213,7 +217,10 @@ class CaptureSessionEngine(
 
     fun recordElapsedSec(): Float {
         if (!isRecording) return 0f
-        return if (sampleRate > 0) framesCaptured.toFloat() / sampleRate else 0f
+        val frameSec = if (sampleRate > 0) framesCaptured.toFloat() / sampleRate else 0f
+        val startedMs = recordingStartedAtEpochMs ?: return frameSec
+        val wallSec = (System.currentTimeMillis() - startedMs).coerceAtLeast(0L) / 1000f
+        return minOf(frameSec, wallSec)
     }
 
     @VisibleForTesting
@@ -420,10 +427,11 @@ class CaptureSessionEngine(
         framesWritten = 0
         framesCaptured = 0
         nativeFramesBaselineAtRecordingStart = 0L
+        nativeTimelineBaselineReady = false
         recordingMeterChunkCounter = 0
         resetLiveWaveformBuffers()
         syntheticRealtimeAnchorNs = 0L
-        recordingStartedAtEpochMs = System.currentTimeMillis()
+        recordingStartedAtEpochMs = null
         lastMetadataPersistFrames = 0
 
         if (plan != null) {
@@ -461,21 +469,6 @@ class CaptureSessionEngine(
                 stagingFile = null
             }
             nativePcmRecordingActive = nativeActive
-            if (nativeActive && captureBackend == AudioBackend.UAC2) {
-                var backlogPeak = 0L
-                repeat(40) {
-                    backlogPeak = maxOf(
-                        backlogPeak,
-                        AudioEngineRouter.nativePcmFileFramesWritten(captureBackend),
-                    )
-                    kotlinx.coroutines.delay(5)
-                }
-                nativeFramesBaselineAtRecordingStart = backlogPeak
-                OmtLog.i(
-                    "CaptureSession",
-                    "native PCM backlog settle baseline=$backlogPeak frames",
-                )
-            }
             sessionWriter = ResilientSessionWriter(
                 primarySessionDir = plan.primarySessionDir,
                 mirrorSessionDirs = plan.mirrorSessionDirs,
@@ -488,12 +481,16 @@ class CaptureSessionEngine(
                 liveCaptureStagingFile = if (nativeActive) stagingFile else null,
             )
             perChannelWriter = null
+            if (nativeActive && captureBackend == AudioBackend.UAC2) {
+                settleNativeRecordingTimelineBaseline(captureBackend)
+                sessionWriter?.setNativeStagingSkipFrames(nativeFramesBaselineAtRecordingStart)
+            }
         } else {
             perChannelWriter = PerChannelWavWriter(dir, config.channelStrips, sampleRate)
             sessionWriter = null
         }
-        if (nativePcmRecordingActive && nativeFramesBaselineAtRecordingStart > 0L) {
-            sessionWriter?.setNativeStagingSkipFrames(nativeFramesBaselineAtRecordingStart)
+        if (recordingStartedAtEpochMs == null) {
+            recordingStartedAtEpochMs = System.currentTimeMillis()
         }
 
         buildSessionMetadata(config, sampleRate, framesWritten).writeTo(dir)
@@ -580,11 +577,40 @@ class CaptureSessionEngine(
         AudioEngineRouter.stopNativePcmFileRecording(backend)
         val frames = AudioEngineRouter.nativePcmFileFramesWritten(backend)
         nativePcmRecordingActive = false
+        nativeTimelineBaselineReady = false
         OmtLog.i("CaptureSession", "native PCM recording stopped frames=$frames")
         return frames
     }
 
+    private suspend fun settleNativeRecordingTimelineBaseline(backend: AudioBackend) {
+        var backlogPeak = 0L
+        var stableSamples = 0
+        repeat(80) {
+            val nativeFrames = AudioEngineRouter.nativePcmFileFramesWritten(backend)
+            if (nativeFrames > backlogPeak) {
+                backlogPeak = nativeFrames
+                stableSamples = 0
+            } else if (nativeFrames == backlogPeak && backlogPeak > 0L) {
+                stableSamples++
+            }
+            if (stableSamples >= 4 && backlogPeak > 0L) {
+                return@repeat
+            }
+            kotlinx.coroutines.delay(5)
+        }
+        nativeFramesBaselineAtRecordingStart = backlogPeak
+        framesCaptured = 0L
+        framesWritten = 0L
+        sessionWriter?.setLiveFramesWritten(0L)
+        nativeTimelineBaselineReady = true
+        OmtLog.i(
+            "CaptureSession",
+            "native PCM backlog settle baseline=$backlogPeak frames stable=$stableSamples",
+        )
+    }
+
     private fun syncNativeRecordingProgress(backend: AudioBackend): Boolean {
+        if (!nativeTimelineBaselineReady) return false
         val nativeFrames = AudioEngineRouter.nativePcmFileFramesWritten(backend)
         val sessionFrames = (nativeFrames - nativeFramesBaselineAtRecordingStart).coerceAtLeast(0L)
         if (sessionFrames <= framesCaptured) return false
