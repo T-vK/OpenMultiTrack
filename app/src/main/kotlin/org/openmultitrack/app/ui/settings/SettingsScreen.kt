@@ -733,6 +733,14 @@ private fun <T> SettingsPickerItem(row: SettingsPickerRow<T>) {
     }
 }
 
+private val SNAPSHOT_SLOT_OPTIONS: List<Int> = (0..64).toList()
+
+private fun snapshotSlotLabel(slot: Int): String =
+    when (slot) {
+        0 -> "Not set"
+        else -> "Snapshot $slot"
+    }
+
 private fun buildSettingsRows(
     state: SettingsUiState,
     monitorGain: Float,
@@ -955,6 +963,37 @@ private fun buildSettingsRows(
                 onSelect = { onRoutingAutomationConfigChange(config.copy(method = it)) },
             ),
         )
+        if (config.method == org.openmultitrack.app.data.RoutingAutomationMethod.SNAPSHOT_SLOT) {
+            val snapshotSlots = SNAPSHOT_SLOT_OPTIONS
+            add(
+                SettingsDropdownRow(
+                    id = "routing_record_snapshot_slot",
+                    category = SettingsCategory.OSC,
+                    title = "Record snapshot",
+                    description = "Mixer snapshot slot (1–64) recalled when recording starts.",
+                    options = snapshotSlots,
+                    selected = config.recordSnapshotSlot,
+                    label = ::snapshotSlotLabel,
+                    onSelect = { slot ->
+                        onRoutingAutomationConfigChange(config.copy(recordSnapshotSlot = slot))
+                    },
+                ),
+            )
+            add(
+                SettingsDropdownRow(
+                    id = "routing_soundcheck_snapshot_slot",
+                    category = SettingsCategory.OSC,
+                    title = "Soundcheck snapshot",
+                    description = "Mixer snapshot slot (1–64) recalled when soundcheck playback starts.",
+                    options = snapshotSlots,
+                    selected = config.soundcheckSnapshotSlot,
+                    label = ::snapshotSlotLabel,
+                    onSelect = { slot ->
+                        onRoutingAutomationConfigChange(config.copy(soundcheckSnapshotSlot = slot))
+                    },
+                ),
+            )
+        }
         add(
             SettingsDropdownRow(
                 id = "routing_restore_policy",
