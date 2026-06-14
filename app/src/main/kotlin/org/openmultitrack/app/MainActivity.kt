@@ -253,6 +253,7 @@ class MainActivity : ComponentActivity() {
                                 viewModel.setRoutingAutomationConfig(id, config)
                             }
                         },
+                        onRefreshMixerSnapshots = viewModel::refreshMixerSnapshots,
                         onOpenInputSources = { viewModel.showInputSources(true) },
                         onCloseInputSources = { viewModel.showInputSources(false) },
                         onRefreshInputSources = viewModel::refreshInputSources,

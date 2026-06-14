@@ -31,6 +31,57 @@ internal object Xr18RoutingOsc {
     fun snapshotNameQueryPaths(): List<String> =
         (1..64).map { OscPath.snapSlotName(it) }
 
+    suspend fun readAllSnapshotNames(client: OscUdpClient): List<MixerSnapshotOption> {
+        client.send(OscPath.xremote())
+        Thread.sleep(50)
+        val merged = linkedMapOf<String, List<Any>>()
+        for (batch in (1..64).chunked(16)) {
+            val paths = batch.map { OscPath.snapSlotName(it) }
+            merged.putAll(
+                client.query(
+                    paths,
+                    timeoutMs = 4000,
+                    rounds = 5,
+                    label = "snap batch ${batch.first()}-${batch.last()}",
+                ),
+            )
+        }
+        val results = (1..64).map { slot -> snapshotOption(slot, merged) }.toMutableList()
+        for (slot in 1..64) {
+            if (results[slot - 1].name.isNotBlank()) continue
+            for (path in OscPath.snapSlotNameQueryPaths(slot)) {
+                if (merged.containsKey(path)) continue
+                val replies = client.query(
+                    paths = listOf(path),
+                    timeoutMs = 600,
+                    rounds = 2,
+                    label = "snap path $slot",
+                )
+                merged.putAll(replies)
+                val name = snapshotOption(slot, merged).name
+                if (name.isNotBlank()) {
+                    results[slot - 1] = MixerSnapshotOption(slot, name)
+                    break
+                }
+            }
+        }
+        for (slot in 1..64) {
+            if (results[slot - 1].name.isNotBlank()) continue
+            client.send(OscPath.snapIndex(), listOf(OscArgument.IntArg(slot)))
+            val replies = client.query(
+                paths = listOf(OscPath.snapName()),
+                timeoutMs = 600,
+                rounds = 2,
+                label = "snap index $slot",
+            )
+            val name = oscString(replies[OscPath.snapName()]?.firstOrNull()).orEmpty().trim()
+            if (name.isNotBlank()) {
+                results[slot - 1] = MixerSnapshotOption(slot, name)
+            }
+        }
+        return results
+    }
+
     fun parseSnapshotNames(replies: Map<String, List<Any>>): List<MixerSnapshotOption> =
         (1..64).map { slot -> snapshotOption(slot, replies) }
 

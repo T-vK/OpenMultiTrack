@@ -16,6 +16,8 @@ class OscPathTest {
         assertThat(OscPath.channelConfigRtnsrc(3)).isEqualTo("/ch/03/config/rtnsrc")
         assertThat(OscPath.channelPreampRtnSw(3)).isEqualTo("/ch/03/preamp/rtnsw")
         assertThat(OscPath.snapLoad()).isEqualTo("/-snap/load")
+        assertThat(OscPath.snapName()).isEqualTo("/-snap/name")
+        assertThat(OscPath.snapIndex()).isEqualTo("/-snap/index")
     }
 
     @Test

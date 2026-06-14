@@ -12,6 +12,22 @@ class Xr18RoutingOscSnapshotTest {
     }
 
     @Test
+    fun snapSlotNameQueryPaths_includesCommonVariants() {
+        assertThat(OscPath.snapSlotNameQueryPaths(1)).containsExactly(
+            "/-snap/01/name/01",
+            "/-snap/01/name",
+            "/-snap/00/name/01",
+            "/-snap/00/name",
+        )
+        assertThat(OscPath.snapSlotNameQueryPaths(10)).containsExactly(
+            "/-snap/10/name/01",
+            "/-snap/10/name",
+            "/-snap/09/name/01",
+            "/-snap/09/name",
+        )
+    }
+
+    @Test
     fun parseSnapshotNames_returnsAllSlotsIncludingEmpty() {
         val replies = mapOf(
             OscPath.snapSlotName(1) to listOf("  "),

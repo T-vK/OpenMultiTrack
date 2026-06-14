@@ -120,6 +120,7 @@ fun SettingsScreen(
     onMinFreeStorageBytesChange: (Long) -> Unit = {},
     onOpenBatterySettings: () -> Unit = {},
     onRoutingAutomationConfigChange: (org.openmultitrack.app.data.MixerRoutingAutomationConfig) -> Unit = {},
+    onRefreshMixerSnapshots: () -> Unit = {},
 ) {
     var query by remember { mutableStateOf("") }
     var openCategory by remember { mutableStateOf<SettingsCategory?>(null) }
@@ -197,6 +198,7 @@ fun SettingsScreen(
             onMinFreeStorageBytesChange = onMinFreeStorageBytesChange,
             onOpenBatterySettings = onOpenBatterySettings,
             onRoutingAutomationConfigChange = onRoutingAutomationConfigChange,
+            onRefreshMixerSnapshots = onRefreshMixerSnapshots,
         )
     }
 }
@@ -240,9 +242,19 @@ private fun SettingsContent(
     onMinFreeStorageBytesChange: (Long) -> Unit = {},
     onOpenBatterySettings: () -> Unit = {},
     onRoutingAutomationConfigChange: (org.openmultitrack.app.data.MixerRoutingAutomationConfig) -> Unit = {},
+    onRefreshMixerSnapshots: () -> Unit = {},
 ) {
     val normalizedQuery = query.trim().lowercase()
     val isSearching = normalizedQuery.isNotEmpty()
+    val wantsSnapshotNames = state.showOscRoutingSettings &&
+        (
+            openCategory == SettingsCategory.OSC ||
+                state.routingAutomationConfig.method ==
+                org.openmultitrack.app.data.RoutingAutomationMethod.SNAPSHOT_SLOT
+            )
+    androidx.compose.runtime.LaunchedEffect(wantsSnapshotNames) {
+        if (wantsSnapshotNames) onRefreshMixerSnapshots()
+    }
 
     val rows = remember(state, monitorGain) {
         buildSettingsRows(
@@ -748,20 +760,24 @@ private val ALL_SNAPSHOT_SLOT_OPTIONS: List<Int> = (0..64).toList()
 private fun snapshotSlotLabel(
     slot: Int,
     snapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption>,
+    loading: Boolean,
 ): String = when (slot) {
     0 -> "Not set"
     else -> {
         val name = snapshots.find { it.slot == slot }?.name.orEmpty()
-        val slotLabel = slot.toString().padStart(2, '0')
-        if (name.isNotBlank()) name else "Snapshot $slotLabel"
+        when {
+            name.isNotBlank() -> name
+            loading -> "…"
+            else -> "${slot.toString().padStart(2, '0')} (empty)"
+        }
     }
 }
 
-private fun snapshotPickerDescription(loading: Boolean): String =
-    if (loading) {
-        "Loading snapshot names from the mixer…"
-    } else {
-        "All mixer snapshot slots (1–64); empty slots show as Snapshot NN."
+private fun snapshotPickerDescription(loading: Boolean, namedCount: Int): String =
+    when {
+        loading -> "Loading snapshot names from the mixer…"
+        namedCount > 0 -> "$namedCount named snapshots loaded from the mixer."
+        else -> "Could not read snapshot names — check XR18 Wi‑Fi and OSC IP."
     }
 
 private fun buildSettingsRows(
@@ -987,10 +1003,14 @@ private fun buildSettingsRows(
             ),
         )
         if (config.method == org.openmultitrack.app.data.RoutingAutomationMethod.SNAPSHOT_SLOT) {
+            val namedCount = state.mixerSnapshots.count { it.name.isNotBlank() }
             val snapshotLabel: (Int) -> String = { slot ->
-                snapshotSlotLabel(slot, state.mixerSnapshots)
+                snapshotSlotLabel(slot, state.mixerSnapshots, state.mixerSnapshotsLoading)
             }
-            val snapshotDescription = snapshotPickerDescription(state.mixerSnapshotsLoading)
+            val snapshotDescription = snapshotPickerDescription(
+                loading = state.mixerSnapshotsLoading,
+                namedCount = namedCount,
+            )
             add(
                 SettingsDropdownRow(
                     id = "routing_record_snapshot_slot",

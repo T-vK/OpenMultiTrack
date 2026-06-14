@@ -216,15 +216,9 @@ class Xr18RoutingService(
     override suspend fun listSnapshots(): List<MixerSnapshotOption> = withContext(Dispatchers.IO) {
         runCatching {
             openClient().use { client ->
-                val replies = client.query(
-                    Xr18RoutingOsc.snapshotNameQueryPaths(),
-                    timeoutMs = 5000,
-                    rounds = 4,
-                    label = "snap names",
-                )
-                Xr18RoutingOsc.parseSnapshotNames(replies)
+                Xr18RoutingOsc.readAllSnapshotNames(client)
             }
-        }.getOrDefault(emptyList())
+        }.getOrElse { emptyList() }
     }
 
     private suspend fun readChannelInputsOnClient(

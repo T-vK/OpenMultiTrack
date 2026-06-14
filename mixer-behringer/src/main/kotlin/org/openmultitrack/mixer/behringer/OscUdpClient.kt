@@ -57,9 +57,10 @@ class OscUdpClient(
                     val packet = DatagramPacket(buf, buf.size)
                     socket.receive(packet)
                     for (msg in OscMessageDecoder.decodeAll(buf.copyOf(packet.length))) {
-                        if (msg.path in pending && msg.args.isNotEmpty()) {
-                            replies[msg.path] = msg.args
-                            pending.remove(msg.path)
+                        val matched = matchPendingPath(msg.path, pending)
+                        if (matched != null && msg.args.isNotEmpty()) {
+                            replies[matched] = msg.args
+                            pending.remove(matched)
                         }
                     }
                 } catch (_: java.net.SocketTimeoutException) {
@@ -78,6 +79,17 @@ class OscUdpClient(
 
     override fun close() {
         socket.close()
+    }
+
+    private fun matchPendingPath(msgPath: String, pending: Set<String>): String? {
+        if (msgPath in pending) return msgPath
+        if (!msgPath.startsWith("/-snap/") || !msgPath.contains("/name")) return null
+        val msgSlot = msgPath.substringAfter("/-snap/").substringBefore('/')
+        return pending.firstOrNull { pendingPath ->
+            pendingPath.startsWith("/-snap/") &&
+                pendingPath.contains("/name") &&
+                pendingPath.substringAfter("/-snap/").substringBefore('/') == msgSlot
+        }
     }
 
     companion object {

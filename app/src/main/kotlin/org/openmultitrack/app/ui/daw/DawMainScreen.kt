@@ -228,6 +228,7 @@ fun DawMainScreen(
     onMinFreeStorageBytesChange: (Long) -> Unit = {},
     onOpenBatterySettings: () -> Unit = {},
     onRoutingAutomationConfigChange: (org.openmultitrack.app.data.MixerRoutingAutomationConfig) -> Unit = {},
+    onRefreshMixerSnapshots: () -> Unit = {},
     onOpenInputSources: () -> Unit = {},
     onCloseInputSources: () -> Unit = {},
     onRefreshInputSources: () -> Unit = {},
@@ -357,6 +358,7 @@ fun DawMainScreen(
                     onRoutingAutomationConfigChange(config)
                 }
             },
+            onRefreshMixerSnapshots = onRefreshMixerSnapshots,
         )
         return
     }
