@@ -255,19 +255,8 @@ void Uac2Playback::closeUnlocked() {
     urb_layout_ = {};
 }
 
-void Uac2Playback::waitForPlaybackRingPrime() {
-    const size_t min_prime = std::max<size_t>(static_cast<size_t>(sample_rate_ / 10), 2'400);
-    constexpr int kMaxWaitIterations = 1'500;
-    for (int i = 0; i < kMaxWaitIterations && running_.load(); ++i) {
-        if (ring_ != nullptr && ring_->availableFrames() >= min_prime) {
-            OMT_LOGI("uac2 playback ring primed frames=%zu", ring_->availableFrames());
-            return;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-    OMT_LOGW("uac2 playback ring prime timeout (available=%zu need=%zu)",
-             ring_ != nullptr ? ring_->availableFrames() : 0,
-             min_prime);
+size_t Uac2Playback::playbackMinPrimeFrames() const {
+    return std::max<size_t>(static_cast<size_t>(sample_rate_ / 10), 2'400);
 }
 
 size_t Uac2Playback::writeFrames(const float* src, size_t frame_count) {
@@ -293,7 +282,12 @@ bool Uac2Playback::fillUrbBuffer(uint8_t* dest, size_t byte_capacity, size_t* fr
 
     const size_t max_frames = byte_capacity / bpf;
     std::vector<float> scratch(max_frames * alt_.format.channels);
-    const size_t got = ring_ != nullptr ? ring_->popFrames(scratch.data(), max_frames) : 0;
+    const size_t min_prime = playbackMinPrimeFrames();
+    const size_t available = ring_ != nullptr ? ring_->availableFrames() : 0;
+    const bool hold_silence = available < min_prime;
+    const size_t got = (!hold_silence && ring_ != nullptr)
+        ? ring_->popFrames(scratch.data(), max_frames)
+        : 0;
 
     std::vector<float> frame(alt_.format.channels);
     for (size_t f = 0; f < max_frames; ++f) {
@@ -302,7 +296,9 @@ bool Uac2Playback::fillUrbBuffer(uint8_t* dest, size_t byte_capacity, size_t* fr
                 frame[c] = scratch[f * alt_.format.channels + c];
             }
         } else {
-            underrun_frames_.fetch_add(1);
+            if (!hold_silence) {
+                underrun_frames_.fetch_add(1);
+            }
             std::fill(frame.begin(), frame.end(), 0.0f);
         }
         floatFrameToPcm(
@@ -465,8 +461,6 @@ void Uac2Playback::workerLoopLibusb(std::promise<bool> init_promise) {
         init_reported = true;
     }
 
-    waitForPlaybackRingPrime();
-
     const int64_t pipeline_frames = static_cast<int64_t>(frames_per_urb) * kNumUrbs;
     const auto playback_start = std::chrono::steady_clock::now();
     int io_error_streak = 0;
@@ -530,23 +524,10 @@ void Uac2Playback::workerLoopLibusb(std::promise<bool> init_promise) {
 
 void Uac2Playback::workerLoopUsbdevfs(std::promise<bool> init_promise) {
     const IsoUrbLayout layout = urb_layout_;
-    const size_t bpf = bytesPerFrame(alt_.format);
-    const int frames_per_urb =
-        bpf > 0 ? layout.buffer_length / static_cast<int>(bpf) : 0;
-    bool init_reported = false;
-
-    if (frames_per_urb <= 0) {
-        init_promise.set_value(false);
-        running_.store(false);
-        return;
-    }
-
-    // Unblock open() so Kotlin can prime the ring before the first isoch OUT URB.
-    init_promise.set_value(true);
-    init_reported = true;
-    waitForPlaybackRingPrime();
 
     std::vector<UrbContext> contexts(kNumUrbs);
+    bool init_reported = false;
+
     for (int i = 0; i < kNumUrbs; ++i) {
         usbdevfs_urb* urb = allocIsoUrb(layout, &contexts[static_cast<size_t>(i)]);
         initIsoUrb(urb, layout, alt_.endpoint_address, &contexts[static_cast<size_t>(i)], false);
@@ -554,8 +535,16 @@ void Uac2Playback::workerLoopUsbdevfs(std::promise<bool> init_promise) {
         fillUrbBuffer(static_cast<uint8_t*>(urb->buffer), static_cast<size_t>(layout.buffer_length), &frames);
         if (ioctl(usb_fd_, USBDEVFS_SUBMITURB, urb) < 0) {
             OMT_LOGE("uac2 playback SUBMITURB init failed: %s", std::strerror(errno));
+            if (!init_reported) {
+                init_promise.set_value(false);
+                init_reported = true;
+            }
             running_.store(false);
             return;
+        }
+        if (!init_reported) {
+            init_promise.set_value(true);
+            init_reported = true;
         }
     }
 

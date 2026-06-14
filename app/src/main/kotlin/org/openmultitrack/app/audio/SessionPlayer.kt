@@ -66,23 +66,36 @@ class SessionPlayer {
     ): Result<Unit> {
         val reader = WavReader(file)
         val channels = reader.format.channelCount.coerceAtMost(32)
-        return startPlayback(
-            scope = scope,
-            route = route,
-            usbDevice = usbDevice,
-            startFrame = startFrame,
-            channels = channels,
-            sampleRate = reader.format.sampleRate,
-            duration = reader.format.frameCount,
-            label = file.absolutePath,
-            loopStartFrame = loopStartFrame,
-            loopEndFrame = loopEndFrame,
-            loopEnabled = loopEnabled,
-            seek = { frame -> reader.seekFrame(frame) },
-        ) { scratch, onFramesSubmitted ->
-            reader.use { wav ->
-                if (startFrame > 0) wav.seekFrame(startFrame)
-                readLoop(wav, channels, scratch, onFramesSubmitted)
+        return reader.use { wav ->
+            if (startFrame > 0) wav.seekFrame(startFrame)
+            startPlayback(
+                scope = scope,
+                route = route,
+                usbDevice = usbDevice,
+                startFrame = startFrame,
+                channels = channels,
+                sampleRate = reader.format.sampleRate,
+                duration = reader.format.frameCount,
+                label = file.absolutePath,
+                loopStartFrame = loopStartFrame,
+                loopEndFrame = loopEndFrame,
+                loopEnabled = loopEnabled,
+                seek = { frame -> wav.seekFrame(frame) },
+                blockingPrime = if (route.backend == AudioBackend.UAC2) {
+                    { scratch, chunkScratch, onFramesSubmitted ->
+                        primeUac2Ring(wav, channels, scratch, chunkScratch, onFramesSubmitted)
+                    }
+                } else {
+                    null
+                },
+            ) { scratch, onFramesSubmitted ->
+                readLoop(
+                    wav,
+                    channels,
+                    scratch,
+                    onFramesSubmitted,
+                    skipPrime = route.backend == AudioBackend.UAC2,
+                )
             }
         }
     }
@@ -103,27 +116,57 @@ class SessionPlayer {
         val inputChannels = reader.channelCount.coerceAtMost(32)
         val outputChannels = mixContext?.usbOutputCount?.coerceAtLeast(1) ?: inputChannels
         val scratchChannels = max(inputChannels, outputChannels)
-        return startPlayback(
-            scope = scope,
-            route = route,
-            usbDevice = usbDevice,
-            startFrame = startFrame,
-            channels = outputChannels,
-            scratchChannels = scratchChannels,
-            sampleRate = reader.sampleRate,
-            duration = reader.frameCount,
-            label = sessionDir.absolutePath,
-            loopStartFrame = loopStartFrame,
-            loopEndFrame = loopEndFrame,
-            loopEnabled = loopEnabled,
-            seek = { frame -> reader.seekFrame(frame) },
-        ) { scratch, onFramesSubmitted ->
-            reader.use { wav ->
-                if (startFrame > 0) wav.seekFrame(startFrame)
-                if (mixContext != null) {
-                    readLoopMixed(wav, inputChannels, outputChannels, scratch, mixContext, onFramesSubmitted)
+        return reader.use { wav ->
+            if (startFrame > 0) wav.seekFrame(startFrame)
+            startPlayback(
+                scope = scope,
+                route = route,
+                usbDevice = usbDevice,
+                startFrame = startFrame,
+                channels = outputChannels,
+                scratchChannels = scratchChannels,
+                sampleRate = reader.sampleRate,
+                duration = reader.frameCount,
+                label = sessionDir.absolutePath,
+                loopStartFrame = loopStartFrame,
+                loopEndFrame = loopEndFrame,
+                loopEnabled = loopEnabled,
+                seek = { frame -> wav.seekFrame(frame) },
+                blockingPrime = if (route.backend == AudioBackend.UAC2) {
+                    { scratch, chunkScratch, onFramesSubmitted ->
+                        val outScratch = FloatArray(2048 * outputChannels)
+                        if (mixContext != null) {
+                            primeUac2RingMixed(
+                                wav,
+                                inputChannels,
+                                outputChannels,
+                                scratch,
+                                mixContext,
+                                outScratch,
+                                chunkScratch,
+                                onFramesSubmitted,
+                            )
+                        } else {
+                            primeUac2Ring(wav, inputChannels, scratch, chunkScratch, onFramesSubmitted)
+                        }
+                    }
                 } else {
-                    readLoop(wav, inputChannels, scratch, onFramesSubmitted)
+                    null
+                },
+            ) { scratch, onFramesSubmitted ->
+                val skipPrime = route.backend == AudioBackend.UAC2
+                if (mixContext != null) {
+                    readLoopMixed(
+                        wav,
+                        inputChannels,
+                        outputChannels,
+                        scratch,
+                        mixContext,
+                        onFramesSubmitted,
+                        skipPrime = skipPrime,
+                    )
+                } else {
+                    readLoop(wav, inputChannels, scratch, onFramesSubmitted, skipPrime = skipPrime)
                 }
             }
         }
@@ -196,6 +239,7 @@ class SessionPlayer {
         loopEndFrame: Long?,
         loopEnabled: Boolean,
         seek: (Long) -> Unit,
+        blockingPrime: ((FloatArray, FloatArray, (Int) -> Unit) -> Unit)? = null,
         run: (scratch: FloatArray, onFramesSubmitted: (Int) -> Unit) -> Unit,
     ): Result<Unit> {
         val trace = TransportTrace("startPlayback")
@@ -244,6 +288,15 @@ class SessionPlayer {
         trace.mark("status=PLAYING, launching read loop")
 
         val scratch = FloatArray(2048 * scratchChannels.coerceAtLeast(1))
+        if (blockingPrime != null && backend == AudioBackend.UAC2 && !canReuseWarm) {
+            trace.mark("blocking UAC2 ring prime before read loop")
+            val chunkScratch = FloatArray(2048 * channels.coerceAtLeast(1))
+            blockingPrime(scratch, chunkScratch) { framesWritten ->
+                status = status.copy(positionFrames = status.positionFrames + framesWritten)
+            }
+            resetUac2PaceAnchor(status.positionFrames)
+            trace.mark("UAC2 ring primed to ${status.positionFrames} frames")
+        }
         previous?.cancel()
         var loggedFirstWrite = false
         playbackJob = scope.launch(Dispatchers.IO) {
@@ -281,11 +334,14 @@ class SessionPlayer {
         scratch: FloatArray,
         mixContext: PlaybackMixContext,
         onFramesSubmitted: (Int) -> Unit,
+        skipPrime: Boolean = false,
     ) {
         val backend = activeBackend ?: return
         val outScratch = FloatArray(2048 * outputChannels)
         val chunkScratch = FloatArray(2048 * outputChannels)
-        primeUac2RingMixed(wav, inputChannels, outputChannels, scratch, mixContext, outScratch, chunkScratch, onFramesSubmitted)
+        if (!skipPrime) {
+            primeUac2RingMixed(wav, inputChannels, outputChannels, scratch, mixContext, outScratch, chunkScratch, onFramesSubmitted)
+        }
         while (playbackJob?.isActive == true) {
             val frames = synchronized(readerLock) {
                 when (wav) {
@@ -323,10 +379,13 @@ class SessionPlayer {
         channels: Int,
         scratch: FloatArray,
         onFramesSubmitted: (Int) -> Unit,
+        skipPrime: Boolean = false,
     ) {
         val backend = activeBackend ?: return
         val chunkScratch = FloatArray(2048 * channels)
-        primeUac2Ring(wav, channels, scratch, chunkScratch, onFramesSubmitted)
+        if (!skipPrime) {
+            primeUac2Ring(wav, channels, scratch, chunkScratch, onFramesSubmitted)
+        }
         while (playbackJob?.isActive == true) {
             val frames = synchronized(readerLock) {
                 when (wav) {
