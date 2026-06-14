@@ -525,7 +525,13 @@ class MixerSessionController(
                 OmtLog.d("MixerSession", "playback route warmup: ${e.message}")
             }
             .getOrNull() ?: return
-        AudioEngineRouter.preclaimPlaybackRoute(route, activeUsbDevice)
+        // Java UsbManager.claimInterface breaks USBDEVFS_SUBMITURB on hardware tablets;
+        // native usbdevfs claim is required for reliable isoch OUT (FLOW 8 playback).
+        AudioEngineRouter.preclaimPlaybackRoute(
+            route,
+            activeUsbDevice,
+            skipJavaClaim = isFlow8Active(),
+        )
         trace.mark("usbStream open fd=${usbStream?.fd} backend=${route.backend}")
         trace.mark("done")
     }
@@ -1049,15 +1055,6 @@ class MixerSessionController(
 
     /** FLOW 8 needs capture isoch stopped and a short settle delay before UAC2 playback. */
     private suspend fun prepareFlow8UsbForPlaybackLocked() {
-        if (isUsbStreamHeld() &&
-            !captureEngine.isCaptureActive &&
-            !captureEngine.isNativeUsbCaptureRunning() &&
-            !player.isPlaying &&
-            !testTonePlayer.isPlaying
-        ) {
-            OmtLog.d("MixerSession", "FLOW 8 playback prepare skipped — stream held")
-            return
-        }
         if (_state.value.isMonitoring) {
             captureEngine.updateMonitor(MonitorMixConfig(enabled = false))
             _state.update { it.copy(isMonitoring = false) }

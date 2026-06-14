@@ -158,14 +158,21 @@ object AudioEngineRouter {
             val alt = NativeUac2Probe.selectBestPlaybackAlt(uac2, minOf(effectiveChannels, 2), sampleRateHz)
                 ?: NativeUac2Probe.selectBestPlaybackAlt(uac2, 1, sampleRateHz)
             if (alt != null && alt.formatValid) {
-                OmtLog.i("Router", "playback → UAC2 fallback ${alt.channels}ch (Oboe unavailable)")
-                return PlaybackRoute(
-                    backend = AudioBackend.UAC2,
-                    usbStream = stream,
-                    uac2Alt = alt,
-                    channelCount = alt.channels,
-                    sampleRate = alt.sampleRateHz.takeIf { it > 0 } ?: sampleRateHz,
-                )
+                if (Flow8UsbPlaybackProfile.isFlow8(probe.usb) && alt.channels < Flow8UsbPlaybackProfile.USB_PLAYBACK_CHANNELS) {
+                    OmtLog.e(
+                        "Router",
+                        "FLOW 8 playback rejected ${alt.channels}ch fallback — requires ${Flow8UsbPlaybackProfile.USB_PLAYBACK_CHANNELS}ch",
+                    )
+                } else {
+                    OmtLog.i("Router", "playback → UAC2 fallback ${alt.channels}ch (Oboe unavailable)")
+                    return PlaybackRoute(
+                        backend = AudioBackend.UAC2,
+                        usbStream = stream,
+                        uac2Alt = alt,
+                        channelCount = alt.channels,
+                        sampleRate = alt.sampleRateHz.takeIf { it > 0 } ?: sampleRateHz,
+                    )
+                }
             }
         }
 
@@ -289,8 +296,9 @@ object AudioEngineRouter {
     fun preclaimPlaybackRoute(
         route: PlaybackRoute,
         usbDevice: android.hardware.usb.UsbDevice?,
+        skipJavaClaim: Boolean = false,
     ): Boolean {
-        if (route.backend != AudioBackend.UAC2) return true
+        if (route.backend != AudioBackend.UAC2 || skipJavaClaim) return true
         val stream = route.usbStream ?: return false
         val alt = route.uac2Alt ?: return false
         val t0 = SystemClock.elapsedRealtime()
