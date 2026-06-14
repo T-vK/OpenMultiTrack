@@ -33,8 +33,8 @@ class VirtualDemoCaptureInstrumentedTest {
 
             delay(300)
             val meters = engine.debugRawMeterPeaks()
-            assertThat(meters[0]).isWithin(0.06f).of(0.38f)
-            assertThat(meters[7]).isWithin(0.06f).of(0.48f)
+            assertThat(meters[0]).isGreaterThan(0.85f)
+            assertThat(meters[VirtualMixer.DEMO_CHANNEL_COUNT - 1]).isLessThan(0.02f)
 
             val tmp = File.createTempFile("omt-demo", null)
             tmp.delete()

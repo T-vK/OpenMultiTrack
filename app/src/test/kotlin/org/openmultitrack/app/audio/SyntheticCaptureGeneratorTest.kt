@@ -32,16 +32,24 @@ class SyntheticCaptureGeneratorTest {
     }
 
     @Test
-    fun demoBand_usesPerChannelLevels() {
+    fun demoBand_firstChannelFull_lastSilent_middleChannelsPump() {
         val gen = SyntheticCaptureGenerator.fromDemoBand()
         assertThat(gen.channelCount).isEqualTo(DemoBandChannels.specs.size)
-        val scratch = FloatArray(480 * gen.channelCount)
-        gen.fill(scratch, 480)
-        val kickPeak = peakForChannel(scratch, gen.channelCount, 7, 480)
-        val hihatPeak = peakForChannel(scratch, gen.channelCount, 9, 480)
-        assertThat(kickPeak).isWithin(0.03f).of(0.48f)
-        assertThat(hihatPeak).isWithin(0.03f).of(0.14f)
-        assertThat(kickPeak).isGreaterThan(hihatPeak)
+        val sampleRate = gen.sampleRate
+        val frames = sampleRate
+        val scratch = FloatArray(frames * gen.channelCount)
+        gen.fill(scratch, frames)
+
+        val leadPeak = peakForChannel(scratch, gen.channelCount, 0, frames)
+        val playbackPeak = peakForChannel(scratch, gen.channelCount, gen.channelCount - 1, frames)
+        assertThat(leadPeak).isWithin(0.03f).of(1f)
+        assertThat(playbackPeak).isLessThan(0.001f)
+
+        // Live waveform buckets use ~30 peaks/sec — verify the 2 Hz pump is visible there.
+        val pumpPeaks = peakSeriesForChannel(scratch, gen.channelCount, 1, frames, peaksPerSec = 30)
+        assertThat(pumpPeaks.maxOrNull()!!).isGreaterThan(0.75f)
+        assertThat(pumpPeaks.minOrNull()!!).isLessThan(0.15f)
+        assertThat(pumpPeaks.maxOrNull()!! - pumpPeaks.minOrNull()!!).isGreaterThan(0.5f)
     }
 
     private fun peakForChannel(scratch: FloatArray, channelCount: Int, channel: Int, frames: Int): Float {
@@ -50,5 +58,25 @@ class SyntheticCaptureGeneratorTest {
             peak = maxOf(peak, abs(scratch[f * channelCount + channel]))
         }
         return peak
+    }
+
+    private fun peakSeriesForChannel(
+        scratch: FloatArray,
+        channelCount: Int,
+        channel: Int,
+        frames: Int,
+        peaksPerSec: Int,
+    ): List<Float> {
+        val bucket = frames / peaksPerSec
+        require(bucket > 0)
+        return (0 until peaksPerSec).map { bucketIndex ->
+            val start = bucketIndex * bucket
+            val end = minOf(frames, start + bucket)
+            var peak = 0f
+            for (f in start until end) {
+                peak = maxOf(peak, abs(scratch[f * channelCount + channel]))
+            }
+            peak
+        }
     }
 }
