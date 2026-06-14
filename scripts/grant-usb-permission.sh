@@ -12,6 +12,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/common.sh
+source "$ROOT/scripts/lib/common.sh"
+
 SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}"
 ADB="${SDK}/platform-tools/adb"
 
@@ -47,6 +50,10 @@ CACHE_FILE="/data/local/tmp/omt_usb_${FLOW8_VID}_${FLOW8_PID}.bin"
 OVERLAY_NAME="DisableUsbPerm"
 
 wait_for_boot() {
+  if ! omt_adb_is_emulator "$ADB" "${ADB_FLAGS[@]}"; then
+    echo "Refusing to wait for boot on a physical device." >&2
+    return 1
+  fi
   for _ in $(seq 1 120); do
     if "${ADB[@]}" "${ADB_FLAGS[@]}" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' | grep -q '^1$'; then
       if "${ADB[@]}" "${ADB_FLAGS[@]}" shell pm path android >/dev/null 2>&1; then
@@ -75,8 +82,6 @@ find_sysfs_descriptors() {
   " 2>/dev/null | tr -d '\r'
 }
 
-wait_for_boot
-
 grant_usb_uid_in_xml() {
   local uid="$1"
   [[ -z "$uid" ]] && return 0
@@ -101,9 +106,13 @@ sync_usb_package_uids() {
   applied_uids="$("${ADB[@]}" "${ADB_FLAGS[@]}" shell "cat '$uid_marker' 2>/dev/null || true" | tr -d '\r')"
   # Skip system_server restart until both packages are installed (prepare_guest runs before androidTest APK).
   if [[ -n "$app_uid" && -n "$test_uid" && "$current_uids" != "$applied_uids" ]]; then
-    echo "Refreshing USB permissions for app uid=$app_uid test uid=$test_uid..."
-    "${ADB[@]}" "${ADB_FLAGS[@]}" shell killall system_server 2>/dev/null || true
-    wait_for_boot
+    if omt_adb_is_emulator "$ADB" "${ADB_FLAGS[@]}"; then
+      echo "Refreshing USB permissions for app uid=$app_uid test uid=$test_uid..."
+      "${ADB[@]}" "${ADB_FLAGS[@]}" shell killall system_server 2>/dev/null || true
+      wait_for_boot
+    else
+      echo "Physical device: updated usb_permissions.xml only (no system_server restart)."
+    fi
     "${ADB[@]}" "${ADB_FLAGS[@]}" shell "echo '$current_uids' > '$uid_marker'" 2>/dev/null || true
   fi
 }
@@ -123,6 +132,10 @@ wait_for_flow8() {
 }
 
 if [[ "$SYNC_UIDS_ONLY" == true ]]; then
+  if ! omt_adb_is_emulator "$ADB" "${ADB_FLAGS[@]}"; then
+    echo "Physical device: skipping USB permission sync (grant USB in the app when prompted)."
+    exit 0
+  fi
   "${ADB[@]}" "${ADB_FLAGS[@]}" root >/dev/null 2>&1 || true
   sleep 1
   sync_usb_package_uids
@@ -134,6 +147,14 @@ if [[ "$SYNC_UIDS_ONLY" == true ]]; then
   echo "USB package UIDs synced."
   exit 0
 fi
+
+if ! omt_adb_is_emulator "$ADB" "${ADB_FLAGS[@]}"; then
+  echo "grant-usb-permission.sh is for emulators with Flow 8 USB passthrough only." >&2
+  echo "On a physical tablet, grant USB access in the app when prompted — this script will not run." >&2
+  exit 1
+fi
+
+wait_for_boot
 
 if ! wait_for_flow8; then
   echo "Flow 8 not visible in emulator USB host manager." >&2
@@ -174,9 +195,10 @@ FLOW8_NODE="${FLOW8_NODE:-/dev/bus/usb/001/002}"
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell cmd overlay fabricate --target android --name "$OVERLAY_NAME" \
   android:bool/config_disableUsbPermissionDialogs 0x12 0x1 >/dev/null 2>&1 || true
 "${ADB[@]}" "${ADB_FLAGS[@]}" shell cmd overlay enable --user 0 "com.android.shell:${OVERLAY_NAME}" >/dev/null 2>&1 || true
-# Restart system_server once so the USB permission overlay takes effect.
+# Emulator-only: restart system_server once so the USB permission overlay takes effect.
 OVERLAY_MARKER="/data/local/tmp/omt_usb_overlay_applied"
-if ! "${ADB[@]}" "${ADB_FLAGS[@]}" shell "test -f '$OVERLAY_MARKER'" 2>/dev/null; then
+if omt_adb_is_emulator "$ADB" "${ADB_FLAGS[@]}" && \
+  ! "${ADB[@]}" "${ADB_FLAGS[@]}" shell "test -f '$OVERLAY_MARKER'" 2>/dev/null; then
   echo "Restarting system_server once to apply USB permission overlay..."
   "${ADB[@]}" "${ADB_FLAGS[@]}" shell killall system_server 2>/dev/null || true
   wait_for_boot

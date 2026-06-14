@@ -58,3 +58,12 @@ omt_parse_serial_and_mode() {
     esac
   done
 }
+
+# Returns 0 when [adb -s SERIAL …] targets an emulator (not a physical tablet/phone).
+omt_adb_is_emulator() {
+  local adb_bin="${1:-adb}"
+  shift || true
+  local qemu
+  qemu="$("$adb_bin" "$@" shell getprop ro.kernel.qemu 2>/dev/null | tr -d '\r\n')" || true
+  [[ "$qemu" == "1" ]]
+}

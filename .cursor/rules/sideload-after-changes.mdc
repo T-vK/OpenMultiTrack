@@ -8,7 +8,18 @@ alwaysApply: true
 When you finish implementing or fixing something in this Android project:
 
 1. Build the debug APK: `./gradlew :app:assembleDebug` (use `JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64` and `ANDROID_HOME=~/Android/Sdk` if needed).
-2. Sideload to the test tablet: `adb connect 192.168.3.62:45551` then `adb -s 192.168.3.62:45551 install -r app/build/outputs/apk/debug/app-debug.apk`.
+2. Sideload to the test tablet: `adb connect <host:port>` then `adb -s <host:port> install -r app/build/outputs/apk/debug/app-debug.apk`.
 3. Mention sideload success in the summary.
 
 Do this on every completed task that touches the app, unless the user explicitly says not to sideload.
+
+## Physical tablet — do NOT reboot or restart system services
+
+The test tablet uses **wireless adb** (port changes on reconnect). Never on a physical device:
+
+- `adb reboot`
+- `scripts/grant-usb-permission.sh` (runs `killall system_server` on emulators — breaks wireless adb on tablets)
+- `scripts/grant-emulator-usb-host.sh` (explicit reboot)
+- Any command that restarts `system_server` or waits for boot
+
+Sideload is **install -r only**. Grant USB permission in the app UI when prompted.

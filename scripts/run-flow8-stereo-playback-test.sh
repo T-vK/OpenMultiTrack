@@ -64,11 +64,8 @@ log "installing…"
 adb_dev install -r "$ROOT/app/build/outputs/apk/debug/app-debug.apk"
 adb_dev install -r "$ROOT/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
 
-if [[ -x "$ROOT/scripts/grant-usb-permission.sh" ]]; then
-  log "syncing USB permission…"
-  "$ROOT/scripts/grant-usb-permission.sh" --sync-uids-only "$SERIAL" 2>/dev/null || \
-    log "USB permission sync skipped (grant manually if the test cannot open Flow 8)"
-fi
+# Physical tablets: install + instrument only — never run grant-usb-permission.sh
+# (it killall system_server on emulators and drops wireless adb on tablets).
 
 adb_dev get-state >/dev/null 2>&1 || { echo "ERROR: adb device $SERIAL not connected" >&2; exit 1; }
 
