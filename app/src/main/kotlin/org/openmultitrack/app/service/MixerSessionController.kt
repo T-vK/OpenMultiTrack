@@ -1192,15 +1192,19 @@ class MixerSessionController(
                     player.suspendAndAwait()
                 }
             }
-            trace?.mark("soundcheck routing before playback USB route")
-            when (val routing = routingBeforeSoundcheckLocked(dir, metadata)) {
-                RoutingHookResult.Cancelled ->
-                    throw IllegalStateException("Soundcheck routing cancelled")
-                is RoutingHookResult.Failed ->
-                    throw IllegalStateException(routing.message)
-                else -> Unit
-            }
             val ui = _state.value
+            if (ui.appMode != AppMode.SIMPLE_PLAY) {
+                trace?.mark("soundcheck routing before playback USB route")
+                when (val routing = routingBeforeSoundcheckLocked(dir, metadata)) {
+                    RoutingHookResult.Cancelled ->
+                        throw IllegalStateException("Soundcheck routing cancelled")
+                    is RoutingHookResult.Failed ->
+                        throw IllegalStateException(routing.message)
+                    else -> Unit
+                }
+            } else {
+                trace?.mark("simple play — skip OSC routing")
+            }
             val usbOutputs = when (ui.appMode) {
                 AppMode.SIMPLE_PLAY -> 2
                 else -> maxPlaybackChannelsFromProbe(probe).coerceAtLeast(1)
@@ -1208,14 +1212,16 @@ class MixerSessionController(
             trace?.mark("ensurePlaybackRoute usbStream=${usbStream != null} fd=${usbStream?.fd}")
             val route = ensurePlaybackLocked(descriptor, probe, usbOutputs).getOrThrow()
             trace?.mark("route resolved backend=${route.backend}")
-            when (val routingRetry = routingAfterSoundcheckPlaybackStartedLocked()) {
-                RoutingHookResult.Cancelled ->
-                    throw IllegalStateException("Soundcheck routing cancelled")
-                is RoutingHookResult.Failed ->
-                    throw IllegalStateException(routingRetry.message)
-                else -> Unit
+            if (ui.appMode != AppMode.SIMPLE_PLAY) {
+                when (val routingRetry = routingAfterSoundcheckPlaybackStartedLocked()) {
+                    RoutingHookResult.Cancelled ->
+                        throw IllegalStateException("Soundcheck routing cancelled")
+                    is RoutingHookResult.Failed ->
+                        throw IllegalStateException(routingRetry.message)
+                    else -> Unit
+                }
+                trace?.mark("soundcheck routing confirmed with USB route open")
             }
-            trace?.mark("soundcheck routing confirmed with USB route open")
             val mixContext = PlaybackMixContext(
                 appMode = ui.appMode,
                 sessionChannelCount = metadata.channels.size,
@@ -1308,7 +1314,7 @@ class MixerSessionController(
         } else if (hardStop && _state.value.appMode == AppMode.SIMPLE_PLAY) {
             withContext(Dispatchers.IO) { restoreAndroidPlaybackInterfaceLocked() }
         }
-        if (restoreRouting && supportsOscRouting()) {
+        if (restoreRouting && supportsOscRouting() && _state.value.appMode != AppMode.SIMPLE_PLAY) {
             quiesceUsbBeforeRoutingLocked()
             RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
         }
@@ -2147,8 +2153,10 @@ class MixerSessionController(
                 }
                 if (isFlow8Active() && releaseNative) {
                     teardownFlow8UsbPlaybackLocked(trace)
+                } else if (releaseNative && _state.value.appMode == AppMode.SIMPLE_PLAY) {
+                    restoreAndroidPlaybackInterfaceLocked()
                 }
-                if (restoreRouting && supportsOscRouting()) {
+                if (restoreRouting && supportsOscRouting() && _state.value.appMode != AppMode.SIMPLE_PLAY) {
                     quiesceUsbBeforeRoutingLocked()
                     RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
                 }
@@ -2164,6 +2172,7 @@ class MixerSessionController(
     }
 
     private suspend fun routingBeforeSoundcheckLocked(dir: File, metadata: SessionMetadata): RoutingHookResult {
+        if (_state.value.appMode == AppMode.SIMPLE_PLAY) return RoutingHookResult.Skipped
         if (!supportsOscRouting()) return RoutingHookResult.Skipped
         val prof = profile ?: return RoutingHookResult.Skipped
         val trackChannels = SoundcheckTrackChannels.indicesWithTracks(dir, metadata)
@@ -2172,6 +2181,7 @@ class MixerSessionController(
     }
 
     private suspend fun routingAfterSoundcheckPlaybackStartedLocked(): RoutingHookResult {
+        if (_state.value.appMode == AppMode.SIMPLE_PLAY) return RoutingHookResult.Skipped
         if (!supportsOscRouting()) return RoutingHookResult.Skipped
         val prof = profile ?: return RoutingHookResult.Skipped
         return RoutingAutomationBridge.hooks?.afterSoundcheckPlaybackStarted(prof)
