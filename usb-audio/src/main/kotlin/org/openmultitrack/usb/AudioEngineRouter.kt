@@ -295,7 +295,11 @@ object AudioEngineRouter {
             AudioBackend.OBOE -> 0L
         }
 
-    fun startPlayback(route: PlaybackRoute, usbDevice: android.hardware.usb.UsbDevice? = null): NativeEngineStatus {
+    fun startPlayback(
+        route: PlaybackRoute,
+        usbDevice: android.hardware.usb.UsbDevice? = null,
+        ifbCaptureRoute: CaptureRoute? = null,
+    ): NativeEngineStatus {
         val t0 = SystemClock.elapsedRealtime()
         fun mark(phase: String) {
             OmtLog.i("Router", "startPlayback +${SystemClock.elapsedRealtime() - t0}ms $phase")
@@ -317,6 +321,14 @@ object AudioEngineRouter {
                 // native usbdevfs claim is required for reliable isoch OUT (Flow 8 playback).
                 val status = NativeUac2Engine.startPlayback(stream.fd, alt, javaInterfaceClaimed = false)
                 mark("UAC2 start active=${status.active}")
+                if (status.active && ifbCaptureRoute != null && !ifbFeederActive) {
+                    mark("starting IFB feeder after playback open")
+                    val ifb = startIfbFeederCapture(ifbCaptureRoute, usbDevice)
+                    mark("IFB feeder active=${ifb.active}")
+                    if (!ifb.active) {
+                        OmtLog.w("Router", "IFB feeder failed (playback kept): ${ifb.errorMessage}")
+                    }
+                }
                 status
             }
         }
@@ -326,6 +338,7 @@ object AudioEngineRouter {
         val t0 = SystemClock.elapsedRealtime()
         NativeAudioEngine.stopPlayback()
         NativeUac2Engine.stopPlayback()
+        stopIfbFeederCapture()
         OmtLog.i("Router", "stopPlayback +${SystemClock.elapsedRealtime() - t0}ms done")
     }
 

@@ -15,6 +15,7 @@ import org.openmultitrack.sessionio.wav.PerChannelWavReader
 import org.openmultitrack.sessionio.wav.WavReader
 import org.openmultitrack.usb.AudioBackend
 import org.openmultitrack.usb.AudioEngineRouter
+import org.openmultitrack.usb.CaptureRoute
 import org.openmultitrack.usb.PlaybackRoute
 import java.io.File
 import kotlin.math.abs
@@ -127,6 +128,7 @@ class SessionPlayer {
         loopEndFrame: Long? = null,
         loopEnabled: Boolean = false,
         mixContext: PlaybackMixContext? = null,
+        ifbCaptureRoute: CaptureRoute? = null,
     ): Result<Unit> {
         val reader = PerChannelWavReader.open(sessionDir, metadata)
         val inputChannels = reader.channelCount.coerceAtMost(32)
@@ -147,6 +149,7 @@ class SessionPlayer {
             loopEndFrame = loopEndFrame,
             loopEnabled = loopEnabled,
             seek = { frame -> reader.seekFrame(frame) },
+            ifbCaptureRoute = ifbCaptureRoute,
             blockingPrime = if (route.backend == AudioBackend.UAC2) {
                 { scratch, chunkScratch, onFramesSubmitted ->
                     val outScratch = FloatArray(2048 * outputChannels)
@@ -272,6 +275,7 @@ class SessionPlayer {
         loopEndFrame: Long?,
         loopEnabled: Boolean,
         seek: (Long) -> Unit,
+        ifbCaptureRoute: CaptureRoute? = null,
         blockingPrime: ((FloatArray, FloatArray, (Int) -> Unit) -> Unit)? = null,
         run: (scratch: FloatArray, onFramesSubmitted: (Int) -> Unit) -> Unit,
     ): Result<Unit> {
@@ -297,7 +301,7 @@ class SessionPlayer {
             )
         } else {
             trace.mark("starting native engine backend=$backend")
-            val started = AudioEngineRouter.startPlayback(route, usbDevice)
+            val started = AudioEngineRouter.startPlayback(route, usbDevice, ifbCaptureRoute)
             trace.mark("native engine start returned active=${started.active}")
             started
         }
@@ -321,7 +325,7 @@ class SessionPlayer {
         trace.mark("status=PLAYING, launching read loop")
 
         val scratch = FloatArray(2048 * scratchChannels.coerceAtLeast(1))
-        if (blockingPrime != null && backend == AudioBackend.UAC2) {
+        if (blockingPrime != null && backend == AudioBackend.UAC2 && !canReuseWarm) {
             trace.mark("blocking UAC2 ring prime before read loop")
             val chunkScratch = FloatArray(2048 * channels.coerceAtLeast(1))
             blockingPrime(scratch, chunkScratch) { framesWritten ->
@@ -460,7 +464,7 @@ class SessionPlayer {
         requireActiveJob: Boolean = true,
     ) {
         if (activeBackend != AudioBackend.UAC2 || paceSampleRate <= 0) return
-        val target = (paceSampleRate / 5).coerceIn(4_800, 9_600)
+        val target = (paceSampleRate / 10).coerceIn(2_400, 4_800)
         var primed = 0
         while (primed < target && (!requireActiveJob || playbackJob?.isActive == true)) {
             val frames = synchronized(readerLock) {
@@ -505,7 +509,7 @@ class SessionPlayer {
         requireActiveJob: Boolean = true,
     ) {
         if (activeBackend != AudioBackend.UAC2 || paceSampleRate <= 0) return
-        val target = (paceSampleRate / 5).coerceIn(4_800, 9_600)
+        val target = (paceSampleRate / 10).coerceIn(2_400, 4_800)
         var primed = 0
         while (primed < target && (!requireActiveJob || playbackJob?.isActive == true)) {
             val frames = synchronized(readerLock) {

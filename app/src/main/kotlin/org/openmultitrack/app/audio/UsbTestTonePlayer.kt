@@ -29,6 +29,7 @@ class UsbTestTonePlayer {
         route: PlaybackRoute,
         usbDevice: UsbDevice?,
         usbChannelIndex: Int,
+        ifbCaptureRoute: org.openmultitrack.usb.CaptureRoute? = null,
     ): Result<Unit> {
         val trace = TransportTrace("usbTestTone")
         val channelCount = route.channelCount.coerceAtLeast(1)
@@ -42,7 +43,7 @@ class UsbTestTonePlayer {
         val epoch = playbackEpoch
         trace.mark("starting backend=$backend ch=$usbChannelIndex/$channelCount")
 
-        val engineStatus = AudioEngineRouter.startPlayback(route, usbDevice)
+        val engineStatus = AudioEngineRouter.startPlayback(route, usbDevice, ifbCaptureRoute)
         if (!engineStatus.active) {
             activeBackend = null
             return Result.failure(
@@ -129,7 +130,7 @@ class UsbTestTonePlayer {
         chunkScratch: FloatArray,
     ) {
         if (activeBackend != AudioBackend.UAC2 || paceSampleRate <= 0) return
-        val target = (paceSampleRate / 5).coerceIn(4_800, 9_600)
+        val target = (paceSampleRate / 10).coerceIn(2_400, 4_800)
         var primed = 0
         while (primed < target && playbackJob?.isActive == true) {
             val frames = generator.fill(scratch, 2048)

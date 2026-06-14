@@ -18,50 +18,58 @@ The playback alt setting declares a **Feedback Endpoint** association pointing a
 capture `0x81`. The device does not accept a separate explicit feedback EP; timing is
 derived from completed capture IN URBs.
 
-## Linux kernel quirk (reference only)
+## Linux kernel quirk `QUIRK_FLAG_IFB_SILENCE_ON_EMPTY`
 
 Commit [a238120](https://github.com/torvalds/linux/commit/a23812004228d4b041a858b927db787a7ff80f50)
-adds `QUIRK_FLAG_IFB_SILENCE_ON_EMPTY` for FLOW 8 in `snd-usb-audio`: when the
-playback buffer is empty, ALSA sends silence on OUT rather than stalling the implicit
-feedback clock.
+adds this quirk for FLOW 8 in `snd-usb-audio`. It does **not** mean “start capture
+before playback” or “keep multitrack capture running”.
 
-OpenMultiTrack bypasses `snd-usb-audio` and talks to the device through `usbdevfs` /
-libusb in userspace. The quirk is not applied automatically, but the behaviour it
-documents is still required:
+What it fixes: during long playback (5–35 minutes), capture IN URBs can occasionally
+return with every iso frame errored (`-EXDEV`). In `snd_usb_handle_sync_urb()`, that
+looks like `bytes == 0`, which used to skip enqueueing the paired playback OUT URB.
+The OUT ring then starves permanently while ALSA still reports RUNNING.
 
-1. Keep capture IN isoch alive during playback (IFB feeder).
-2. Prime the playback ring before sending non-silent OUT (initial silence is OK).
-3. Do not re-gate to silence after the stream is armed — that advances the host
-   playhead while the mixer hears zeros (silent USB returns).
+With the quirk, ALSA still enqueues a `packet_info` with zero-length packets so
+`prepare_outbound_urb` emits **silence** and the OUT ring keeps moving.
+
+OpenMultiTrack bypasses `snd-usb-audio`, but the same behaviour applies in spirit:
+after the playback stream is armed, always keep submitting OUT URBs (silence pads on
+underrun). Do not stop the OUT isoch loop when the ring is temporarily empty.
+
+This quirk is **orthogonal** to the IFB feeder: the feeder keeps capture IN alive for
+implicit feedback timing; the quirk covers glitchy capture URBs during sustained
+playback.
 
 ## OpenMultiTrack implementation
 
-### IFB feeder capture
+### Handoff order (crash avoidance)
 
-Before starting UAC2 playback on FLOW 8:
+FLOW 8 firmware locks up if **application multitrack capture** and playback compete.
+Our sequence:
 
-1. Stop normal multitrack capture (`forceStopAllRecording`).
-2. Short settle delay (`PRE_PLAYBACK_DELAY_MS`).
-3. Start **IFB feeder** on the capture route via `NativeUac2Engine.startIfbFeederCapture`:
-   submits capture IN URBs and discards PCM (`ifb_feeder_mode_` in `uac2_capture.cpp`).
-4. Start playback OUT on interface 1.
+1. Stop multitrack capture (`forceStopAllRecording`) and settle (~120 ms) when needed.
+2. Open **playback OUT** first (`NativeUac2Engine.startPlayback`).
+3. Start **IFB feeder** on the capture route (`startIfbFeederCapture`) — IN isoch
+   runs but PCM is discarded.
+4. On pause/stop (suspend), keep the native playback engine and IFB feeder warm for
+   instant resume. Full USB teardown only on hard stop (leave soundcheck, disconnect).
 
-The feeder is stopped in `teardownFlow8UsbPlaybackLocked` and when preparing for
-capture again.
+Do **not** start the IFB feeder before playback open or tear down playback on every
+play press — that was causing firmware crashes and multi-second start latency.
 
 ### Playback ring arming
 
 `uac2_playback.cpp` uses a one-shot `stream_armed_` flag: hold silence until the ring
-reaches `playbackMinPrimeFrames()` (~100 ms), then send real PCM even if the ring
+reaches `playbackMinPrimeFrames()` (~50 ms), then send real PCM even if the ring
 later runs low (count underruns, pad with zeros for that URB only).
 
 ### Backend preference
 
-On Android tablets, libusb is tried before usbdevfs for both IFB feeder and playback
-open paths — usbdevfs `USBDEVFS_SUBMITURB` often returns `EINVAL` while libusb works.
+On Android tablets, libusb is tried before usbdevfs for playback and IFB feeder open
+paths — usbdevfs `USBDEVFS_SUBMITURB` often returns `EINVAL` while libusb works.
 
 ## Future work
 
 True IFB pacing would submit each playback OUT URB when a capture IN URB completes
 (same model as ALSA `snd_usb_handle_sync_urb`), instead of wall-clock libusb
-re-submission. The IFB feeder is the minimal fix to keep the feedback clock running.
+re-submission. The IFB feeder plus silence-on-underrun is the current pragmatic fix.
