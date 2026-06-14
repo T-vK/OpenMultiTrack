@@ -75,11 +75,6 @@ class UsbAudioStreamHandle private constructor(
                 "open ${device.deviceName} vid=${device.vendorId} pid=${device.productId}",
             )
 
-            val nodePath = device.deviceName.takeIf { it.startsWith("/dev/bus/usb/") }
-            if (nodePath != null) {
-                openDeviceNode(nodePath)?.let { return it }
-            }
-
             val connection = runCatching { usbManager.openDevice(device) }
                 .onFailure { OmtLog.w("UsbStream", "openDevice exception for ${device.deviceName}", it) }
                 .getOrNull()
@@ -89,6 +84,17 @@ class UsbAudioStreamHandle private constructor(
                     "openDevice ok fd=${connection.fileDescriptor} +${SystemClock.elapsedRealtime() - t0}ms",
                 )
                 return UsbAudioStreamHandle(connection, null)
+            }
+
+            val nodePath = device.deviceName.takeIf { it.startsWith("/dev/bus/usb/") }
+            if (nodePath != null) {
+                openDeviceNode(nodePath)?.let {
+                    OmtLog.i(
+                        "UsbStream",
+                        "openDeviceNode ok fd=${it.fd} +${SystemClock.elapsedRealtime() - t0}ms",
+                    )
+                    return it
+                }
             }
 
             OmtLog.w(
@@ -102,10 +108,10 @@ class UsbAudioStreamHandle private constructor(
         fun openDeviceNode(path: String): UsbAudioStreamHandle? {
             return runCatching {
                 val pfd = ParcelFileDescriptor.open(File(path), ParcelFileDescriptor.MODE_READ_WRITE)
-                OmtLog.i("UsbStream", "opened device node $path fd=${pfd.fd}")
+                OmtLog.d("UsbStream", "opened device node $path fd=${pfd.fd}")
                 UsbAudioStreamHandle(null, pfd)
             }.onFailure {
-                OmtLog.w("UsbStream", "openDeviceNode failed for $path", it)
+                OmtLog.d("UsbStream", "openDeviceNode failed for $path: ${it.message}")
             }.getOrNull()
         }
     }

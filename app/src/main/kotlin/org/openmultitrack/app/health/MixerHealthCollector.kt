@@ -74,7 +74,8 @@ object MixerHealthCollector {
 
     private fun buildIssues(session: MixerSessionUiState?, usb: UsbHealth): List<HealthIssue> {
         val issues = mutableListOf<HealthIssue>()
-        if (session?.isUsbDegraded == true) {
+        val usbActuallyHealthy = usb.attached && usb.probeState == ProbeState.OK
+        if (session?.isUsbDegraded == true && !usbActuallyHealthy) {
             issues += HealthIssue(
                 code = "usb_degraded",
                 severity = HealthLevel.DEGRADED,

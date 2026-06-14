@@ -72,4 +72,29 @@ class MixerHealthCollectorTest {
         assertThat(snapshot.primaryIssue).isNull()
         assertThat(snapshot.overall).isEqualTo(HealthLevel.OK)
     }
+
+    @Test
+    fun staleUsbDegradedIgnoredWhenProbeHealthy() {
+        val session = MixerSessionUiState(
+            mixerId = flow8Profile.id,
+            appMode = AppMode.VIRTUAL_SOUNDCHECK,
+            selectedSoundcheckDir = "/data/session",
+            isUsbDegraded = true,
+            warningMessage = "No USB audio — waiting for device. Recording silence if active.",
+            probe = org.openmultitrack.usb.FullUsbProbeResult(
+                usb = flow8Usb,
+                input = null,
+                output = null,
+                uac2Caps = null,
+            ),
+        )
+        val snapshot = MixerHealthCollector.collect(
+            profile = flow8Profile,
+            session = session,
+            availableUsb = listOf(flow8Usb),
+            usbPermissionGranted = true,
+        )
+        assertThat(snapshot.issues.none { it.code == "usb_degraded" }).isTrue()
+        assertThat(snapshot.overall).isEqualTo(HealthLevel.OK)
+    }
 }

@@ -207,6 +207,7 @@ class MixerSessionController(
     fun setProbeResult(descriptor: UsbAudioDeviceDescriptor, probe: FullUsbProbeResult) {
         activeDescriptor = descriptor
         activeProbe = probe
+        clearUsbDegradedState()
         val playbackCh = maxPlaybackChannelsFromProbe(probe)
         if (_state.value.isRecording) {
             _state.update {
@@ -261,6 +262,7 @@ class MixerSessionController(
         refreshStorageEstimate()
         scope.launch {
             captureMutex.withLock {
+                if (!isActiveMixer()) return@withLock
                 if (profile?.let(VirtualMixer::isDemoMixer) != true) {
                     withContext(Dispatchers.IO) {
                         ensureUsbStreamOpenLocked(descriptor)
@@ -1201,10 +1203,13 @@ class MixerSessionController(
             AppMode.SIMPLE_PLAY -> "Playing stereo mix to USB 1+2"
             else -> "Playing to USB returns"
         }
+        captureEngine.setUsbDegraded(false)
+        clearUsbDegradedState()
         _state.update {
             it.copy(
                 isPlaying = true,
                 transportState = TransportState.PLAYING,
+                isUsbDegraded = false,
                 statusMessage = statusMessage,
                 warningMessage = null,
                 playbackChannelCount = maxPlaybackChannelsFromProbe(probe),
@@ -1917,6 +1922,23 @@ class MixerSessionController(
 
     fun isUsbCaptureWarm(): Boolean = captureEngine.isUsbStreamHealthy()
 
+    private fun clearUsbDegradedState() {
+        if (!_state.value.isUsbDegraded && !captureEngine.isUsbDegraded) return
+        captureEngine.setUsbDegraded(false)
+        _state.update { state ->
+            state.copy(
+                isUsbDegraded = false,
+                warningMessage = state.warningMessage.takeUnless(::isUsbDetachWarning),
+            )
+        }
+    }
+
+    private fun isUsbDetachWarning(message: String?): Boolean {
+        if (message.isNullOrBlank()) return false
+        return message.startsWith("No USB audio", ignoreCase = true) ||
+            message.startsWith("USB reconnected but audio failed", ignoreCase = true)
+    }
+
     fun onUsbDetached(deviceName: String?) {
         val desc = activeDescriptor ?: return
         if (deviceName == null || deviceName != desc.deviceName) return
@@ -1929,10 +1951,17 @@ class MixerSessionController(
             }
         }
         captureEngine.setUsbDegraded(true)
+        val detachWarning = when {
+            _state.value.isRecording ->
+                "No USB audio — waiting for device. Recording silence if active."
+            _state.value.appMode.isPlaybackMode ->
+                "No USB audio — reconnect the cable to play back."
+            else -> "No USB audio — waiting for device."
+        }
         _state.update {
             it.copy(
                 isUsbDegraded = true,
-                warningMessage = "No USB audio — waiting for device. Recording silence if active.",
+                warningMessage = detachWarning,
                 transportState = if (it.isRecording) TransportState.RECORDING_DEGRADED else it.transportState,
             )
         }
@@ -1993,6 +2022,7 @@ class MixerSessionController(
                 return@launch
             }
             captureEngine.setUsbDegraded(false)
+            clearUsbDegradedState()
             _state.update {
                 it.copy(
                     isUsbDegraded = false,
@@ -2694,9 +2724,13 @@ class MixerSessionController(
     ): Result<Int> {
         val capT0 = System.nanoTime()
         updateWaveformConfig()
+        fun captureSuccess(count: Int): Result<Int> {
+            clearUsbDegradedState()
+            return Result.success(count)
+        }
         if (VirtualMixer.isDemoMixer(profile ?: return Result.failure(IllegalStateException("No mixer profile")))) {
             if (captureEngine.isCaptureActive && captureEngine.isSyntheticCapture()) {
-                return Result.success(captureEngine.activeChannelCount)
+                return captureSuccess(captureEngine.activeChannelCount)
             }
             return captureEngine.startSyntheticCapture(
                 scope = scope,
@@ -2706,7 +2740,7 @@ class MixerSessionController(
             ).map {
                 syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
                 captureEngine.activeChannelCount
-            }
+            }.also { if (it.isSuccess) clearUsbDegradedState() }
         }
         if (_state.value.appMode == AppMode.MULTITRACK_RECORD &&
             captureEngine.isUsbStreamHealthy() &&
@@ -2715,7 +2749,7 @@ class MixerSessionController(
             if (!captureEngine.isCaptureActive) {
                 captureEngine.ensureFanoutRunning(scope).getOrThrow()
             }
-            return Result.success(
+            return captureSuccess(
                 captureEngine.activeChannelCount.coerceAtLeast(channelCountFromProbe(probe)),
             )
         }
@@ -2726,7 +2760,7 @@ class MixerSessionController(
             if (!captureEngine.isCaptureActive) {
                 captureEngine.ensureFanoutRunning(scope).getOrThrow()
             }
-            return Result.success(captureEngine.activeChannelCount)
+            return captureSuccess(captureEngine.activeChannelCount)
         }
         if (captureEngine.isCaptureActive && !captureEngine.isUsbDegraded && captureEngine.isNativeCaptureOwner()) {
             val receiveWindowMs = when {
@@ -2736,21 +2770,21 @@ class MixerSessionController(
             }
             if (captureEngine.isReceivingAudio(receiveWindowMs)) {
                 val count = channelCountFromProbe(probe)
-                return Result.success(count)
+                return captureSuccess(count)
             }
             if (isRecordingTransport() || captureEngine.isNativePcmRecording()) {
                 OmtLog.i(
                     "MixerSession",
                     "Capture active during recording for $mixerId — keeping stream",
                 )
-                return Result.success(captureEngine.activeChannelCount)
+                return captureSuccess(captureEngine.activeChannelCount)
             }
             if (_state.value.appMode == AppMode.MULTITRACK_RECORD) {
                 OmtLog.i(
                     "MixerSession",
                     "Capture active in record mode for $mixerId — keeping stream despite brief stall",
                 )
-                return Result.success(captureEngine.activeChannelCount)
+                return captureSuccess(captureEngine.activeChannelCount)
             } else {
                 OmtLog.w("MixerSession", "Capture active but not receiving audio for $mixerId — restarting capture")
                 withContext(Dispatchers.IO) { captureEngine.stopCapture() }
@@ -2769,7 +2803,7 @@ class MixerSessionController(
         val device = enumerator.getUsbDevice(descriptor.deviceName)
             ?: return Result.failure(IllegalStateException("USB device not found"))
         if (isRecordingTransport() && captureEngine.isCaptureActive && captureEngine.isNativeCaptureOwner()) {
-            return Result.success(captureEngine.activeChannelCount)
+            return captureSuccess(captureEngine.activeChannelCount)
         }
         if (isFlow8Active() && !isRecordingTransport() && !_state.value.appMode.isPlaybackMode) {
             val recordMode = _state.value.appMode == AppMode.MULTITRACK_RECORD
@@ -2792,7 +2826,7 @@ class MixerSessionController(
                     "ch=${captureEngine.activeChannelCount}",
             )
             captureEngine.activeChannelCount
-        }
+        }.also { if (it.isSuccess) clearUsbDegradedState() }
     }
 
     private fun syncChannelStripsToCaptureCount(captureCh: Int) {

@@ -99,6 +99,7 @@ import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
 import org.openmultitrack.domain.channel.ChannelStripState
 import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.domain.mixer.MixerRoutingConfig
+import org.openmultitrack.domain.mixer.ProbeState
 import org.openmultitrack.domain.remote.RemoteConnectionState
 import org.openmultitrack.domain.remote.RemoteRole
 import org.openmultitrack.domain.remote.RemoteProtocol
@@ -592,7 +593,13 @@ fun DawMainScreen(
                             )
                         }
                     }
-                    session?.warningMessage?.let { WarningBanner(it) }
+                    session?.warningMessage
+                        ?.takeUnless { msg ->
+                            activeMixerHealth?.usb?.attached == true &&
+                                activeMixerHealth?.usb?.probeState == ProbeState.OK &&
+                                msg.startsWith("No USB audio", ignoreCase = true)
+                        }
+                        ?.let { WarningBanner(it) }
                     when {
                         session?.appMode?.isPlaybackMode == true -> session?.let { s ->
                             SoundcheckPanel(
