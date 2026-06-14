@@ -2,6 +2,7 @@ package org.openmultitrack.app.service
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.media.AudioManager
 import android.os.Bundle
 import android.os.SystemClock
 import android.support.v4.media.MediaMetadataCompat
@@ -22,6 +23,8 @@ class PlaybackMediaNotification(
     private var albumArt: Bitmap? = null
 
     init {
+        @Suppress("DEPRECATION")
+        mediaSession.setPlaybackToLocal(AudioManager.STREAM_MUSIC)
         mediaSession.setCallback(
             object : MediaSessionCompat.Callback() {
                 override fun onPlay() = dispatchPlaybackToggle()

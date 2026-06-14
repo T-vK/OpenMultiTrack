@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.provider.Settings
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
@@ -142,6 +143,7 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalComposeUiApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        volumeControlStream = AudioManager.STREAM_MUSIC
         requestNotificationPermissionIfNeeded()
         registerUsbReceiver()
         setContent {

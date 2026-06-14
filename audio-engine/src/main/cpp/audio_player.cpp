@@ -61,6 +61,8 @@ PlayerStatus AudioPlayer::start(int32_t deviceId, int32_t channelCount, int32_t 
 
     oboe::AudioStreamBuilder builder;
     builder.setDirection(oboe::Direction::Output);
+    builder.setUsage(oboe::Usage::Media);
+    builder.setContentType(oboe::ContentType::Music);
     builder.setDeviceId(deviceId);
     builder.setSampleRate(sampleRate);
     builder.setChannelCount(channelCount);

@@ -23,6 +23,7 @@ import org.openmultitrack.app.audio.CaptureSessionEngine
 import org.openmultitrack.app.audio.VirtualDevicePlayback
 import org.openmultitrack.app.audio.LiveWaveformSnapshot
 import org.openmultitrack.app.audio.MonitorMixConfig
+import org.openmultitrack.app.audio.PlaybackAudioFocus
 import org.openmultitrack.app.audio.PlaybackMixContext
 import org.openmultitrack.app.audio.SessionPlayer
 import org.openmultitrack.app.audio.TransportTrace
@@ -841,6 +842,7 @@ class MixerSessionController(
                         TransportTraceHub.finish(mixerId, "playback started")
                     } catch (e: Exception) {
                         OmtLog.e("MixerSession", "toggleSoundcheckPlayback failed", e)
+                        PlaybackAudioFocus.abandon(appContext)
                         player.stopAndAwait()
                         stopPlaybackStatusUpdates()
                         _state.update {
@@ -1251,6 +1253,9 @@ class MixerSessionController(
                     resolveFlow8IfbCaptureRoute()
                 },
             ).getOrThrow()
+            if (route.backend == AudioBackend.OBOE) {
+                PlaybackAudioFocus.request(appContext)
+            }
             trace?.mark("player.playSession returned")
         }
         val statusMessage = when (_state.value.appMode) {
@@ -1302,6 +1307,7 @@ class MixerSessionController(
         if (!skipStateUpdate) {
             stopPlaybackStatusUpdates()
         }
+        PlaybackAudioFocus.abandon(appContext)
         if (hardStop) {
             player.stopAndAwait()
             trace?.mark("hard stop complete")
@@ -2130,6 +2136,7 @@ class MixerSessionController(
         if (cancelStatusJob) {
             stopPlaybackStatusUpdates()
         }
+        PlaybackAudioFocus.abandon(appContext)
         _state.update {
             it.copy(
                 isPlaying = false,
