@@ -31,12 +31,29 @@ constexpr size_t kMinVerifyFrames = 48;
 bool Uac2Capture::waitForIncomingFrames(int timeout_ms) {
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    const size_t bpf = bytesPerFrame(alt_.format);
+    const size_t min_ifb_bytes = bpf > 0 ? bpf * kMinVerifyFrames : kMinVerifyFrames;
     while (std::chrono::steady_clock::now() < deadline && running_.load()) {
-        if (ring_ != nullptr && ring_->availableFrames() >= kMinVerifyFrames) {
+        if (ifb_feeder_mode_) {
+            if (ifb_ingest_bytes_.load() >= min_ifb_bytes) {
+                OMT_LOGI("uac2 capture ifb-feeder verify ok bytes=%llu",
+                         static_cast<unsigned long long>(ifb_ingest_bytes_.load()));
+                return true;
+            }
+        } else if (ring_ != nullptr && ring_->availableFrames() >= kMinVerifyFrames) {
             OMT_LOGI("uac2 capture verify ok frames=%zu", ring_->availableFrames());
             return true;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    if (ifb_feeder_mode_) {
+        const uint64_t bytes = ifb_ingest_bytes_.load();
+        if (bytes > 0) {
+            OMT_LOGW("uac2 capture ifb-feeder verify timeout with only %llu bytes (need %zu)",
+                     static_cast<unsigned long long>(bytes),
+                     min_ifb_bytes);
+        }
+        return bytes >= min_ifb_bytes;
     }
     const size_t available = ring_ != nullptr ? ring_->availableFrames() : 0;
     if (available > 0) {
@@ -82,6 +99,7 @@ CaptureStatus Uac2Capture::open(int usb_fd,
     alt_ = alt;
     java_interface_claimed_ = java_interface_claimed;
     ifb_feeder_mode_ = ifb_feeder;
+    ifb_ingest_bytes_.store(0);
     channel_count_ = alt.format.channels;
     sample_rate_ = static_cast<int32_t>(alt.format.sample_rate_hz);
     if (!ifb_feeder_mode_) {
@@ -295,6 +313,7 @@ void Uac2Capture::closeUnlocked() {
     usb_fd_ = -1;
     java_interface_claimed_ = false;
     ifb_feeder_mode_ = false;
+    ifb_ingest_bytes_.store(0);
     alt_ = {};
     channel_count_ = 0;
     sample_rate_ = 0;
@@ -457,6 +476,7 @@ void Uac2Capture::pcmFileWriterLoop() {
 void Uac2Capture::ingestPcmBytes(const uint8_t* bytes, size_t byte_count) {
     if (byte_count == 0) return;
     if (ifb_feeder_mode_) {
+        ifb_ingest_bytes_.fetch_add(byte_count);
         return;
     }
     const size_t bpf = bytesPerFrame(alt_.format);

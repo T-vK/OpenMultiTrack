@@ -334,6 +334,12 @@ object AudioEngineRouter {
         }
     }
 
+    fun setPlaybackOutputHold(hold: Boolean, backend: AudioBackend) {
+        if (backend == AudioBackend.UAC2) {
+            NativeUac2Engine.setPlaybackOutputHold(hold)
+        }
+    }
+
     fun stopPlayback() {
         val t0 = SystemClock.elapsedRealtime()
         NativeAudioEngine.stopPlayback()

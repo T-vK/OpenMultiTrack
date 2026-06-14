@@ -50,7 +50,8 @@ Our sequence:
 1. Stop multitrack capture (`forceStopAllRecording`) and settle (~120 ms) when needed.
 2. Open **playback OUT** first (`NativeUac2Engine.startPlayback`).
 3. Start **IFB feeder** on the capture route (`startIfbFeederCapture`) — IN isoch
-   runs but PCM is discarded.
+   runs but PCM is discarded. Open verification counts ingested bytes (not the
+   capture ring, which IFB mode does not use).
 4. On pause/stop (suspend), keep the native playback engine and IFB feeder warm for
    instant resume. Full USB teardown only on hard stop (leave soundcheck, disconnect).
 

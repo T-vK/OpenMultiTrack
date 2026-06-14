@@ -36,6 +36,9 @@ public:
     PlaybackStatus open(int usb_fd, const Uac2AltSetting& alt, bool java_interface_claimed = false);
     void close();
 
+    /** When held, OUT URBs emit silence without draining the ring (pause/suspend). */
+    void setOutputHold(bool hold);
+
     size_t writeFrames(const float* src, size_t frame_count);
     uint64_t underrunFrames() const { return underrun_frames_.load(); }
 
@@ -83,6 +86,7 @@ private:
     std::atomic<uint32_t> libusb_error_streak_{0};
 
     std::atomic<bool> stream_armed_{false};
+    std::atomic<bool> output_hold_{false};
 
     std::unique_ptr<openmultitrack::SpscRingBuffer> ring_;
 };

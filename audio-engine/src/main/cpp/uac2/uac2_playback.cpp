@@ -49,6 +49,7 @@ PlaybackStatus Uac2Playback::open(int usb_fd, const Uac2AltSetting& alt, bool ja
     underrun_frames_.store(0);
     libusb_error_streak_.store(0);
     stream_armed_.store(false);
+    output_hold_.store(false);
 
     if (usb_fd < 0 || !alt.format.valid) {
         PlaybackStatus status;
@@ -251,6 +252,7 @@ void Uac2Playback::closeUnlocked() {
     usb_fd_ = -1;
     java_interface_claimed_ = false;
     stream_armed_.store(false);
+    output_hold_.store(false);
     alt_ = {};
     channel_count_ = 0;
     sample_rate_ = 0;
@@ -259,6 +261,15 @@ void Uac2Playback::closeUnlocked() {
 
 size_t Uac2Playback::playbackMinPrimeFrames() const {
     return std::max<size_t>(static_cast<size_t>(sample_rate_ / 10), 2'400);
+}
+
+void Uac2Playback::setOutputHold(bool hold) {
+    output_hold_.store(hold);
+    if (hold) {
+        OMT_LOGI("uac2 playback output hold enabled");
+    } else {
+        OMT_LOGI("uac2 playback output hold released");
+    }
 }
 
 size_t Uac2Playback::writeFrames(const float* src, size_t frame_count) {
@@ -290,7 +301,7 @@ bool Uac2Playback::fillUrbBuffer(uint8_t* dest, size_t byte_capacity, size_t* fr
         stream_armed_.store(true);
         OMT_LOGI("uac2 playback stream armed frames=%zu", available);
     }
-    const bool hold_silence = !stream_armed_.load();
+    const bool hold_silence = !stream_armed_.load() || output_hold_.load();
     const size_t got = (!hold_silence && ring_ != nullptr)
         ? ring_->popFrames(scratch.data(), max_frames)
         : 0;

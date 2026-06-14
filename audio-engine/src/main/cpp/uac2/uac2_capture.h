@@ -87,7 +87,8 @@ private:
     int usb_fd_ = -1;
     bool java_interface_claimed_ = false;
     bool libusb_owns_interface_ = false;
-    bool ifb_feeder_mode_ = false;
+    std::atomic<bool> ifb_feeder_mode_ = false;
+    std::atomic<uint64_t> ifb_ingest_bytes_{0};
     Uac2AltSetting alt_{};
     int32_t channel_count_ = 0;
     int32_t sample_rate_ = 0;

@@ -241,6 +241,9 @@ class SessionPlayer {
         val job = playbackJob
         playbackJob = null
         job?.cancel()
+        if (activeBackend == AudioBackend.UAC2) {
+            AudioEngineRouter.setPlaybackOutputHold(true, AudioBackend.UAC2)
+        }
         trace.mark("read loop cancelled, keeping native engine warm=$nativePlaybackWarm backend=$activeBackend")
         job?.join()
         val pos = status.positionFrames
@@ -293,6 +296,13 @@ class SessionPlayer {
         val canReuseWarm = nativePlaybackWarm && activeBackend == backend
         val engineStatus = if (canReuseWarm) {
             trace.mark("reusing warm native engine backend=$backend")
+            if (ifbCaptureRoute != null && !AudioEngineRouter.isIfbFeederActive()) {
+                trace.mark("starting IFB feeder on warm resume")
+                val ifb = AudioEngineRouter.startIfbFeederCapture(ifbCaptureRoute, usbDevice)
+                if (!ifb.active) {
+                    OmtLog.w("Player", "IFB feeder failed on warm resume: ${ifb.errorMessage}")
+                }
+            }
             NativeEngineStatus(
                 active = true,
                 channelCount = route.channelCount,
@@ -311,6 +321,9 @@ class SessionPlayer {
             nativePlaybackWarm = false
             seekReader = null
             return Result.failure(IllegalStateException(engineStatus.errorMessage ?: "Playback failed"))
+        }
+        if (backend == AudioBackend.UAC2) {
+            AudioEngineRouter.setPlaybackOutputHold(false, AudioBackend.UAC2)
         }
         activeBackend = backend
         nativePlaybackWarm = true
@@ -334,6 +347,8 @@ class SessionPlayer {
             resetUac2PaceAnchor(status.positionFrames)
             val primedFrames = status.positionFrames - startFrame
             trace.mark("UAC2 ring primed $primedFrames frames (position=${status.positionFrames})")
+        } else if (blockingPrime != null && backend == AudioBackend.UAC2 && canReuseWarm) {
+            trace.mark("warm UAC2 resume — ring retained via output hold")
         }
         previous?.cancel()
         var loggedFirstWrite = false

@@ -226,6 +226,14 @@ Java_org_openmultitrack_audio_NativeUac2Engine_nativeStartPlayback(
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_org_openmultitrack_audio_NativeUac2Engine_nativeSetPlaybackOutputHold(
+    JNIEnv* /*env*/,
+    jobject /*thiz*/,
+    jboolean hold) {
+    openmultitrack::uac2::Uac2Playback::instance().setOutputHold(hold == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_org_openmultitrack_audio_NativeUac2Engine_nativeStopPlayback(
     JNIEnv* /*env*/,
     jobject /*thiz*/) {

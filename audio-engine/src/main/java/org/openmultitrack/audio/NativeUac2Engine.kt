@@ -57,6 +57,10 @@ object NativeUac2Engine {
         nativeStopPlayback()
     }
 
+    fun setPlaybackOutputHold(hold: Boolean) {
+        nativeSetPlaybackOutputHold(hold)
+    }
+
     fun writePlaybackFrames(src: FloatArray, frameCount: Int): Int =
         nativeWritePlaybackFrames(src, frameCount)
 
@@ -103,6 +107,8 @@ object NativeUac2Engine {
     ): NativeEngineStatus
 
     private external fun nativeStopPlayback()
+
+    private external fun nativeSetPlaybackOutputHold(hold: Boolean)
 
     private external fun nativeWritePlaybackFrames(src: FloatArray, frameCount: Int): Int
 
