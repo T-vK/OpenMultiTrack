@@ -34,68 +34,21 @@ internal object Xr18RoutingOsc {
     suspend fun readAllSnapshotNames(client: OscUdpClient): List<MixerSnapshotOption> {
         client.send(OscPath.xremote())
         Thread.sleep(50)
-        val merged = linkedMapOf<String, List<Any>>()
-        for (batch in (1..64).chunked(16)) {
-            val paths = batch.map { OscPath.snapSlotName(it) }
-            merged.putAll(
-                client.query(
-                    paths,
-                    timeoutMs = 4000,
-                    rounds = 5,
-                    label = "snap batch ${batch.first()}-${batch.last()}",
-                ),
-            )
-        }
-        val results = (1..64).map { slot -> snapshotOption(slot, merged) }.toMutableList()
-        for (slot in 1..64) {
-            if (results[slot - 1].name.isNotBlank()) continue
-            for (path in OscPath.snapSlotNameQueryPaths(slot)) {
-                if (merged.containsKey(path)) continue
-                val replies = client.query(
-                    paths = listOf(path),
-                    timeoutMs = 600,
-                    rounds = 2,
-                    label = "snap path $slot",
-                )
-                merged.putAll(replies)
-                val name = snapshotOption(slot, merged).name
-                if (name.isNotBlank()) {
-                    results[slot - 1] = MixerSnapshotOption(slot, name)
-                    break
-                }
-            }
-        }
-        for (slot in 1..64) {
-            if (results[slot - 1].name.isNotBlank()) continue
-            client.send(OscPath.snapIndex(), listOf(OscArgument.IntArg(slot)))
+        return (1..64).map { slot ->
             val replies = client.query(
-                paths = listOf(OscPath.snapName()),
-                timeoutMs = 600,
-                rounds = 2,
-                label = "snap index $slot",
+                OscPath.snapSlotNameQueryPaths(slot),
+                timeoutMs = 900,
+                rounds = 3,
+                label = "snap#$slot",
             )
-            val name = oscString(replies[OscPath.snapName()]?.firstOrNull()).orEmpty().trim()
-            if (name.isNotBlank()) {
-                results[slot - 1] = MixerSnapshotOption(slot, name)
-            }
+            MixerSnapshotOption(slot, MixerSnapshotNames.resolveFromReplies(slot, replies))
         }
-        return results
     }
 
     fun parseSnapshotNames(replies: Map<String, List<Any>>): List<MixerSnapshotOption> =
-        (1..64).map { slot -> snapshotOption(slot, replies) }
-
-    private fun snapshotOption(slot: Int, replies: Map<String, List<Any>>): MixerSnapshotOption {
-        val padded = slot.toString().padStart(2, '0')
-        val path = OscPath.snapSlotName(slot)
-        val raw = oscString(replies[path]?.firstOrNull())
-            ?: replies.entries.firstOrNull { (replyPath, _) ->
-                replyPath.startsWith("/-snap/$padded/name")
-            }?.value?.firstOrNull()?.let { oscString(it) }
-        return MixerSnapshotOption(slot, raw?.trim().orEmpty())
-    }
-
-    private fun oscString(value: Any?): String? = value as? String
+        (1..64).map { slot ->
+            MixerSnapshotOption(slot, MixerSnapshotNames.resolveFromReplies(slot, replies))
+        }
 
     fun readChannel(replies: Map<String, List<Any>>, channelIndex: Int): XAirChannelInputState? {
         val ch = channelIndex + 1

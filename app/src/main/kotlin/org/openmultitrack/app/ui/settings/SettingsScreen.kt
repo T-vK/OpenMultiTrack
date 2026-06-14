@@ -764,11 +764,12 @@ private fun snapshotSlotLabel(
 ): String = when (slot) {
     0 -> "Not set"
     else -> {
+        val pad = slot.toString().padStart(2, '0')
         val name = snapshots.find { it.slot == slot }?.name.orEmpty()
         when {
             name.isNotBlank() -> name
-            loading -> "…"
-            else -> "${slot.toString().padStart(2, '0')} (empty)"
+            loading -> "Slot $pad…"
+            else -> "Slot $pad (empty)"
         }
     }
 }

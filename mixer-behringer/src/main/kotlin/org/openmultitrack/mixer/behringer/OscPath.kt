@@ -31,15 +31,10 @@ object OscPath {
     fun snapSlotNameQueryPaths(slot: Int): List<String> {
         require(slot in 1..64) { "snapshot slot must be 1..64, got $slot" }
         val oneBased = slot.toString().padStart(2, '0')
-        val zeroBased = (slot - 1).toString().padStart(2, '0')
-        return buildList {
-            add("/-snap/$oneBased/name/01")
-            add("/-snap/$oneBased/name")
-            if (zeroBased != oneBased) {
-                add("/-snap/$zeroBased/name/01")
-                add("/-snap/$zeroBased/name")
-            }
-        }
+        return listOf(
+            "/-snap/$oneBased/name/01",
+            "/-snap/$oneBased/name",
+        )
     }
 
     fun snapshotRecall(slot: Int): String = "/snap/recall/$slot"

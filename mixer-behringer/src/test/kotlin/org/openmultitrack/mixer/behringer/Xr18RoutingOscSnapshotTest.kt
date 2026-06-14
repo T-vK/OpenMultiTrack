@@ -12,18 +12,14 @@ class Xr18RoutingOscSnapshotTest {
     }
 
     @Test
-    fun snapSlotNameQueryPaths_includesCommonVariants() {
+    fun snapSlotNameQueryPaths_usesOneBasedSlotPaths() {
         assertThat(OscPath.snapSlotNameQueryPaths(1)).containsExactly(
             "/-snap/01/name/01",
             "/-snap/01/name",
-            "/-snap/00/name/01",
-            "/-snap/00/name",
         )
         assertThat(OscPath.snapSlotNameQueryPaths(10)).containsExactly(
             "/-snap/10/name/01",
             "/-snap/10/name",
-            "/-snap/09/name/01",
-            "/-snap/09/name",
         )
     }
 
@@ -40,5 +36,16 @@ class Xr18RoutingOscSnapshotTest {
         assertThat(parsed[1]).isEqualTo(MixerSnapshotOption(2, "Record routing"))
         assertThat(parsed[2]).isEqualTo(MixerSnapshotOption(3, "Soundcheck"))
         assertThat(parsed[3]).isEqualTo(MixerSnapshotOption(4, ""))
+    }
+
+    @Test
+    fun parseSnapshotNames_stripsPlaceholderDash() {
+        val replies = mapOf(
+            OscPath.snapSlotName(1) to listOf("-"),
+            OscPath.snapSlotName(2) to listOf("My scene"),
+        )
+        val parsed = Xr18RoutingOsc.parseSnapshotNames(replies)
+        assertThat(parsed[0]).isEqualTo(MixerSnapshotOption(1, ""))
+        assertThat(parsed[1]).isEqualTo(MixerSnapshotOption(2, "My scene"))
     }
 }
