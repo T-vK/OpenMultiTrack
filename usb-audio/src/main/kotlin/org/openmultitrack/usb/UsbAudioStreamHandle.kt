@@ -52,6 +52,20 @@ class UsbAudioStreamHandle private constructor(
         return false
     }
 
+    fun releaseInterface(device: UsbDevice, interfaceNumber: Int): Boolean {
+        val conn = connection ?: return false
+        for (i in 0 until device.interfaceCount) {
+            val iface = device.getInterface(i)
+            if (iface.id != interfaceNumber) continue
+            val released = runCatching { conn.releaseInterface(iface) }
+                .onFailure { OmtLog.w("UsbStream", "releaseInterface exception iface=$interfaceNumber", it) }
+                .getOrDefault(false)
+            OmtLog.i("UsbStream", "releaseInterface $interfaceNumber → $released")
+            return released
+        }
+        return false
+    }
+
     override fun close() {
         val t0 = SystemClock.elapsedRealtime()
         runCatching { connection?.close() }

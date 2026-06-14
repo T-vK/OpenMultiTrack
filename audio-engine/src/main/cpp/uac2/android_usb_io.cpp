@@ -265,4 +265,34 @@ UsbIoStatus releaseInterface(int usb_fd, uint8_t interface_number) {
     return ok;
 }
 
+UsbIoStatus reattachKernelDriver(int usb_fd, uint8_t interface_number) {
+    if (usb_fd < 0) {
+        return fail("invalid fd", EINVAL);
+    }
+    usbdevfs_ioctl cmd{};
+    cmd.ifno = static_cast<int>(interface_number);
+    cmd.ioctl_code = USBDEVFS_CONNECT;
+    cmd.data = nullptr;
+    if (ioctl(usb_fd, USBDEVFS_IOCTL, &cmd) < 0) {
+        if (errno == ENODEV || errno == EINVAL || errno == EBUSY) {
+            OMT_LOGI("usb_io CONNECT iface=%u skipped (%s)",
+                     interface_number,
+                     std::strerror(errno));
+            UsbIoStatus ok;
+            ok.ok = true;
+            return ok;
+        }
+        return fail("CONNECT", errno);
+    }
+    OMT_LOGI("usb_io reattached kernel driver on iface=%u", interface_number);
+    UsbIoStatus ok;
+    ok.ok = true;
+    return ok;
+}
+
+UsbIoStatus restorePlaybackInterfaceToAndroid(int usb_fd, uint8_t interface_number) {
+    (void)releaseInterface(usb_fd, interface_number);
+    return reattachKernelDriver(usb_fd, interface_number);
+}
+
 }  // namespace openmultitrack::uac2

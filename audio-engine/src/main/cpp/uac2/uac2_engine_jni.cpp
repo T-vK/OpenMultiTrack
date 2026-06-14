@@ -1,3 +1,4 @@
+#include "android_usb_io.h"
 #include "uac2_capture.h"
 #include "uac2_playback.h"
 
@@ -238,6 +239,19 @@ Java_org_openmultitrack_audio_NativeUac2Engine_nativeStopPlayback(
     JNIEnv* /*env*/,
     jobject /*thiz*/) {
     openmultitrack::uac2::Uac2Playback::instance().close();
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_openmultitrack_audio_NativeUac2Engine_nativeRestorePlaybackInterfaceToAndroid(
+    JNIEnv* /*env*/,
+    jobject /*thiz*/,
+    jint usbFd,
+    jint interfaceNumber) {
+    const openmultitrack::uac2::UsbIoStatus status =
+        openmultitrack::uac2::restorePlaybackInterfaceToAndroid(
+            static_cast<int>(usbFd),
+            static_cast<uint8_t>(interfaceNumber));
+    return status.ok ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jint JNICALL

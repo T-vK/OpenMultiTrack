@@ -183,6 +183,63 @@ object AudioEngineRouter {
         return null
     }
 
+    /**
+     * Stereo playback through Android's audio stack (Oboe/AAudio).
+     * Used by Simple Play mode so the kernel keeps the USB playback interface.
+     */
+    fun resolveOboePlaybackRoute(
+        probe: FullUsbProbeResult,
+        sampleRateHz: Int = 48_000,
+        maxChannels: Int = 2,
+    ): PlaybackRoute? {
+        val oboeOut = probe.output?.takeIf { it.isSuccess } ?: return null
+        val channels = minOf(maxChannels, oboeOut.channelCount).coerceAtLeast(1)
+        OmtLog.i("Router", "playback → Oboe (simple) ${channels}ch deviceId=${oboeOut.deviceId}")
+        return PlaybackRoute(
+            backend = AudioBackend.OBOE,
+            oboeDeviceId = oboeOut.deviceId,
+            channelCount = channels,
+            sampleRate = oboeOut.sampleRate.takeIf { it > 0 } ?: sampleRateHz,
+        )
+    }
+
+    fun playbackInterfaceForRestore(probe: FullUsbProbeResult): NativeUac2AltSetting? {
+        val uac2 = probe.uac2Caps ?: return null
+        if (!uac2.parseOk) return null
+        return NativeUac2Probe.selectBestPlaybackAlt(uac2, 2, 48_000)
+    }
+
+    /**
+     * Stop UAC2/IFB playback and return the playback AS interface to the kernel driver
+     * so Android system audio and Oboe can use the device again.
+     */
+    fun restoreAndroidPlayback(
+        usbStream: UsbAudioStreamHandle?,
+        usbDevice: android.hardware.usb.UsbDevice?,
+        playbackAlt: NativeUac2AltSetting?,
+    ) {
+        val t0 = SystemClock.elapsedRealtime()
+        stopPlayback()
+        val alt = playbackAlt ?: run {
+            OmtLog.w("Router", "restoreAndroidPlayback skipped — no playback alt")
+            return
+        }
+        val fd = usbStream?.fd ?: run {
+            OmtLog.w("Router", "restoreAndroidPlayback skipped — no usb fd")
+            return
+        }
+        if (fd < 0) return
+        if (usbDevice != null) {
+            usbStream.releaseInterface(usbDevice, alt.interfaceNumber)
+        }
+        val ok = NativeUac2Engine.restorePlaybackInterfaceToAndroid(fd, alt.interfaceNumber)
+        OmtLog.i(
+            "Router",
+            "restoreAndroidPlayback iface=${alt.interfaceNumber} → $ok " +
+                "+${SystemClock.elapsedRealtime() - t0}ms",
+        )
+    }
+
     fun startRecording(
         route: CaptureRoute,
         ownerId: String,

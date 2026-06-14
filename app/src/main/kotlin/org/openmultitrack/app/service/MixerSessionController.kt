@@ -338,13 +338,25 @@ class MixerSessionController(
             scope.launch {
                 captureMutex.withLock {
                     withContext(Dispatchers.IO) {
-                        if (isFlow8Active()) {
-                            prepareFlow8UsbForPlaybackLocked()
-                        } else {
-                            prepareUsbForPlaybackLocked()
+                        if (player.isPlaying) player.stopAndAwait()
+                        if (testTonePlayer.isPlaying) {
+                            testTonePlayer.stopAndAwait()
+                            _state.update { it.copy(usbTestToneActiveChannel = null) }
+                        }
+                        when (mode) {
+                            AppMode.SIMPLE_PLAY -> restoreAndroidPlaybackInterfaceLocked()
+                            else -> {
+                                if (isFlow8Active()) {
+                                    prepareFlow8UsbForPlaybackLocked()
+                                } else {
+                                    prepareUsbForPlaybackLocked()
+                                }
+                            }
                         }
                     }
-                    warmPlaybackRouteLocked()
+                    if (mode != AppMode.SIMPLE_PLAY) {
+                        warmPlaybackRouteLocked()
+                    }
                 }
             }
             _state.update {
@@ -506,6 +518,10 @@ class MixerSessionController(
 
     private suspend fun warmPlaybackRouteLocked() {
         if (!_state.value.appMode.isPlaybackMode) return
+        if (_state.value.appMode == AppMode.SIMPLE_PLAY) {
+            withContext(Dispatchers.IO) { restoreAndroidPlaybackInterfaceLocked() }
+            return
+        }
         if (isSoundcheckTransportActive()) {
             OmtLog.d("MixerSession", "warmPlaybackRoute skipped — soundcheck transport active")
             return
@@ -1150,17 +1166,23 @@ class MixerSessionController(
                 testTonePlayer.stopAndAwait()
                 _state.update { it.copy(usbTestToneActiveChannel = null) }
             }
-            if (isFlow8Active()) {
-                trace?.mark("preparing FLOW 8 USB for playback")
-                if (flow8PlaybackHandoffNeeded()) {
-                    prepareFlow8UsbForPlaybackLocked()
-                } else {
-                    trace?.mark("FLOW 8 USB already playback-ready")
+            when (_state.value.appMode) {
+                AppMode.SIMPLE_PLAY -> {
+                    trace?.mark("restoring Android playback for simple play")
+                    restoreAndroidPlaybackInterfaceLocked()
                 }
-            } else {
-                trace?.mark("preparing USB for playback")
-                prepareUsbForPlaybackLocked()
-                trace?.mark("USB prepared for playback")
+                else -> if (isFlow8Active()) {
+                    trace?.mark("preparing FLOW 8 USB for playback")
+                    if (flow8PlaybackHandoffNeeded()) {
+                        prepareFlow8UsbForPlaybackLocked()
+                    } else {
+                        trace?.mark("FLOW 8 USB already playback-ready")
+                    }
+                } else {
+                    trace?.mark("preparing USB for playback")
+                    prepareUsbForPlaybackLocked()
+                    trace?.mark("USB prepared for playback")
+                }
             }
             if (player.isPlaying) {
                 trace?.mark("player still playing, stopping first")
@@ -1179,7 +1201,10 @@ class MixerSessionController(
                 else -> Unit
             }
             val ui = _state.value
-            val usbOutputs = maxPlaybackChannelsFromProbe(probe).coerceAtLeast(1)
+            val usbOutputs = when (ui.appMode) {
+                AppMode.SIMPLE_PLAY -> 2
+                else -> maxPlaybackChannelsFromProbe(probe).coerceAtLeast(1)
+            }
             trace?.mark("ensurePlaybackRoute usbStream=${usbStream != null} fd=${usbStream?.fd}")
             val route = ensurePlaybackLocked(descriptor, probe, usbOutputs).getOrThrow()
             trace?.mark("route resolved backend=${route.backend}")
@@ -1214,7 +1239,11 @@ class MixerSessionController(
                 loopEndFrame = loopEnd,
                 loopEnabled = ui.soundcheckLoopEnabled,
                 mixContext = mixContext,
-                ifbCaptureRoute = resolveFlow8IfbCaptureRoute(),
+                ifbCaptureRoute = if (ui.appMode == AppMode.SIMPLE_PLAY) {
+                    null
+                } else {
+                    resolveFlow8IfbCaptureRoute()
+                },
             ).getOrThrow()
             trace?.mark("player.playSession returned")
         }
@@ -1276,6 +1305,8 @@ class MixerSessionController(
         }
         if (flow8 && hardStop) {
             teardownFlow8UsbPlaybackLocked(trace)
+        } else if (hardStop && _state.value.appMode == AppMode.SIMPLE_PLAY) {
+            withContext(Dispatchers.IO) { restoreAndroidPlaybackInterfaceLocked() }
         }
         if (restoreRouting && supportsOscRouting()) {
             quiesceUsbBeforeRoutingLocked()
@@ -2956,13 +2987,33 @@ class MixerSessionController(
         val stream = ensureUsbStreamOpenLocked(descriptor)
             ?: return Result.failure(IllegalStateException("Could not open USB device"))
         activeUsbDevice = device
-        val route = AudioEngineRouter.resolvePlaybackRoute(probe, stream, channelCount)
-            ?: return Result.failure(IllegalStateException("No playback route"))
+        val route = if (_state.value.appMode == AppMode.SIMPLE_PLAY) {
+            AudioEngineRouter.resolveOboePlaybackRoute(probe, sampleRateHz = 48_000, maxChannels = 2)
+        } else {
+            AudioEngineRouter.resolvePlaybackRoute(probe, stream, channelCount)
+        }
+            ?: return Result.failure(IllegalStateException(
+                if (_state.value.appMode == AppMode.SIMPLE_PLAY) {
+                    "No Android stereo playback device"
+                } else {
+                    "No playback route"
+                },
+            ))
         TransportTraceHub.mark(
             mixerId,
             "ensurePlayback ${(System.nanoTime() - playT0) / 1_000_000}ms backend=${route.backend}",
         )
         return Result.success(route)
+    }
+
+    private suspend fun restoreAndroidPlaybackInterfaceLocked() {
+        val probe = activeProbe ?: return
+        val descriptor = activeDescriptor ?: return
+        if (profile?.let(VirtualMixer::isDemoMixer) == true) return
+        ensureUsbStreamOpenLocked(descriptor)
+        activeUsbDevice = activeUsbDevice ?: enumerator.getUsbDevice(descriptor.deviceName)
+        val alt = AudioEngineRouter.playbackInterfaceForRestore(probe) ?: return
+        AudioEngineRouter.restoreAndroidPlayback(usbStream, activeUsbDevice, alt)
     }
 
     private fun maxPlaybackChannelsFromProbe(probe: FullUsbProbeResult): Int =

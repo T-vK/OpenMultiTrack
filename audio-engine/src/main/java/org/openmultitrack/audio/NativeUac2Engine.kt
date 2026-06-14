@@ -57,6 +57,10 @@ object NativeUac2Engine {
         nativeStopPlayback()
     }
 
+    /** Release userspace playback claim and reattach snd-usb-audio for Android/Oboe. */
+    fun restorePlaybackInterfaceToAndroid(usbFd: Int, interfaceNumber: Int): Boolean =
+        nativeRestorePlaybackInterfaceToAndroid(usbFd, interfaceNumber)
+
     fun setPlaybackOutputHold(hold: Boolean) {
         nativeSetPlaybackOutputHold(hold)
     }
@@ -107,6 +111,11 @@ object NativeUac2Engine {
     ): NativeEngineStatus
 
     private external fun nativeStopPlayback()
+
+    private external fun nativeRestorePlaybackInterfaceToAndroid(
+        usbFd: Int,
+        interfaceNumber: Int,
+    ): Boolean
 
     private external fun nativeSetPlaybackOutputHold(hold: Boolean)
 
