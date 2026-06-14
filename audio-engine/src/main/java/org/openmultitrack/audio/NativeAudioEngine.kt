@@ -30,6 +30,10 @@ object NativeAudioEngine {
 
     fun playbackUnderrunFrames(): Long = nativePlaybackUnderrunFrames()
 
+    fun isPlaybackRunning(): Boolean = nativeIsPlaybackRunning()
+
+    private external fun nativeIsPlaybackRunning(): Boolean
+
     private external fun nativeStartRecording(
         deviceId: Int,
         channelCount: Int,

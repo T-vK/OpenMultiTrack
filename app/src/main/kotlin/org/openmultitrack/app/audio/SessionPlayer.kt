@@ -7,6 +7,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.openmultitrack.audio.NativeEngineStatus
+import org.openmultitrack.audio.NativeAudioEngine
+import org.openmultitrack.audio.NativeUac2Engine
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.session.TransportState
 import org.openmultitrack.domain.session.TransportStatus
@@ -44,6 +46,10 @@ class SessionPlayer {
 
     val isPlaying: Boolean
         get() = playbackJob?.isActive == true && status.state == TransportState.PLAYING
+
+    fun isNativePlaybackWarm(): Boolean = nativePlaybackWarm
+
+    fun activePlaybackBackend(): AudioBackend? = activeBackend
 
     fun meterLevelsSnapshot(): Map<Int, Float> {
         val count = meterChannelCount
@@ -293,7 +299,12 @@ class SessionPlayer {
         seekReader = seek
         trace.mark("preparing backend=$backend warm=$nativePlaybackWarm activeBackend=$activeBackend label=$label")
 
-        val canReuseWarm = nativePlaybackWarm && activeBackend == backend
+        val canReuseWarm = nativePlaybackWarm &&
+            activeBackend == backend &&
+            isNativePlaybackRunning(backend)
+        if (nativePlaybackWarm && !canReuseWarm) {
+            nativePlaybackWarm = false
+        }
         val engineStatus = if (canReuseWarm) {
             trace.mark("reusing warm native engine backend=$backend")
             if (ifbCaptureRoute != null && !AudioEngineRouter.isIfbFeederActive()) {
@@ -627,6 +638,15 @@ class SessionPlayer {
         status = TransportStatus(state = TransportState.IDLE)
         trace.mark("done")
     }
+
+    fun needsUsbInterfaceRestore(): Boolean =
+        nativePlaybackWarm && activeBackend == AudioBackend.UAC2
+
+    private fun isNativePlaybackRunning(backend: AudioBackend): Boolean =
+        when (backend) {
+            AudioBackend.OBOE -> NativeAudioEngine.isPlaybackRunning()
+            AudioBackend.UAC2 -> NativeUac2Engine.isPlaybackRunning()
+        }
 
     private fun stopNative() {
         val backend = activeBackend

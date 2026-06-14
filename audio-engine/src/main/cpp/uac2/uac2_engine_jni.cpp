@@ -242,6 +242,13 @@ Java_org_openmultitrack_audio_NativeUac2Engine_nativeStopPlayback(
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
+Java_org_openmultitrack_audio_NativeUac2Engine_nativeIsPlaybackRunning(
+    JNIEnv* /*env*/,
+    jobject /*thiz*/) {
+    return openmultitrack::uac2::Uac2Playback::instance().isRunning() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
 Java_org_openmultitrack_audio_NativeUac2Engine_nativeRestorePlaybackInterfaceToAndroid(
     JNIEnv* /*env*/,
     jobject /*thiz*/,

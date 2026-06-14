@@ -42,6 +42,8 @@ public:
     size_t writeFrames(const float* src, size_t frame_count);
     uint64_t underrunFrames() const { return underrun_frames_.load(); }
 
+    bool isRunning() const { return running_.load(); }
+
 private:
     enum class IoBackend { None, Libusb, Usbdevfs };
 

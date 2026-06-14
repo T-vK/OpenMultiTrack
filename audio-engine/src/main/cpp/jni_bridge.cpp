@@ -159,6 +159,13 @@ Java_org_openmultitrack_audio_NativeAudioEngine_nativeStopPlayback(
     openmultitrack::AudioPlayer::instance().stop();
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_openmultitrack_audio_NativeAudioEngine_nativeIsPlaybackRunning(
+    JNIEnv* /*env*/,
+    jobject /*thiz*/) {
+    return openmultitrack::AudioPlayer::instance().status().playing ? JNI_TRUE : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_org_openmultitrack_audio_NativeAudioEngine_nativeWritePlaybackFrames(
     JNIEnv* env,

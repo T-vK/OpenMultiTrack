@@ -345,7 +345,11 @@ class MixerSessionController(
                             _state.update { it.copy(usbTestToneActiveChannel = null) }
                         }
                         when (mode) {
-                            AppMode.SIMPLE_PLAY -> restoreAndroidPlaybackInterfaceLocked()
+                            AppMode.SIMPLE_PLAY -> {
+                                if (player.needsUsbInterfaceRestore() || AudioEngineRouter.isIfbFeederActive()) {
+                                    restoreAndroidPlaybackInterfaceLocked()
+                                }
+                            }
                             else -> {
                                 if (isFlow8Active()) {
                                     prepareFlow8UsbForPlaybackLocked()
@@ -520,7 +524,9 @@ class MixerSessionController(
     private suspend fun warmPlaybackRouteLocked() {
         if (!_state.value.appMode.isPlaybackMode) return
         if (_state.value.appMode == AppMode.SIMPLE_PLAY) {
-            withContext(Dispatchers.IO) { restoreAndroidPlaybackInterfaceLocked() }
+            if (player.needsUsbInterfaceRestore() || AudioEngineRouter.isIfbFeederActive()) {
+                withContext(Dispatchers.IO) { restoreAndroidPlaybackInterfaceLocked() }
+            }
             return
         }
         if (isSoundcheckTransportActive()) {
@@ -1170,8 +1176,12 @@ class MixerSessionController(
             }
             when (_state.value.appMode) {
                 AppMode.SIMPLE_PLAY -> {
-                    trace?.mark("restoring Android playback for simple play")
-                    restoreAndroidPlaybackInterfaceLocked()
+                    if (player.needsUsbInterfaceRestore() || AudioEngineRouter.isIfbFeederActive()) {
+                        trace?.mark("restoring Android playback after UAC2")
+                        restoreAndroidPlaybackInterfaceLocked()
+                    } else {
+                        trace?.mark("simple play — skip USB restore (Oboe path)")
+                    }
                 }
                 else -> if (isFlow8Active()) {
                     trace?.mark("preparing FLOW 8 USB for playback")
@@ -2215,6 +2225,7 @@ class MixerSessionController(
             var lastPosSec = -1f
             var idleChecks = 0
             var lastAdvanceMs = System.currentTimeMillis()
+            var playbackStartedAtMs = lastAdvanceMs
             var loggedFirstCursorAdvance = false
             val endToleranceFrames = (sampleRate * PlaybackTransportPolicy.END_TOLERANCE_SEC)
                 .toLong()
@@ -2291,10 +2302,15 @@ class MixerSessionController(
                     lastPosSec >= 0f &&
                     durSec > 0f &&
                     posSec < durSec - 0.25f &&
+                    System.currentTimeMillis() - playbackStartedAtMs > 1_500L &&
                     System.currentTimeMillis() - lastAdvanceMs >
                         if (isFlow8Active()) 4_500L else 2_500L
                 ) {
-                    OmtLog.w("MixerSession", "playback stalled at ${posSec}s — stopping")
+                    OmtLog.w(
+                        "MixerSession",
+                        "playback stalled at ${posSec}s backend=${player.activePlaybackBackend()} " +
+                            "warm=${player.isNativePlaybackWarm()} — stopping",
+                    )
                     org.openmultitrack.app.util.AppLogBuffer.append(
                         "W",
                         "Transport",

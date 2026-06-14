@@ -70,6 +70,10 @@ object NativeUac2Engine {
 
     fun playbackUnderrunFrames(): Long = nativePlaybackUnderrunFrames()
 
+    fun isPlaybackRunning(): Boolean = nativeIsPlaybackRunning()
+
+    private external fun nativeIsPlaybackRunning(): Boolean
+
     private external fun nativeStartCapture(
         usbFd: Int,
         alt: NativeUac2AltSetting,
