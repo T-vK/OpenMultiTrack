@@ -16,9 +16,11 @@ import org.openmultitrack.app.test.RequiresUsbDevice
 import org.openmultitrack.app.test.UsbAppProcessRule
 import org.openmultitrack.app.test.UsbDeviceRule
 import org.openmultitrack.app.test.UsbInstrumentedPermission
+import org.openmultitrack.audio.NativeUac2Probe
 import org.openmultitrack.usb.AudioBackend
 import org.openmultitrack.usb.AudioEngineRouter
 import org.openmultitrack.usb.Flow8UsbPlaybackProfile
+import org.openmultitrack.usb.PlaybackRoute
 import org.openmultitrack.usb.FullUsbProbeResult
 import org.openmultitrack.usb.UsbAudioEnumerator
 import org.openmultitrack.usb.UsbAudioProbeService
@@ -49,11 +51,8 @@ class Flow8StereoPlaybackInstrumentedTest {
             AudioEngineRouter.forceStopAllRecording()
             delay(Flow8UsbPlaybackProfile.PRE_PLAYBACK_DELAY_MS)
 
-            val playbackRoute = AudioEngineRouter.resolvePlaybackRoute(
-                probe,
-                stream,
-                Flow8UsbPlaybackProfile.USB_PLAYBACK_CHANNELS,
-            ) ?: error("No UAC2 playback route")
+            val playbackRoute = resolveFlow8Uac2PlaybackRoute(probe, stream)
+                ?: error("No UAC2 playback route — is Flow 8 connected?")
             assertThat(playbackRoute.backend).isEqualTo(AudioBackend.UAC2)
             assertThat(playbackRoute.channelCount).isAtLeast(2)
 
@@ -166,6 +165,25 @@ class Flow8StereoPlaybackInstrumentedTest {
             val sleepMs = ((ahead - headroomFrames) * 1_000L / sampleRate).coerceIn(1L, 50L)
             delay(sleepMs)
         }
+    }
+
+    private fun resolveFlow8Uac2PlaybackRoute(
+        probe: FullUsbProbeResult,
+        stream: UsbAudioStreamHandle,
+    ): PlaybackRoute? {
+        val caps = probe.uac2Caps?.takeIf { it.parseOk } ?: return null
+        val alt = NativeUac2Probe.selectBestPlaybackAlt(
+            caps,
+            Flow8UsbPlaybackProfile.USB_PLAYBACK_CHANNELS,
+            48_000,
+        )?.takeIf { it.formatValid && it.channels >= 2 } ?: return null
+        return PlaybackRoute(
+            backend = AudioBackend.UAC2,
+            usbStream = stream,
+            uac2Alt = alt,
+            channelCount = alt.channels,
+            sampleRate = alt.sampleRateHz.takeIf { it > 0 } ?: 48_000,
+        )
     }
 
     private fun probeOnAppProcess(): FullUsbProbeResult = usbAppProcessRule.runOnActivity { activity ->
