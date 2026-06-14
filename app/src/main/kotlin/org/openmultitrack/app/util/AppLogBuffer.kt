@@ -45,7 +45,7 @@ object AppLogBuffer {
     const val MAX_BUFFER_LINES = 1_500
 
     /** Maximum lines rendered in the log viewer UI (tail only). */
-    const val MAX_DISPLAY_LINES = 600
+    const val MAX_DISPLAY_LINES = 200
 
     /** Maximum lines loaded from each persisted session file for display. */
     private const val MAX_PERSISTED_DISPLAY_LINES = 400

@@ -140,6 +140,11 @@ class MixerSessionController(
     private val isActiveMixer: () -> Boolean = { true },
     private val requestVuMeterSync: () -> Unit = {},
 ) {
+    /** Set true to emit periodic ch1/ch2 VU debug lines (noisy during normal use). */
+    private companion object {
+        const val VU_METER_PERIODIC_DEBUG_LOGS = false
+    }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val captureEngine = CaptureSessionEngine(mixerId)
     private val player = SessionPlayer()
@@ -157,7 +162,6 @@ class MixerSessionController(
     private var usbTestToneBurstJob: Job? = null
     private var playbackStatusJob: Job? = null
     private var profile: MixerProfile? = null
-    private var lastVuLogNs = 0L
     private var lastMediaProgressSec = -1
     private var recordingWakeLock: PowerManager.WakeLock? = null
     private var routingConfig: MixerRoutingConfig = MixerRoutingConfig()
@@ -2514,9 +2518,7 @@ class MixerSessionController(
                         refreshStorageEstimateOffMain()
                     }
                     val levels = captureEngine.captureMeterLevels()
-                    val nowNs = System.nanoTime()
-                    if (nowNs - lastVuLogNs >= 2_000_000_000L) {
-                        lastVuLogNs = nowNs
+                    if (VU_METER_PERIODIC_DEBUG_LOGS) {
                         val rawPeaks = captureEngine.debugRawMeterPeaks()
                         val ch1 = levels[0] ?: 0f
                         val ch2 = levels[1] ?: 0f
