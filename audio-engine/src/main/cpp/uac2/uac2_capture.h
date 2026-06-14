@@ -42,7 +42,9 @@ public:
     uint64_t droppedFrames() const { return dropped_frames_.load(); }
 
     /** Drains the capture ring to a raw interleaved PCM file on a native thread (high throughput). */
-    bool startPcmFileRecording(const std::string& path);
+    bool startPcmFileRecording(const std::string& path, bool reset_capture_ring = true);
+    /** Keeps the file writer running but opens a new output path (session dir at record press). */
+    bool switchPcmFileRecording(const std::string& path);
     void stopPcmFileRecording();
     uint64_t pcmFileFramesWritten() const { return file_frames_written_.load(); }
     bool isPcmFileRecording() const { return file_recording_.load(); }

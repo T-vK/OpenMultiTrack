@@ -26,7 +26,12 @@ object NativeUac2Engine {
 
     fun captureDroppedFrames(): Long = nativeCaptureDroppedFrames()
 
-    fun startPcmFileRecording(path: String): Boolean = nativeStartPcmFileRecording(path)
+    fun startPcmFileRecording(path: String, resetCaptureRing: Boolean = true): Boolean =
+        nativeStartPcmFileRecording(path, resetCaptureRing)
+
+    fun switchPcmFileRecording(path: String): Boolean = nativeSwitchPcmFileRecording(path)
+
+    fun isPcmFileRecording(): Boolean = nativeIsPcmFileRecording()
 
     fun stopPcmFileRecording() {
         nativeStopPcmFileRecording()
@@ -67,7 +72,11 @@ object NativeUac2Engine {
 
     private external fun nativeCaptureDroppedFrames(): Long
 
-    private external fun nativeStartPcmFileRecording(path: String): Boolean
+    private external fun nativeStartPcmFileRecording(path: String, resetCaptureRing: Boolean): Boolean
+
+    private external fun nativeSwitchPcmFileRecording(path: String): Boolean
+
+    private external fun nativeIsPcmFileRecording(): Boolean
 
     private external fun nativeStopPcmFileRecording()
 

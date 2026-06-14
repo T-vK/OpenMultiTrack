@@ -220,9 +220,21 @@ object AudioEngineRouter {
             AudioBackend.UAC2 -> NativeUac2Engine.captureDroppedFrames()
         }
 
-    fun startNativePcmFileRecording(path: String, backend: AudioBackend): Boolean =
+    fun startNativePcmFileRecording(path: String, backend: AudioBackend, resetCaptureRing: Boolean = true): Boolean =
         when (backend) {
-            AudioBackend.UAC2 -> NativeUac2Engine.startPcmFileRecording(path)
+            AudioBackend.UAC2 -> NativeUac2Engine.startPcmFileRecording(path, resetCaptureRing)
+            AudioBackend.OBOE -> false
+        }
+
+    fun switchNativePcmFileRecording(path: String, backend: AudioBackend): Boolean =
+        when (backend) {
+            AudioBackend.UAC2 -> NativeUac2Engine.switchPcmFileRecording(path)
+            AudioBackend.OBOE -> false
+        }
+
+    fun isNativePcmFileRecording(backend: AudioBackend): Boolean =
+        when (backend) {
+            AudioBackend.UAC2 -> NativeUac2Engine.isPcmFileRecording()
             AudioBackend.OBOE -> false
         }
 

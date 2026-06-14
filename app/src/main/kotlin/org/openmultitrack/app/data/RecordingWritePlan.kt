@@ -15,6 +15,12 @@ data class RecordingWritePlan(
     val liveCaptureStagingFile: File?,
 ) {
     companion object {
+        /** Scratch file for pre-arming the native PCM writer (no session timestamp). */
+        fun prearmStagingFile(resolver: RecordingStorageResolver, mixerFolderName: String): File {
+            val dir = File(resolver.localSpillRoot(), mixerFolderName).apply { mkdirs() }
+            return File(dir, ".prearm_capture.raw")
+        }
+
         fun create(
             resolver: RecordingStorageResolver,
             settings: AppSettingsStore,

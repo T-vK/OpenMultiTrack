@@ -1539,6 +1539,15 @@ class MainViewModel(
         return _uiState.value.sessionByMixer.values.any { it.isRecording }
     }
 
+    private fun isAnyMixerTransportActive(): Boolean =
+        _uiState.value.sessionByMixer.values.any { session ->
+            session.isRecording ||
+                session.isPlaying ||
+                session.transportState == TransportState.RECORDING ||
+                session.transportState == TransportState.RECORDING_DEGRADED ||
+                session.transportState == TransportState.PLAYING
+        }
+
     private fun clearInterruptedRecordingIfNeeded(mixerId: String) {
         if (IncompleteRecordingStore.recoverableSession(appContext, settings, mixerId) == null) {
             _uiState.update { it.copy(interruptedRecordings = it.interruptedRecordings - mixerId) }
@@ -1995,6 +2004,13 @@ class MainViewModel(
     }
 
     private suspend fun importScribbleForMixerLocked(profile: MixerProfile, backgroundRefresh: Boolean = false) {
+        if (backgroundRefresh) {
+            if (profile.id != _uiState.value.activeMixerId) return
+            if (isAnyMixerTransportActive()) {
+                OmtLog.i("ViewModel", "skipped OSC scribble refresh — transport active on another mixer")
+                return
+            }
+        }
         val flow8 = ScribbleImportSupport.supportsFlow8(profile)
         val previousFingerprint = if (backgroundRefresh) scribbleStripCache.loadFingerprint(profile.id) else null
         if (shouldShowScribbleStatus(profile, backgroundRefresh)) {
@@ -2280,7 +2296,9 @@ class MainViewModel(
                 resolvedProfile.id,
             ) != null
             if (!resumePending) {
-                if (ScribbleImportSupport.supportsOsc(resolvedProfile)) {
+                if (ScribbleImportSupport.supportsOsc(resolvedProfile) &&
+                    resolvedProfile.id == _uiState.value.activeMixerId
+                ) {
                     onOscMixerReady(resolvedProfile.id)
                 } else if (
                     ScribbleImportSupport.supportsFlow8(resolvedProfile) &&
@@ -2326,6 +2344,10 @@ class MainViewModel(
     }
 
     private fun onOscMixerReady(mixerId: String) {
+        if (mixerId != _uiState.value.activeMixerId) {
+            OmtLog.d("ViewModel", "skipped OSC scribble for inactive mixer $mixerId")
+            return
+        }
         val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
         if (!ScribbleImportSupport.supportsOsc(profile)) return
         val session = _uiState.value.sessionByMixer[mixerId]
@@ -2352,6 +2374,11 @@ class MainViewModel(
     private fun maybeBackgroundRefreshOscScribble(mixerId: String, quiet: Boolean) {
         val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return
         if (!ScribbleImportSupport.supportsOsc(profile)) return
+        if (mixerId != _uiState.value.activeMixerId) return
+        if (isAnyMixerTransportActive()) {
+            OmtLog.i("ViewModel", "skipped OSC scribble refresh — transport active")
+            return
+        }
         if (IncompleteRecordingStore.recoverableSession(appContext, settings, mixerId) != null) {
             AppLogBuffer.append("I", "Scribble", "Skipped OSC scribble refresh — interrupted recording pending")
             return

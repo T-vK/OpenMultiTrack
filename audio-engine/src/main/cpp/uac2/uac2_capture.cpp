@@ -303,13 +303,15 @@ int32_t Uac2Capture::captureBytesPerFrame() const {
     return static_cast<int32_t>(bytesPerFrame(alt_.format));
 }
 
-bool Uac2Capture::startPcmFileRecording(const std::string& path) {
+bool Uac2Capture::startPcmFileRecording(const std::string& path, bool reset_capture_ring) {
     std::lock_guard<std::mutex> lock(mutex_);
     stopPcmFileRecordingUnlocked();
     if (ring_ == nullptr || !running_.load()) {
         return false;
     }
-    ring_->reset();
+    if (reset_capture_ring) {
+        ring_->reset();
+    }
     FILE* file = std::fopen(path.c_str(), "wb");
     if (file == nullptr) {
         OMT_LOGE("uac2 pcm file open failed: %s", std::strerror(errno));
@@ -327,7 +329,38 @@ bool Uac2Capture::startPcmFileRecording(const std::string& path) {
     file_frames_written_.store(0);
     file_recording_.store(true);
     file_writer_ = std::thread(&Uac2Capture::pcmFileWriterLoop, this);
-    OMT_LOGI("uac2 pcm file recording started path=%s", path.c_str());
+    OMT_LOGI("uac2 pcm file recording started path=%s reset_ring=%d",
+             path.c_str(),
+             reset_capture_ring ? 1 : 0);
+    return true;
+}
+
+bool Uac2Capture::switchPcmFileRecording(const std::string& path) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!file_recording_.load() || !file_writer_.joinable()) {
+        return startPcmFileRecording(path, false);
+    }
+    if (file_ring_ != nullptr) {
+        file_ring_->reset();
+    }
+    file_frames_written_.store(0);
+    if (file_handle_ != nullptr) {
+        std::fflush(file_handle_);
+        std::fclose(file_handle_);
+        file_handle_ = nullptr;
+    }
+    FILE* file = std::fopen(path.c_str(), "wb");
+    if (file == nullptr) {
+        OMT_LOGE("uac2 pcm file switch open failed: %s", std::strerror(errno));
+        file_recording_.store(false);
+        return false;
+    }
+    static constexpr size_t kFileBufferBytes = 1u << 20;
+    if (std::setvbuf(file, nullptr, _IOFBF, kFileBufferBytes) != 0) {
+        OMT_LOGW("uac2 pcm file switch setvbuf failed for %s", path.c_str());
+    }
+    file_handle_ = file;
+    OMT_LOGI("uac2 pcm file recording switched path=%s", path.c_str());
     return true;
 }
 

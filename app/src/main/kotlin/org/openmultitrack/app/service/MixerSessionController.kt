@@ -34,7 +34,9 @@ import org.openmultitrack.app.routing.SoundcheckTrackChannels
 import org.openmultitrack.app.audio.SyntheticCaptureGenerator
 import org.openmultitrack.app.audio.VirtualMixerProbe
 import org.openmultitrack.app.data.AppSettingsStore
+import org.openmultitrack.app.data.RecordingWritePlan
 import org.openmultitrack.app.data.RecordingStorageResolver
+import org.openmultitrack.app.routing.RoutingOverrideCoordinator
 import org.openmultitrack.app.root.LoopbackSetup
 import org.openmultitrack.app.root.RootShell
 import org.openmultitrack.audio.OmtLog
@@ -902,6 +904,12 @@ class MixerSessionController(
     private fun isFlow8Active(): Boolean =
         activeDescriptor?.let { Flow8UsbPlaybackProfile.isFlow8(it) } == true
 
+    /** OSC/LAN routing automation (XR18/X32 family). FLOW 8 and other USB-only mixers skip this path. */
+    private fun supportsOscRouting(): Boolean {
+        val prof = profile ?: return false
+        return RoutingOverrideCoordinator.isEligible(prof, settings.routingAutomationForMixer(prof.id))
+    }
+
     /**
      * FLOW 8 firmware requires the capture isoch stream to be fully released before playback.
      * Native UAC2 capture can outlive the Kotlin fanout ([isNativeUsbCaptureRunning]).
@@ -1070,6 +1078,7 @@ class MixerSessionController(
 
     /** Stop USB capture/playback so XR18 accepts OSC routing changes (verified on hardware). */
     private suspend fun quiesceUsbBeforeRoutingLocked(keepCaptureForFlow8Record: Boolean = false) {
+        if (!supportsOscRouting()) return
         val t0 = System.nanoTime()
         if (testTonePlayer.isPlaying) {
             testTonePlayer.stopAndAwait()
@@ -1240,7 +1249,7 @@ class MixerSessionController(
         if (flow8) {
             teardownFlow8UsbPlaybackLocked(trace)
         }
-        if (restoreRouting) {
+        if (restoreRouting && supportsOscRouting()) {
             quiesceUsbBeforeRoutingLocked()
             RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
         }
@@ -1457,7 +1466,7 @@ class MixerSessionController(
                 statusMessage = "USB test tone off",
             )
         }
-        if (restoreRouting) {
+        if (restoreRouting && supportsOscRouting()) {
             quiesceUsbBeforeRoutingLocked()
             RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
         }
@@ -1589,9 +1598,11 @@ class MixerSessionController(
                 captureMutex.withLock {
                     TransportTraceHub.mark(mixerId, "captureMutex acquired")
                     withContext(Dispatchers.IO) {
-                        TransportTraceHub.mark(mixerId, "quiesceUsb")
-                        quiesceUsbBeforeRoutingLocked(keepCaptureForFlow8Record = true)
-                        TransportTraceHub.mark(mixerId, "routing.beforeRecord")
+                        if (supportsOscRouting()) {
+                            TransportTraceHub.mark(mixerId, "quiesceUsb")
+                            quiesceUsbBeforeRoutingLocked(keepCaptureForFlow8Record = true)
+                            TransportTraceHub.mark(mixerId, "routing.beforeRecord")
+                        }
                         when (val routing = routingBeforeRecordLocked()) {
                             RoutingHookResult.Cancelled -> {
                                 TransportTraceHub.finish(mixerId, "cancelled at routing")
@@ -1785,7 +1796,7 @@ class MixerSessionController(
                     TransportTraceHub.mark(mixerId, "captureEngine.stopRecording")
                     val ended = captureEngine.stopRecording()
                     TransportTraceHub.mark(mixerId, "captureEngine.stopRecording done path=${ended?.filePath}")
-                    if (restoreRouting) {
+                    if (restoreRouting && supportsOscRouting()) {
                         TransportTraceHub.mark(mixerId, "routing.afterRecordRestore")
                         quiesceUsbBeforeRoutingLocked()
                         RoutingAutomationBridge.hooks?.afterRecordRestore()
@@ -1882,6 +1893,7 @@ class MixerSessionController(
                         return@withContext
                     }
                 }
+                maybePrearmNativePcmWriterLocked()
             }
             if (!captureEngine.isCaptureActive) {
                 _state.update { it.copy(isVuMetering = false) }
@@ -2051,7 +2063,7 @@ class MixerSessionController(
                 if (isFlow8Active()) {
                     teardownFlow8UsbPlaybackLocked(trace)
                 }
-                if (restoreRouting) {
+                if (restoreRouting && supportsOscRouting()) {
                     quiesceUsbBeforeRoutingLocked()
                     RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
                 }
@@ -2060,12 +2072,14 @@ class MixerSessionController(
     }
 
     private suspend fun routingBeforeRecordLocked(): RoutingHookResult {
+        if (!supportsOscRouting()) return RoutingHookResult.Skipped
         val prof = profile ?: return RoutingHookResult.Skipped
         val armed = _state.value.channelStrips.filter { it.armed }.map { it.index }.toSet()
         return RoutingAutomationBridge.hooks?.beforeRecordApply(prof, armed) ?: RoutingHookResult.Skipped
     }
 
     private suspend fun routingBeforeSoundcheckLocked(dir: File, metadata: SessionMetadata): RoutingHookResult {
+        if (!supportsOscRouting()) return RoutingHookResult.Skipped
         val prof = profile ?: return RoutingHookResult.Skipped
         val trackChannels = SoundcheckTrackChannels.indicesWithTracks(dir, metadata)
         return RoutingAutomationBridge.hooks?.beforeSoundcheckApply(prof, trackChannels)
@@ -2073,18 +2087,21 @@ class MixerSessionController(
     }
 
     private suspend fun routingAfterSoundcheckPlaybackStartedLocked(): RoutingHookResult {
+        if (!supportsOscRouting()) return RoutingHookResult.Skipped
         val prof = profile ?: return RoutingHookResult.Skipped
         return RoutingAutomationBridge.hooks?.afterSoundcheckPlaybackStarted(prof)
             ?: RoutingHookResult.Skipped
     }
 
     private suspend fun routingBeforeUsbTestToneLocked(usbChannelIndex: Int): RoutingHookResult {
+        if (!supportsOscRouting()) return RoutingHookResult.Skipped
         val prof = profile ?: return RoutingHookResult.Skipped
         return RoutingAutomationBridge.hooks?.beforeSoundcheckApply(prof, setOf(usbChannelIndex))
             ?: RoutingHookResult.Skipped
     }
 
     private suspend fun routingAfterUsbTestToneStartedLocked(): RoutingHookResult {
+        if (!supportsOscRouting()) return RoutingHookResult.Skipped
         val prof = profile ?: return RoutingHookResult.Skipped
         return RoutingAutomationBridge.hooks?.afterSoundcheckPlaybackStarted(prof)
             ?: RoutingHookResult.Skipped
@@ -2622,6 +2639,17 @@ class MixerSessionController(
             activeDescriptor != null ||
                 (prof != null && VirtualMixer.isDemoMixer(prof))
             )
+    }
+
+    private suspend fun maybePrearmNativePcmWriterLocked() {
+        if (!recordModeCaptureDesired()) return
+        if (captureEngine.isRecording || captureEngine.isNativePcmPrearmed()) return
+        if (captureEngine.isSyntheticCapture()) return
+        if (captureEngine.activeChannelCount < 8) return
+        val prof = profile ?: return
+        if (VirtualMixer.isDemoMixer(prof)) return
+        val scratch = RecordingWritePlan.prearmStagingFile(storageResolver, prof.storageFolderName())
+        captureEngine.prearmNativePcmWriter(scratch)
     }
 
     private fun captureStreamDesired(): Boolean = vuCaptureDesired() || recordModeCaptureDesired()

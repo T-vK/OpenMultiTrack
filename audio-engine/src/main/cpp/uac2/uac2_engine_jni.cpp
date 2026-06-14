@@ -142,10 +142,25 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_org_openmultitrack_audio_NativeUac2Engine_nativeStartPcmFileRecording(
     JNIEnv* env,
     jobject /*thiz*/,
+    jstring path,
+    jboolean resetCaptureRing) {
+    const char* utf = env->GetStringUTFChars(path, nullptr);
+    if (utf == nullptr) return JNI_FALSE;
+    const bool ok = openmultitrack::uac2::Uac2Capture::instance().startPcmFileRecording(
+        utf,
+        resetCaptureRing == JNI_TRUE);
+    env->ReleaseStringUTFChars(path, utf);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_openmultitrack_audio_NativeUac2Engine_nativeSwitchPcmFileRecording(
+    JNIEnv* env,
+    jobject /*thiz*/,
     jstring path) {
     const char* utf = env->GetStringUTFChars(path, nullptr);
     if (utf == nullptr) return JNI_FALSE;
-    const bool ok = openmultitrack::uac2::Uac2Capture::instance().startPcmFileRecording(utf);
+    const bool ok = openmultitrack::uac2::Uac2Capture::instance().switchPcmFileRecording(utf);
     env->ReleaseStringUTFChars(path, utf);
     return ok ? JNI_TRUE : JNI_FALSE;
 }
@@ -163,6 +178,13 @@ Java_org_openmultitrack_audio_NativeUac2Engine_nativePcmFileFramesWritten(
     jobject /*thiz*/) {
     return static_cast<jlong>(
         openmultitrack::uac2::Uac2Capture::instance().pcmFileFramesWritten());
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_openmultitrack_audio_NativeUac2Engine_nativeIsPcmFileRecording(
+    JNIEnv* /*env*/,
+    jobject /*thiz*/) {
+    return openmultitrack::uac2::Uac2Capture::instance().isPcmFileRecording() ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jobject JNICALL
