@@ -328,6 +328,7 @@ bool Uac2Capture::startPcmFileRecording(const std::string& path, bool reset_capt
     file_handle_ = file;
     file_frames_written_.store(0);
     file_recording_.store(true);
+    file_writer_active_.store(true);
     file_writer_ = std::thread(&Uac2Capture::pcmFileWriterLoop, this);
     OMT_LOGI("uac2 pcm file recording started path=%s reset_ring=%d",
              path.c_str(),
@@ -344,22 +345,28 @@ bool Uac2Capture::switchPcmFileRecording(const std::string& path) {
         file_ring_->reset();
     }
     file_frames_written_.store(0);
-    if (file_handle_ != nullptr) {
-        std::fflush(file_handle_);
-        std::fclose(file_handle_);
-        file_handle_ = nullptr;
-    }
-    FILE* file = std::fopen(path.c_str(), "wb");
-    if (file == nullptr) {
+    FILE* new_file = std::fopen(path.c_str(), "wb");
+    if (new_file == nullptr) {
         OMT_LOGE("uac2 pcm file switch open failed: %s", std::strerror(errno));
         file_recording_.store(false);
         return false;
     }
     static constexpr size_t kFileBufferBytes = 1u << 20;
-    if (std::setvbuf(file, nullptr, _IOFBF, kFileBufferBytes) != 0) {
+    if (std::setvbuf(new_file, nullptr, _IOFBF, kFileBufferBytes) != 0) {
         OMT_LOGW("uac2 pcm file switch setvbuf failed for %s", path.c_str());
     }
-    file_handle_ = file;
+    FILE* old_file = file_handle_;
+    file_handle_ = new_file;
+    if (old_file != nullptr) {
+        std::fflush(old_file);
+        std::fclose(old_file);
+    }
+    if (!file_writer_active_.load() && file_writer_.joinable()) {
+        file_writer_.join();
+        file_writer_active_.store(true);
+        file_writer_ = std::thread(&Uac2Capture::pcmFileWriterLoop, this);
+        OMT_LOGW("uac2 pcm file writer restarted after early exit");
+    }
     OMT_LOGI("uac2 pcm file recording switched path=%s", path.c_str());
     return true;
 }
@@ -377,6 +384,7 @@ void Uac2Capture::stopPcmFileRecordingUnlocked() {
     if (file_writer_.joinable()) {
         file_writer_.join();
     }
+    file_writer_active_.store(false);
     if (file_handle_ != nullptr) {
         std::fflush(file_handle_);
         std::fclose(file_handle_);
@@ -392,8 +400,10 @@ void Uac2Capture::pcmFileWriterLoop() {
 #if defined(__ANDROID__)
     setpriority(PRIO_PROCESS, 0, -12);
 #endif
+    file_writer_active_.store(true);
     const size_t bpf = static_cast<size_t>(bytesPerFrame(alt_.format));
     if (bpf == 0) {
+        file_writer_active_.store(false);
         return;
     }
     std::vector<uint8_t> scratch(2u << 20);
@@ -410,7 +420,8 @@ void Uac2Capture::pcmFileWriterLoop() {
         }
         FILE* file = file_handle_;
         if (file == nullptr) {
-            break;
+            std::this_thread::yield();
+            continue;
         }
         const size_t byte_count = frames * bpf;
         const size_t written = std::fwrite(scratch.data(), 1, byte_count, file);
@@ -421,6 +432,7 @@ void Uac2Capture::pcmFileWriterLoop() {
         }
         file_frames_written_.fetch_add(frames);
     }
+    file_writer_active_.store(false);
 }
 
 void Uac2Capture::ingestPcmBytes(const uint8_t* bytes, size_t byte_count) {

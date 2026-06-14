@@ -99,6 +99,7 @@ private:
     std::unique_ptr<openmultitrack::SpscPcmRing> file_ring_;
 
     std::atomic<bool> file_recording_{false};
+    std::atomic<bool> file_writer_active_{false};
     std::atomic<uint64_t> file_frames_written_{0};
     std::thread file_writer_;
     FILE* file_handle_ = nullptr;
