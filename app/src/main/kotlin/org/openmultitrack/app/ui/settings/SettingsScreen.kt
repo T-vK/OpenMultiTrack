@@ -743,28 +743,25 @@ private fun <T> SettingsPickerItem(row: SettingsPickerRow<T>) {
     }
 }
 
-private fun snapshotSlotOptions(
-    snapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption>,
-    selectedSlot: Int,
-): List<Int> = buildList {
-    add(0)
-    addAll(snapshots.map { it.slot })
-    if (selectedSlot > 0 && selectedSlot !in this) add(selectedSlot)
-}.distinct().sorted()
+private val ALL_SNAPSHOT_SLOT_OPTIONS: List<Int> = (0..64).toList()
 
 private fun snapshotSlotLabel(
     slot: Int,
     snapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption>,
 ): String = when (slot) {
     0 -> "Not set"
-    else -> snapshots.find { it.slot == slot }?.name ?: "Snapshot $slot (unavailable)"
+    else -> {
+        val name = snapshots.find { it.slot == slot }?.name.orEmpty()
+        val slotLabel = slot.toString().padStart(2, '0')
+        if (name.isNotBlank()) name else "Snapshot $slotLabel"
+    }
 }
 
-private fun snapshotPickerDescription(loading: Boolean, snapshotCount: Int): String =
-    when {
-        loading -> "Loading snapshot names from the mixer…"
-        snapshotCount == 0 -> "No named snapshots found on the mixer. Save snapshots on the XR18 first."
-        else -> "Named snapshots stored on the mixer."
+private fun snapshotPickerDescription(loading: Boolean): String =
+    if (loading) {
+        "Loading snapshot names from the mixer…"
+    } else {
+        "All mixer snapshot slots (1–64); empty slots show as Snapshot NN."
     }
 
 private fun buildSettingsRows(
@@ -990,21 +987,17 @@ private fun buildSettingsRows(
             ),
         )
         if (config.method == org.openmultitrack.app.data.RoutingAutomationMethod.SNAPSHOT_SLOT) {
-            val snapshotSlots = snapshotSlotOptions(state.mixerSnapshots, config.recordSnapshotSlot)
             val snapshotLabel: (Int) -> String = { slot ->
                 snapshotSlotLabel(slot, state.mixerSnapshots)
             }
-            val snapshotDescription = snapshotPickerDescription(
-                loading = state.mixerSnapshotsLoading,
-                snapshotCount = state.mixerSnapshots.size,
-            )
+            val snapshotDescription = snapshotPickerDescription(state.mixerSnapshotsLoading)
             add(
                 SettingsDropdownRow(
                     id = "routing_record_snapshot_slot",
                     category = SettingsCategory.OSC,
                     title = "Record snapshot",
                     description = "Snapshot recalled when recording starts. $snapshotDescription",
-                    options = snapshotSlots,
+                    options = ALL_SNAPSHOT_SLOT_OPTIONS,
                     selected = config.recordSnapshotSlot,
                     label = snapshotLabel,
                     onSelect = { slot ->
@@ -1018,7 +1011,7 @@ private fun buildSettingsRows(
                     category = SettingsCategory.OSC,
                     title = "Soundcheck snapshot",
                     description = "Snapshot recalled when soundcheck playback starts. $snapshotDescription",
-                    options = snapshotSlotOptions(state.mixerSnapshots, config.soundcheckSnapshotSlot),
+                    options = ALL_SNAPSHOT_SLOT_OPTIONS,
                     selected = config.soundcheckSnapshotSlot,
                     label = snapshotLabel,
                     onSelect = { slot ->
