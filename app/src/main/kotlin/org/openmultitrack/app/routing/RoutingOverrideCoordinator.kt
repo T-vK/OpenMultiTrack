@@ -7,6 +7,7 @@ import org.openmultitrack.app.data.RoutingRestorePolicy
 import org.openmultitrack.app.scribble.ScribbleImportSupport
 import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.mixer.behringer.MixerRoutingPort
+import org.openmultitrack.mixer.behringer.MixerSnapshotOption
 import org.openmultitrack.mixer.behringer.XAirChannelInputState
 import org.openmultitrack.mixer.behringer.XAirInputSourceCatalog
 import org.openmultitrack.mixer.behringer.Xr18RoutingLog
@@ -130,6 +131,12 @@ class RoutingOverrideCoordinator(
         val port = routingFactory(host)
         if (!port.probe()) return emptyMap()
         return port.readAllChannelInputs()
+    }
+
+    suspend fun listMixerSnapshots(host: String): List<MixerSnapshotOption> {
+        val port = routingFactory(host)
+        if (!port.probe()) return emptyList()
+        return port.listSnapshots()
     }
 
     /**

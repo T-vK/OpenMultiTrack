@@ -175,6 +175,8 @@ data class DawUiState(
     val inputSourcesLoading: Boolean = false,
     val inputSourcesError: String? = null,
     val inputSourcesByChannel: Map<Int, XAirChannelInputState> = emptyMap(),
+    val mixerSnapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption> = emptyList(),
+    val mixerSnapshotsLoading: Boolean = false,
     val routingAutomationConfig: MixerRoutingAutomationConfig = MixerRoutingAutomationConfig(),
 )
 
@@ -1688,7 +1690,31 @@ class MainViewModel(
 
     fun showSettings(show: Boolean) {
         _uiState.update { it.copy(showSettings = show) }
-        if (show) refreshStorageVolumeOptionsAsync()
+        if (show) {
+            refreshStorageVolumeOptionsAsync()
+            refreshMixerSnapshots()
+        }
+    }
+
+    fun refreshMixerSnapshots() {
+        val profile = activeMixerProfile() ?: run {
+            _uiState.update { it.copy(mixerSnapshots = emptyList(), mixerSnapshotsLoading = false) }
+            return
+        }
+        if (!ScribbleImportSupport.supportsOsc(profile) || profile.oscHost.isNullOrBlank()) {
+            _uiState.update { it.copy(mixerSnapshots = emptyList(), mixerSnapshotsLoading = false) }
+            return
+        }
+        _uiState.update { it.copy(mixerSnapshotsLoading = true) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val snapshots = routingCoordinator.listMixerSnapshots(profile.oscHost!!)
+            _uiState.update {
+                it.copy(
+                    mixerSnapshotsLoading = false,
+                    mixerSnapshots = snapshots,
+                )
+            }
+        }
     }
 
     private fun refreshStorageVolumeOptionsAsync() {

@@ -6,6 +6,11 @@ class FakeMixerRoutingPort(
 ) : MixerRoutingPort {
     val writes = mutableListOf<Pair<Int, XAirChannelInputState>>()
     var snapshotLoads = mutableListOf<Int>()
+    var snapshots: List<MixerSnapshotOption> = emptyList()
+
+    fun seedSnapshot(slot: Int, name: String) {
+        snapshots = snapshots.filter { it.slot != slot } + MixerSnapshotOption(slot, name)
+    }
 
     fun seedChannel(index: Int, state: XAirChannelInputState) {
         channels[index] = state
@@ -95,4 +100,6 @@ class FakeMixerRoutingPort(
         snapshotLoads += slot
         return true
     }
+
+    override suspend fun listSnapshots(): List<MixerSnapshotOption> = snapshots
 }

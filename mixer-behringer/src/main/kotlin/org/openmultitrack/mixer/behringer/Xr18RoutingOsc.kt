@@ -28,6 +28,16 @@ internal object Xr18RoutingOsc {
         }
     }
 
+    fun snapshotNameQueryPaths(): List<String> =
+        (1..64).map { OscPath.snapSlotName(it) }
+
+    fun parseSnapshotNames(replies: Map<String, List<Any>>): List<MixerSnapshotOption> =
+        (1..64).mapNotNull { slot ->
+            val raw = replies[OscPath.snapSlotName(slot)]?.firstOrNull() as? String ?: return@mapNotNull null
+            val name = raw.trim()
+            if (name.isEmpty()) null else MixerSnapshotOption(slot, name)
+        }
+
     fun readChannel(replies: Map<String, List<Any>>, channelIndex: Int): XAirChannelInputState? {
         val ch = channelIndex + 1
         if (ch !in 1..XAirInputSourceCatalog.CHANNEL_COUNT) return null

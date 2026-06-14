@@ -78,6 +78,8 @@ data class SettingsUiState(
     val minFreeStorageBytes: Long = 0L,
     val batteryOptimizationIgnored: Boolean = true,
     val showOscRoutingSettings: Boolean = false,
+    val mixerSnapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption> = emptyList(),
+    val mixerSnapshotsLoading: Boolean = false,
     val routingAutomationConfig: org.openmultitrack.app.data.MixerRoutingAutomationConfig =
         org.openmultitrack.app.data.MixerRoutingAutomationConfig(),
 )
@@ -741,12 +743,28 @@ private fun <T> SettingsPickerItem(row: SettingsPickerRow<T>) {
     }
 }
 
-private val SNAPSHOT_SLOT_OPTIONS: List<Int> = (0..64).toList()
+private fun snapshotSlotOptions(
+    snapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption>,
+    selectedSlot: Int,
+): List<Int> = buildList {
+    add(0)
+    addAll(snapshots.map { it.slot })
+    if (selectedSlot > 0 && selectedSlot !in this) add(selectedSlot)
+}.distinct().sorted()
 
-private fun snapshotSlotLabel(slot: Int): String =
-    when (slot) {
-        0 -> "Not set"
-        else -> "Snapshot $slot"
+private fun snapshotSlotLabel(
+    slot: Int,
+    snapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption>,
+): String = when (slot) {
+    0 -> "Not set"
+    else -> snapshots.find { it.slot == slot }?.name ?: "Snapshot $slot (unavailable)"
+}
+
+private fun snapshotPickerDescription(loading: Boolean, snapshotCount: Int): String =
+    when {
+        loading -> "Loading snapshot names from the mixer…"
+        snapshotCount == 0 -> "No named snapshots found on the mixer. Save snapshots on the XR18 first."
+        else -> "Named snapshots stored on the mixer."
     }
 
 private fun buildSettingsRows(
@@ -957,7 +975,7 @@ private fun buildSettingsRows(
                 id = "routing_automation_method",
                 category = SettingsCategory.OSC,
                 title = "Automation method",
-                description = "Per-channel OSC or recall a mixer snapshot slot (1–64).",
+                description = "Per-channel OSC or recall a named mixer snapshot.",
                 options = org.openmultitrack.app.data.RoutingAutomationMethod.entries,
                 selected = config.method,
                 label = {
@@ -972,16 +990,23 @@ private fun buildSettingsRows(
             ),
         )
         if (config.method == org.openmultitrack.app.data.RoutingAutomationMethod.SNAPSHOT_SLOT) {
-            val snapshotSlots = SNAPSHOT_SLOT_OPTIONS
+            val snapshotSlots = snapshotSlotOptions(state.mixerSnapshots, config.recordSnapshotSlot)
+            val snapshotLabel: (Int) -> String = { slot ->
+                snapshotSlotLabel(slot, state.mixerSnapshots)
+            }
+            val snapshotDescription = snapshotPickerDescription(
+                loading = state.mixerSnapshotsLoading,
+                snapshotCount = state.mixerSnapshots.size,
+            )
             add(
                 SettingsDropdownRow(
                     id = "routing_record_snapshot_slot",
                     category = SettingsCategory.OSC,
                     title = "Record snapshot",
-                    description = "Mixer snapshot slot (1–64) recalled when recording starts.",
+                    description = "Snapshot recalled when recording starts. $snapshotDescription",
                     options = snapshotSlots,
                     selected = config.recordSnapshotSlot,
-                    label = ::snapshotSlotLabel,
+                    label = snapshotLabel,
                     onSelect = { slot ->
                         onRoutingAutomationConfigChange(config.copy(recordSnapshotSlot = slot))
                     },
@@ -992,10 +1017,10 @@ private fun buildSettingsRows(
                     id = "routing_soundcheck_snapshot_slot",
                     category = SettingsCategory.OSC,
                     title = "Soundcheck snapshot",
-                    description = "Mixer snapshot slot (1–64) recalled when soundcheck playback starts.",
-                    options = snapshotSlots,
+                    description = "Snapshot recalled when soundcheck playback starts. $snapshotDescription",
+                    options = snapshotSlotOptions(state.mixerSnapshots, config.soundcheckSnapshotSlot),
                     selected = config.soundcheckSnapshotSlot,
-                    label = ::snapshotSlotLabel,
+                    label = snapshotLabel,
                     onSelect = { slot ->
                         onRoutingAutomationConfigChange(config.copy(soundcheckSnapshotSlot = slot))
                     },

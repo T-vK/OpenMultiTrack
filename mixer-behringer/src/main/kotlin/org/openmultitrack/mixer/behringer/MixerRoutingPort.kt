@@ -56,4 +56,7 @@ interface MixerRoutingPort {
     ): Boolean
 
     suspend fun loadSnapshot(slot: Int): Boolean
+
+    /** Non-empty named snapshots currently stored on the mixer (slots 1–64). */
+    suspend fun listSnapshots(): List<MixerSnapshotOption>
 }

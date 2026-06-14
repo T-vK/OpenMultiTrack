@@ -76,4 +76,7 @@ class LanOscRoutingPort(
 
     override suspend fun loadSnapshot(slot: Int): Boolean =
         OscLanSession.withMulticastLock(context) { delegate.loadSnapshot(slot) }
+
+    override suspend fun listSnapshots(): List<org.openmultitrack.mixer.behringer.MixerSnapshotOption> =
+        OscLanSession.withMulticastLock(context) { delegate.listSnapshots() }
 }

@@ -318,6 +318,8 @@ fun DawMainScreen(
                 chapterSupportEnabled = state.chapterSupportEnabled,
                 showOscRoutingSettings = supportsOscRouting,
                 routingAutomationConfig = state.routingAutomationConfig,
+                mixerSnapshots = state.mixerSnapshots,
+                mixerSnapshotsLoading = state.mixerSnapshotsLoading,
             ),
             monitorGain = monitorGain,
             onMonitorGainChange = onMonitorGainChange,
