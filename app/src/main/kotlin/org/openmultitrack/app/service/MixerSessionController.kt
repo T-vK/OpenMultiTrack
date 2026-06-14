@@ -253,12 +253,16 @@ class MixerSessionController(
         syncVuMeterCapture()
         ensureLiveCaptureUiUpdates()
         refreshStorageEstimate()
-        if (_state.value.appMode.isPlaybackMode) {
-            scope.launch {
-                captureMutex.withLock {
-                    if (_state.value.appMode.isPlaybackMode && !isSoundcheckTransportActive()) {
-                        warmPlaybackRouteLocked()
+        scope.launch {
+            captureMutex.withLock {
+                if (profile?.let(VirtualMixer::isDemoMixer) != true) {
+                    withContext(Dispatchers.IO) {
+                        ensureUsbStreamOpenLocked(descriptor)
+                        activeUsbDevice = enumerator.getUsbDevice(descriptor.deviceName)
                     }
+                }
+                if (_state.value.appMode.isPlaybackMode && !isSoundcheckTransportActive()) {
+                    warmPlaybackRouteLocked()
                 }
             }
         }
@@ -299,8 +303,6 @@ class MixerSessionController(
                                     captureEngine.stopCapture()
                                 }
                                 AudioEngineRouter.stopAllRecording()
-                                usbStream?.close()
-                                usbStream = null
                             }
                             captureEngine.resetLiveWaveformBuffers()
                         }
@@ -515,6 +517,7 @@ class MixerSessionController(
                 OmtLog.d("MixerSession", "playback route warmup: ${e.message}")
             }
             .getOrNull() ?: return
+        AudioEngineRouter.preclaimPlaybackRoute(route, activeUsbDevice)
         trace.mark("usbStream open fd=${usbStream?.fd} backend=${route.backend}")
         trace.mark("done")
     }
@@ -670,7 +673,7 @@ class MixerSessionController(
     fun stopSoundcheck(resetPosition: Boolean = true, restoreRouting: Boolean = true) {
         finishPlaybackTransport(
             resetPosition = resetPosition,
-            releaseNative = isFlow8Active(),
+            releaseNative = false,
             restoreRouting = restoreRouting,
         )
     }
@@ -927,9 +930,20 @@ class MixerSessionController(
     private fun isRecordingTransport(): Boolean =
         _state.value.isRecording || captureEngine.isRecording
 
+    private fun isUsbStreamHeld(): Boolean = usbStream?.let { it.fd >= 0 } == true
+
     private suspend fun prepareUsbForPlaybackLocked() {
         if (isFlow8Active()) {
             prepareFlow8UsbForPlaybackLocked()
+            return
+        }
+        if (isUsbStreamHeld() &&
+            !captureEngine.isCaptureActive &&
+            !captureEngine.isNativeUsbCaptureRunning() &&
+            !player.isPlaying &&
+            !testTonePlayer.isPlaying
+        ) {
+            OmtLog.d("MixerSession", "USB playback prepare skipped — stream held")
             return
         }
         if (_state.value.isMonitoring) {
@@ -951,12 +965,10 @@ class MixerSessionController(
                 captureEngine.stopCapture()
             }
             AudioEngineRouter.stopAllRecording()
-            usbStream?.close()
-            usbStream = null
         }
     }
 
-    /** Release FLOW 8 UAC2 playback and close the USB stream so capture/VU can reopen cleanly. */
+    /** Stop FLOW 8 playback isoch streams but keep the USB fd claimed. */
     private suspend fun teardownFlow8UsbPlaybackLocked(trace: TransportTrace? = null) {
         captureEngine.updateVuMetering(false)
         _state.update { it.copy(isVuMetering = false) }
@@ -966,17 +978,16 @@ class MixerSessionController(
             }
             if (player.isPlaying) {
                 player.stopAndAwait()
+            } else {
+                AudioEngineRouter.stopPlayback()
             }
-            AudioEngineRouter.stopPlayback()
             if (!_state.value.isRecording) {
                 releaseFlow8CaptureForPlaybackHandoffLocked()
             }
-            usbStream?.close()
-            usbStream = null
             delay(Flow8UsbPlaybackProfile.POST_PLAYBACK_STOP_DELAY_MS)
         }
-        trace?.mark("FLOW 8 USB playback torn down (stream closed)")
-        OmtLog.i("MixerSession", "FLOW 8 USB playback torn down for $mixerId")
+        trace?.mark("FLOW 8 USB playback settled (stream held)")
+        OmtLog.i("MixerSession", "FLOW 8 USB playback settled for $mixerId (stream held)")
         if (_state.value.appMode == AppMode.MULTITRACK_RECORD && captureStreamDesired()) {
             syncVuMeterCapture()
         }
@@ -1017,15 +1028,22 @@ class MixerSessionController(
                 captureEngine.stopCapture()
             }
             AudioEngineRouter.stopAllRecording()
-            usbStream?.close()
-            usbStream = null
             delay(Flow8UsbPlaybackProfile.POST_PLAYBACK_STOP_DELAY_MS)
         }
-        OmtLog.i("MixerSession", "FLOW 8 USB prepared for capture")
+        OmtLog.i("MixerSession", "FLOW 8 USB prepared for capture (stream held)")
     }
 
-    /** FLOW 8 needs capture fully released and a short settle delay before UAC2 playback. */
+    /** FLOW 8 needs capture isoch stopped and a short settle delay before UAC2 playback. */
     private suspend fun prepareFlow8UsbForPlaybackLocked() {
+        if (isUsbStreamHeld() &&
+            !captureEngine.isCaptureActive &&
+            !captureEngine.isNativeUsbCaptureRunning() &&
+            !player.isPlaying &&
+            !testTonePlayer.isPlaying
+        ) {
+            OmtLog.d("MixerSession", "FLOW 8 playback prepare skipped — stream held")
+            return
+        }
         if (_state.value.isMonitoring) {
             captureEngine.updateMonitor(MonitorMixConfig(enabled = false))
             _state.update { it.copy(isMonitoring = false) }
@@ -1040,12 +1058,14 @@ class MixerSessionController(
                 player.stopAndAwait()
             }
             AudioEngineRouter.stopPlayback()
+            val needsCaptureRelease = captureEngine.isCaptureActive ||
+                captureEngine.isNativeUsbCaptureRunning()
             releaseFlow8CaptureForPlaybackHandoffLocked()
-            usbStream?.close()
-            usbStream = null
-            delay(Flow8UsbPlaybackProfile.PRE_PLAYBACK_DELAY_MS)
+            if (needsCaptureRelease) {
+                delay(Flow8UsbPlaybackProfile.PRE_PLAYBACK_DELAY_MS)
+            }
         }
-        OmtLog.i("MixerSession", "FLOW 8 USB prepared for playback")
+        OmtLog.i("MixerSession", "FLOW 8 USB prepared for playback (stream held)")
     }
 
     /** Stop USB capture/playback so XR18 accepts OSC routing changes (verified on hardware). */
@@ -1199,7 +1219,7 @@ class MixerSessionController(
         trace: TransportTrace? = null,
     ) {
         val flow8 = isFlow8Active()
-        val hardStop = releaseNative || flow8
+        val hardStop = releaseNative
         trace?.mark("stopSoundcheckLocked releaseNative=$hardStop flow8=$flow8")
         val sampleRate = _state.value.soundcheckSampleRate.takeIf { it > 0 } ?: 48_000
         val posSec = if (sampleRate > 0 && player.isPlaying) {
@@ -1454,7 +1474,7 @@ class MixerSessionController(
             throw IllegalStateException("Stop recording before USB test tones")
         }
         if (isSoundcheckTransportActive()) {
-            stopSoundcheckLocked(releaseNative = isFlow8Active(), restoreRouting = false)
+            stopSoundcheckLocked(releaseNative = false, restoreRouting = false)
         }
         stopUsbTestToneLocked(restoreRouting = false)
         withContext(Dispatchers.IO) {
@@ -1845,8 +1865,6 @@ class MixerSessionController(
                     ) {
                         OmtLog.w("VuMeter", "VU capture stalled for $mixerId — restarting")
                         captureEngine.stopCapture()
-                        usbStream?.close()
-                        usbStream = null
                     }
                     val result = ensureCapture(descriptor, probe)
                     if (result.isFailure) {
@@ -1910,8 +1928,7 @@ class MixerSessionController(
                         if (!_state.value.isRecording && captureEngine.isCaptureActive) {
                             captureEngine.stopCapture()
                         }
-                        usbStream?.close()
-                        usbStream = null
+                        releaseUsbStreamLocked()
                     }
                 }
             }
@@ -1993,10 +2010,9 @@ class MixerSessionController(
                 withContext(Dispatchers.IO) {
                     testTonePlayer.stopAndAwait()
                     captureEngine.stopCapture()
+                    releaseUsbStreamLocked()
                 }
             }
-            usbStream?.close()
-            usbStream = null
         }
     }
 
@@ -2140,15 +2156,9 @@ class MixerSessionController(
                     finishPlaybackTransport(
                         resetPosition = true,
                         cancelStatusJob = false,
-                        releaseNative = isFlow8Active(),
+                        releaseNative = false,
                     )
-                    trace?.mark(
-                        if (isFlow8Active()) {
-                            "playback reached end, FLOW 8 hard stop"
-                        } else {
-                            "playback reached end, suspended for fast replay"
-                        },
-                    )
+                    trace?.mark("playback reached end, suspended for fast replay")
                     break
                 }
                 if (posSec > lastPosSec + 0.02f) {
@@ -2712,10 +2722,8 @@ class MixerSessionController(
                 )
                 return Result.success(captureEngine.activeChannelCount)
             } else {
-                OmtLog.w("MixerSession", "Capture active but not receiving audio for $mixerId — reopening")
+                OmtLog.w("MixerSession", "Capture active but not receiving audio for $mixerId — restarting capture")
                 withContext(Dispatchers.IO) { captureEngine.stopCapture() }
-                usbStream?.close()
-                usbStream = null
             }
         }
         if (captureEngine.isCaptureActive && !captureEngine.isNativeCaptureOwner()) {
@@ -2740,10 +2748,8 @@ class MixerSessionController(
                 !recordMode && !captureEngine.isReceivingAudio(5_000) -> prepareFlow8UsbForCaptureLocked()
             }
         }
-        val stream = openStream(descriptor)
+        val stream = ensureUsbStreamOpenLocked(descriptor)
             ?: return Result.failure(IllegalStateException("Could not open USB device"))
-        usbStream?.close()
-        usbStream = stream
         activeProbe = probe
         activeUsbDevice = device
         val route = AudioEngineRouter.resolveCaptureRoute(probe, stream, requested)
@@ -2818,9 +2824,34 @@ class MixerSessionController(
         ) {
             captureEngine.updateVuMetering(false)
             withContext(Dispatchers.IO) { captureEngine.stopCapture() }
-            usbStream?.close()
-            usbStream = null
         }
+    }
+
+    /**
+     * Opens the USB device fd once per connection. Transport handoffs stop isoch streams only;
+     * use [releaseUsbStreamLocked] on detach or [shutdown].
+     */
+    private fun ensureUsbStreamOpenLocked(descriptor: UsbAudioDeviceDescriptor): UsbAudioStreamHandle? {
+        usbStream?.let { existing ->
+            if (activeDescriptor?.deviceName == descriptor.deviceName && existing.fd >= 0) {
+                return existing
+            }
+        }
+        val stream = openStream(descriptor) ?: return null
+        usbStream = stream
+        OmtLog.i("MixerSession", "USB stream opened fd=${stream.fd} device=${descriptor.deviceName}")
+        return stream
+    }
+
+    private suspend fun releaseUsbStreamLocked() {
+        AudioEngineRouter.stopPlayback()
+        if (captureEngine.isCaptureActive) {
+            captureEngine.stopCapture()
+        }
+        AudioEngineRouter.forceStopAllRecording()
+        usbStream?.close()
+        usbStream = null
+        activeUsbDevice = null
     }
 
     private suspend fun ensurePlaybackLocked(
@@ -2838,15 +2869,10 @@ class MixerSessionController(
         }
         val device = enumerator.getUsbDevice(descriptor.deviceName)
             ?: return Result.failure(IllegalStateException("USB device not found"))
-        if (usbStream == null) {
-            OmtLog.i("MixerSession", "ensurePlayback opening USB stream for ${descriptor.deviceName}")
-            val stream = openStream(descriptor)
-                ?: return Result.failure(IllegalStateException("Could not open USB device"))
-            usbStream = stream
-            activeUsbDevice = device
-            OmtLog.i("MixerSession", "ensurePlayback USB stream open fd=${stream.fd}")
-        }
-        val route = AudioEngineRouter.resolvePlaybackRoute(probe, usbStream, channelCount)
+        val stream = ensureUsbStreamOpenLocked(descriptor)
+            ?: return Result.failure(IllegalStateException("Could not open USB device"))
+        activeUsbDevice = device
+        val route = AudioEngineRouter.resolvePlaybackRoute(probe, stream, channelCount)
             ?: return Result.failure(IllegalStateException("No playback route"))
         TransportTraceHub.mark(
             mixerId,

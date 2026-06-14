@@ -6,8 +6,9 @@ import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
  * FLOW 8 USB playback constraints.
  *
  * The mixer exposes **four** USB playback returns (U01–U04 per UAC2 descriptor).
- * Capture must be fully released before playback to avoid firmware lockup; channel
- * count should follow the probe, not be forced down to stereo.
+ * Capture isoch must be fully stopped before playback to avoid firmware lockup.
+ * The USB device fd stays open while connected; only native capture/playback streams
+ * are torn down on handoff. Channel count should follow the probe, not stereo.
  */
 object Flow8UsbPlaybackProfile {
     const val PRODUCT_ID = 0x050c
