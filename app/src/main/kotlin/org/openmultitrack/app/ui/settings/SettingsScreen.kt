@@ -1,6 +1,6 @@
 package org.openmultitrack.app.ui.settings
 
-import androidx.compose.foundation.clickable
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +17,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,7 +43,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.openmultitrack.app.data.PostRecordBehavior
 import org.openmultitrack.app.data.StripIconMode
@@ -119,12 +119,33 @@ fun SettingsScreen(
     onOpenBatterySettings: () -> Unit = {},
     onRoutingAutomationConfigChange: (org.openmultitrack.app.data.MixerRoutingAutomationConfig) -> Unit = {},
 ) {
+    var query by remember { mutableStateOf("") }
+    var openCategory by remember { mutableStateOf<SettingsCategory?>(null) }
+
+    fun navigateBack() {
+        when {
+            query.isNotBlank() -> query = ""
+            openCategory != null -> openCategory = null
+            else -> onDismiss()
+        }
+    }
+
+    BackHandler(onBack = ::navigateBack)
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings") },
+                title = {
+                    Text(
+                        when {
+                            openCategory != null -> openCategory!!.title
+                            query.isNotBlank() -> "Search"
+                            else -> "Settings"
+                        },
+                    )
+                },
                 navigationIcon = {
-                    IconButton(onClick = onDismiss) {
+                    IconButton(onClick = ::navigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -137,6 +158,13 @@ fun SettingsScreen(
                 .padding(padding),
             state = state,
             monitorGain = monitorGain,
+            query = query,
+            onQueryChange = { newQuery ->
+                query = newQuery
+                if (newQuery.isNotBlank()) openCategory = null
+            },
+            openCategory = openCategory,
+            onOpenCategory = { openCategory = it },
             onMonitorGainChange = onMonitorGainChange,
             onHideArmChange = onHideArmChange,
             onHideMonitorChange = onHideMonitorChange,
@@ -176,6 +204,10 @@ private fun SettingsContent(
     modifier: Modifier = Modifier,
     state: SettingsUiState,
     monitorGain: Float,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    openCategory: SettingsCategory?,
+    onOpenCategory: (SettingsCategory) -> Unit,
     onMonitorGainChange: (Float) -> Unit,
     onHideArmChange: (Boolean) -> Unit,
     onHideMonitorChange: (Boolean) -> Unit,
@@ -207,8 +239,6 @@ private fun SettingsContent(
     onOpenBatterySettings: () -> Unit = {},
     onRoutingAutomationConfigChange: (org.openmultitrack.app.data.MixerRoutingAutomationConfig) -> Unit = {},
 ) {
-    var query by remember { mutableStateOf("") }
-    var openCategory by remember { mutableStateOf<SettingsCategory?>(null) }
     val normalizedQuery = query.trim().lowercase()
     val isSearching = normalizedQuery.isNotEmpty()
 
@@ -241,10 +271,7 @@ private fun SettingsContent(
     Column(modifier = modifier) {
         OutlinedTextField(
             value = query,
-            onValueChange = {
-                query = it
-                if (it.isNotBlank()) openCategory = null
-            },
+            onValueChange = onQueryChange,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -272,13 +299,12 @@ private fun SettingsContent(
                 onOpenBatterySettings = onOpenBatterySettings,
             )
             openCategory == null -> SettingsCategoryList(
-                onSelect = { openCategory = it },
+                onSelect = onOpenCategory,
             )
             else -> SettingsCategoryDetail(
-                category = openCategory!!,
+                category = openCategory,
                 state = state,
                 rows = rows.filter { it.category == openCategory },
-                onBack = { openCategory = null },
                 onSetStorageRootPath = onSetStorageRootPath,
                 onAddAdditionalLibraryRoot = onAddAdditionalLibraryRoot,
                 onRemoveAdditionalLibraryRoot = onRemoveAdditionalLibraryRoot,
@@ -355,7 +381,6 @@ private fun SettingsCategoryDetail(
     category: SettingsCategory,
     state: SettingsUiState,
     rows: List<SettingsRowModel>,
-    onBack: () -> Unit,
     onSetStorageRootPath: (String?) -> Unit,
     onAddAdditionalLibraryRoot: (String) -> Unit,
     onRemoveAdditionalLibraryRoot: (String) -> Unit,
@@ -368,28 +393,12 @@ private fun SettingsCategoryDetail(
     onMinFreeStorageBytesChange: (Long) -> Unit,
     onOpenBatterySettings: () -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onBack)
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to categories")
-            }
-            Text(
-                category.title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            when (category) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+        contentPadding = PaddingValues(vertical = 4.dp),
+    ) {
+        when (category) {
                 SettingsCategory.STORAGE -> item(key = "storage") {
                     SettingsStorageSection(
                         effectiveStorageRootPath = state.effectiveStorageRootPath,
@@ -421,8 +430,7 @@ private fun SettingsCategoryDetail(
                     )
                 }
                 else -> items(rows, key = { it.id }) { row ->
-                    SettingsRow(row)
-                }
+                SettingsRow(row)
             }
         }
     }
