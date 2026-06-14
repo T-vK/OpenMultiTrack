@@ -62,6 +62,7 @@ import org.openmultitrack.sessionio.wav.WavWriter
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import org.openmultitrack.usb.AudioBackend
 import org.openmultitrack.usb.AudioEngineRouter
 import org.openmultitrack.usb.Flow8UsbPlaybackProfile
 import org.openmultitrack.usb.FullUsbProbeResult
@@ -923,8 +924,8 @@ class MixerSessionController(
     }
 
     /**
-     * FLOW 8 firmware requires the capture isoch stream to be fully released before playback.
-     * Native UAC2 capture can outlive the Kotlin fanout ([isNativeUsbCaptureRunning]).
+     * FLOW 8 firmware requires normal multitrack capture to stop before playback.
+     * An IFB feeder then keeps capture IN isoch alive for implicit feedback pacing.
      */
     private suspend fun releaseFlow8CaptureForPlaybackHandoffLocked() {
         // UI may set isPlaying before native playback starts; only skip when audio is actually streaming.
@@ -944,6 +945,32 @@ class MixerSessionController(
             }
         }
         AudioEngineRouter.forceStopAllRecording()
+    }
+
+    private fun ensureFlow8IfbFeederLocked() {
+        if (!isFlow8Active()) return
+        if (AudioEngineRouter.isIfbFeederActive()) return
+        val probe = activeProbe ?: return
+        val stream = usbStream ?: return
+        val requested = probe.uac2Caps?.maxCaptureChannels?.takeIf { it > 0 } ?: 10
+        val route = AudioEngineRouter.resolveCaptureRoute(probe, stream, requested)
+            ?: run {
+                OmtLog.w("MixerSession", "FLOW 8 IFB feeder: no capture route")
+                return
+            }
+        if (route.backend != AudioBackend.UAC2) {
+            OmtLog.w("MixerSession", "FLOW 8 IFB feeder: capture route is ${route.backend}")
+            return
+        }
+        val status = AudioEngineRouter.startIfbFeederCapture(route, activeUsbDevice)
+        if (status.active) {
+            OmtLog.i(
+                "MixerSession",
+                "FLOW 8 IFB feeder active ${status.channelCount}ch @ ${status.sampleRate}Hz",
+            )
+        } else {
+            OmtLog.e("MixerSession", "FLOW 8 IFB feeder failed: ${status.errorMessage}")
+        }
     }
 
     /** UI state can lag [CaptureSessionEngine.isRecording] briefly after transport start. */
@@ -1004,6 +1031,7 @@ class MixerSessionController(
             if (!_state.value.isRecording) {
                 releaseFlow8CaptureForPlaybackHandoffLocked()
             }
+            AudioEngineRouter.stopIfbFeederCapture()
             delay(Flow8UsbPlaybackProfile.POST_PLAYBACK_STOP_DELAY_MS)
         }
         trace?.mark("FLOW 8 USB playback settled (stream held)")
@@ -1024,6 +1052,7 @@ class MixerSessionController(
                 player.stopAndAwait()
             }
             AudioEngineRouter.stopPlayback()
+            AudioEngineRouter.stopIfbFeederCapture()
             if (isRecordingTransport()) {
                 OmtLog.i("MixerSession", "FLOW 8 playback stopped; keeping capture during recording")
                 return@withContext
@@ -1053,7 +1082,7 @@ class MixerSessionController(
         OmtLog.i("MixerSession", "FLOW 8 USB prepared for capture (stream held)")
     }
 
-    /** FLOW 8 needs capture isoch stopped and a short settle delay before UAC2 playback. */
+    /** FLOW 8 needs capture stopped, IFB feeder started, and a short settle delay before UAC2 playback. */
     private suspend fun prepareFlow8UsbForPlaybackLocked() {
         if (_state.value.isMonitoring) {
             captureEngine.updateMonitor(MonitorMixConfig(enabled = false))
@@ -1075,6 +1104,7 @@ class MixerSessionController(
             if (needsCaptureRelease) {
                 delay(Flow8UsbPlaybackProfile.PRE_PLAYBACK_DELAY_MS)
             }
+            ensureFlow8IfbFeederLocked()
         }
         OmtLog.i("MixerSession", "FLOW 8 USB prepared for playback (stream held)")
     }

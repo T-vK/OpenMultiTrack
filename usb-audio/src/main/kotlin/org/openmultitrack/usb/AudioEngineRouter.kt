@@ -45,6 +45,9 @@ object AudioEngineRouter {
     @Volatile
     var suppressGlobalCaptureTeardown: (() -> Boolean)? = null
 
+    @Volatile
+    private var ifbFeederActive = false
+
     fun resolveCaptureRoute(
         probe: FullUsbProbeResult,
         stream: UsbAudioStreamHandle?,
@@ -201,6 +204,40 @@ object AudioEngineRouter {
     /** Bypasses [suppressGlobalCaptureTeardown] — required before Flow 8 UAC2 playback. */
     fun forceStopAllRecording() {
         NativeAudioCaptureRegistry.releaseAll()
+        onNativeCaptureStopped()
+    }
+
+    fun isIfbFeederActive(): Boolean = ifbFeederActive
+
+    /**
+     * Keeps the FLOW 8 capture IN isoch alive while discarding PCM so implicit feedback
+     * can pace playback OUT to the USB returns (U01–U04).
+     */
+    fun startIfbFeederCapture(route: CaptureRoute, usbDevice: android.hardware.usb.UsbDevice? = null): NativeEngineStatus {
+        if (route.backend != AudioBackend.UAC2) {
+            return failed("IFB feeder requires UAC2 capture route")
+        }
+        val stream = route.usbStream ?: return failed("missing usb stream")
+        val alt = route.uac2Alt ?: return failed("missing uac2 alt")
+        NativeAudioCaptureRegistry.releaseAll()
+        onNativeCaptureStopped()
+        OmtLog.i("Router", "starting IFB feeder iface=${alt.interfaceNumber} ep=0x${alt.endpointAddress.toString(16)}")
+        val status = NativeUac2Engine.startIfbFeederCapture(stream.fd, alt, javaInterfaceClaimed = false)
+        if (status.active) {
+            ifbFeederActive = true
+        }
+        return status
+    }
+
+    fun stopIfbFeederCapture() {
+        if (!ifbFeederActive) return
+        NativeUac2Engine.stopCapture()
+        onNativeCaptureStopped()
+        OmtLog.i("Router", "IFB feeder stopped")
+    }
+
+    internal fun onNativeCaptureStopped() {
+        ifbFeederActive = false
     }
 
     fun readRecordedFrames(dest: FloatArray, maxFrames: Int, backend: AudioBackend): Int =

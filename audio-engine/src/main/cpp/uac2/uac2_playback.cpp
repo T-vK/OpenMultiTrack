@@ -48,6 +48,7 @@ PlaybackStatus Uac2Playback::open(int usb_fd, const Uac2AltSetting& alt, bool ja
 
     underrun_frames_.store(0);
     libusb_error_streak_.store(0);
+    stream_armed_.store(false);
 
     if (usb_fd < 0 || !alt.format.valid) {
         PlaybackStatus status;
@@ -63,9 +64,9 @@ PlaybackStatus Uac2Playback::open(int usb_fd, const Uac2AltSetting& alt, bool ja
     ring_ = std::make_unique<openmultitrack::SpscRingBuffer>(96'000, channel_count_);
     urb_layout_ = layoutForAlt(alt, false);
 
-    bool opened = tryOpenUsbdevfs(usb_fd, alt, java_interface_claimed);
+    bool opened = tryOpenLibusb(usb_fd, alt, java_interface_claimed);
     if (!opened) {
-        opened = tryOpenLibusb(usb_fd, alt, java_interface_claimed);
+        opened = tryOpenUsbdevfs(usb_fd, alt, java_interface_claimed);
     }
 
     if (!opened) {
@@ -249,6 +250,7 @@ void Uac2Playback::closeUnlocked() {
     backend_ = IoBackend::None;
     usb_fd_ = -1;
     java_interface_claimed_ = false;
+    stream_armed_.store(false);
     alt_ = {};
     channel_count_ = 0;
     sample_rate_ = 0;
@@ -284,7 +286,11 @@ bool Uac2Playback::fillUrbBuffer(uint8_t* dest, size_t byte_capacity, size_t* fr
     std::vector<float> scratch(max_frames * alt_.format.channels);
     const size_t min_prime = playbackMinPrimeFrames();
     const size_t available = ring_ != nullptr ? ring_->availableFrames() : 0;
-    const bool hold_silence = available < min_prime;
+    if (!stream_armed_.load() && available >= min_prime) {
+        stream_armed_.store(true);
+        OMT_LOGI("uac2 playback stream armed frames=%zu", available);
+    }
+    const bool hold_silence = !stream_armed_.load();
     const size_t got = (!hold_silence && ring_ != nullptr)
         ? ring_->popFrames(scratch.data(), max_frames)
         : 0;

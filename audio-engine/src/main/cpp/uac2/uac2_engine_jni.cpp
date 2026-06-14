@@ -68,6 +68,25 @@ Java_org_openmultitrack_audio_NativeUac2Engine_nativeStartCapture(
         toJstring(env, status.error));
 }
 
+extern "C" JNIEXPORT jobject JNICALL
+Java_org_openmultitrack_audio_NativeUac2Engine_nativeStartIfbFeederCapture(
+    JNIEnv* env,
+    jobject /*thiz*/,
+    jint usbFd,
+    jobject altObj,
+    jboolean javaInterfaceClaimed) {
+    const openmultitrack::uac2::Uac2AltSetting alt = altFromJobject(env, altObj);
+    const openmultitrack::uac2::CaptureStatus status =
+        openmultitrack::uac2::Uac2Capture::instance().open(
+            usbFd, alt, javaInterfaceClaimed == JNI_TRUE, true);
+    return makeEngineStatus(
+        env,
+        status.running,
+        status.channel_count,
+        status.sample_rate,
+        toJstring(env, status.error));
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_org_openmultitrack_audio_NativeUac2Engine_nativeStopCapture(
     JNIEnv* /*env*/,

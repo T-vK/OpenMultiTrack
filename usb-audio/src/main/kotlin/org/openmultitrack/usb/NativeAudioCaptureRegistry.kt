@@ -52,6 +52,7 @@ object NativeAudioCaptureRegistry {
                 return failed("UAC2 capture in use by ${other.value}")
             }
         }
+        AudioEngineRouter.onNativeCaptureStopped()
         stopSlot(slot)
         val status = startBackend(route, usbDevice)
         if (status.active) {
@@ -80,6 +81,7 @@ object NativeAudioCaptureRegistry {
         activeRoutes.keys.toList().forEach(::stopSlot)
         owners.clear()
         activeRoutes.clear()
+        AudioEngineRouter.onNativeCaptureStopped()
         OmtLog.i("CaptureRegistry", "released all backends")
     }
 

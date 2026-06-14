@@ -33,7 +33,10 @@ class Uac2Capture {
 public:
     static Uac2Capture& instance();
 
-    CaptureStatus open(int usb_fd, const Uac2AltSetting& alt, bool java_interface_claimed = false);
+    CaptureStatus open(int usb_fd,
+                       const Uac2AltSetting& alt,
+                       bool java_interface_claimed = false,
+                       bool ifb_feeder = false);
     void close();
 
     size_t readFrames(float* dest, size_t max_frames);
@@ -84,6 +87,7 @@ private:
     int usb_fd_ = -1;
     bool java_interface_claimed_ = false;
     bool libusb_owns_interface_ = false;
+    bool ifb_feeder_mode_ = false;
     Uac2AltSetting alt_{};
     int32_t channel_count_ = 0;
     int32_t sample_rate_ = 0;

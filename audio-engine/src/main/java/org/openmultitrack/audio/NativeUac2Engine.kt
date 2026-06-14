@@ -12,6 +12,12 @@ object NativeUac2Engine {
         javaInterfaceClaimed: Boolean = false,
     ): NativeEngineStatus = nativeStartCapture(usbFd, alt, javaInterfaceClaimed)
 
+    fun startIfbFeederCapture(
+        usbFd: Int,
+        alt: NativeUac2AltSetting,
+        javaInterfaceClaimed: Boolean = false,
+    ): NativeEngineStatus = nativeStartIfbFeederCapture(usbFd, alt, javaInterfaceClaimed)
+
     fun stopCapture() {
         nativeStopCapture()
     }
@@ -57,6 +63,12 @@ object NativeUac2Engine {
     fun playbackUnderrunFrames(): Long = nativePlaybackUnderrunFrames()
 
     private external fun nativeStartCapture(
+        usbFd: Int,
+        alt: NativeUac2AltSetting,
+        javaInterfaceClaimed: Boolean,
+    ): NativeEngineStatus
+
+    private external fun nativeStartIfbFeederCapture(
         usbFd: Int,
         alt: NativeUac2AltSetting,
         javaInterfaceClaimed: Boolean,

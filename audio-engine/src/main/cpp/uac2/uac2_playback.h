@@ -82,6 +82,8 @@ private:
     std::atomic<int64_t> libusb_submitted_frames_{0};
     std::atomic<uint32_t> libusb_error_streak_{0};
 
+    std::atomic<bool> stream_armed_{false};
+
     std::unique_ptr<openmultitrack::SpscRingBuffer> ring_;
 };
 

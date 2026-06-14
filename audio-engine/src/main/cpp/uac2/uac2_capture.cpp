@@ -63,7 +63,10 @@ Uac2Capture& Uac2Capture::instance() {
     return capture;
 }
 
-CaptureStatus Uac2Capture::open(int usb_fd, const Uac2AltSetting& alt, bool java_interface_claimed) {
+CaptureStatus Uac2Capture::open(int usb_fd,
+                                const Uac2AltSetting& alt,
+                                bool java_interface_claimed,
+                                bool ifb_feeder) {
     std::lock_guard<std::mutex> lock(mutex_);
     closeUnlocked();
 
@@ -78,18 +81,24 @@ CaptureStatus Uac2Capture::open(int usb_fd, const Uac2AltSetting& alt, bool java
     usb_fd_ = usb_fd;
     alt_ = alt;
     java_interface_claimed_ = java_interface_claimed;
+    ifb_feeder_mode_ = ifb_feeder;
     channel_count_ = alt.format.channels;
     sample_rate_ = static_cast<int32_t>(alt.format.sample_rate_hz);
-    ring_ = std::make_unique<openmultitrack::SpscPcmRing>(
-        960'000,
-        alt.format.channels,
-        alt.format.subframe_bytes);
+    if (!ifb_feeder_mode_) {
+        ring_ = std::make_unique<openmultitrack::SpscPcmRing>(
+            960'000,
+            alt.format.channels,
+            alt.format.subframe_bytes);
+    }
 
-    // Prefer usbdevfs (emulator / hosts where SUBMITURB works). Fall back to libusb
-    // when claim or isoch submit fails (e.g. XR18 on Samsung tablets).
-    bool opened = tryOpenUsbdevfs(usb_fd, alt, java_interface_claimed);
-    if (!opened) {
+    bool opened = ifb_feeder_mode_
+        ? tryOpenLibusb(usb_fd, alt, java_interface_claimed)
+        : tryOpenUsbdevfs(usb_fd, alt, java_interface_claimed);
+    if (!opened && !ifb_feeder_mode_) {
         opened = tryOpenLibusb(usb_fd, alt, java_interface_claimed);
+    }
+    if (!opened && ifb_feeder_mode_) {
+        opened = tryOpenUsbdevfs(usb_fd, alt, java_interface_claimed);
     }
 
     if (!opened) {
@@ -99,7 +108,8 @@ CaptureStatus Uac2Capture::open(int usb_fd, const Uac2AltSetting& alt, bool java
         return status;
     }
 
-    OMT_LOGI("uac2 capture open %s %dch @ %dHz ep=0x%02x pkt=%u urbs=%d x %d",
+    OMT_LOGI("uac2 capture open %s %s %dch @ %dHz ep=0x%02x pkt=%u urbs=%d x %d",
+             ifb_feeder_mode_ ? "ifb-feeder" : "normal",
              backend_ == IoBackend::Libusb ? "libusb" : "usbdevfs",
              channel_count_,
              sample_rate_,
@@ -284,6 +294,7 @@ void Uac2Capture::closeUnlocked() {
     backend_ = IoBackend::None;
     usb_fd_ = -1;
     java_interface_claimed_ = false;
+    ifb_feeder_mode_ = false;
     alt_ = {};
     channel_count_ = 0;
     sample_rate_ = 0;
@@ -445,6 +456,9 @@ void Uac2Capture::pcmFileWriterLoop() {
 
 void Uac2Capture::ingestPcmBytes(const uint8_t* bytes, size_t byte_count) {
     if (byte_count == 0) return;
+    if (ifb_feeder_mode_) {
+        return;
+    }
     const size_t bpf = bytesPerFrame(alt_.format);
     if (bpf == 0) return;
     const size_t wholeBytes = (byte_count / bpf) * bpf;

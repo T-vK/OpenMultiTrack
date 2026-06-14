@@ -6,7 +6,9 @@ import org.openmultitrack.domain.audio.UsbAudioDeviceDescriptor
  * FLOW 8 USB playback constraints.
  *
  * The mixer exposes **four** USB playback returns (U01–U04 per UAC2 descriptor).
- * Capture isoch must be fully stopped before playback to avoid firmware lockup.
+ * Playback uses UAC2 **implicit feedback**: OUT isoch is paced by the capture IN
+ * endpoint. Normal multitrack capture must stop before playback, then an IFB feeder
+ * keeps capture IN alive (discarding PCM) while playback OUT runs.
  * The USB device fd stays open while connected; only native capture/playback streams
  * are torn down on handoff. Channel count should follow the probe, not stereo.
  */

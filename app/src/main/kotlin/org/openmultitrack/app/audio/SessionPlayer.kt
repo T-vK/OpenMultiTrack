@@ -321,7 +321,7 @@ class SessionPlayer {
         trace.mark("status=PLAYING, launching read loop")
 
         val scratch = FloatArray(2048 * scratchChannels.coerceAtLeast(1))
-        if (blockingPrime != null && backend == AudioBackend.UAC2 && !canReuseWarm) {
+        if (blockingPrime != null && backend == AudioBackend.UAC2) {
             trace.mark("blocking UAC2 ring prime before read loop")
             val chunkScratch = FloatArray(2048 * channels.coerceAtLeast(1))
             blockingPrime(scratch, chunkScratch) { framesWritten ->

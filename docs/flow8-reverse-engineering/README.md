@@ -36,6 +36,7 @@ official app stores in the mixer — values that are not exposed over plain USB 
 | [`04-channel-name-extraction.md`](./04-channel-name-extraction.md) | **Main goal** — six mixer names, USB 1–8 mapping, fixed Main L/R on USB 9–10 |
 | [`05-hardware-probe-findings.md`](./05-hardware-probe-findings.md) | What was observed on the locally attached unit (incl. the USB fault) |
 | [`06-channel-icons-and-stereo-link.md`](./06-channel-icons-and-stereo-link.md) | Channel **icons** (input type + preset → MS id 1–74), full icon tables, **stereo-link** |
+| [`07-implicit-feedback-playback.md`](./07-implicit-feedback-playback.md) | UAC2 implicit feedback, IFB feeder, playback ring arming, Linux quirk reference |
 | [`tools/capture_sysex.sh`](./tools/capture_sysex.sh) | Capture a raw SysEx dump from USB MIDI with `amidi` |
 | [`tools/extract_channel_names.py`](./tools/extract_channel_names.py) | Decode channel names from a captured dump (no dependencies) |
 | [`tools/extract_flow8_channels.py`](./tools/extract_flow8_channels.py) | Decode six names, icons, Flow UI labels, USB 1–10 mapping |
