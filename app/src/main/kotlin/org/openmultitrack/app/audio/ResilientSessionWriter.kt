@@ -50,6 +50,7 @@ class ResilientSessionWriter private constructor(
         primaryRoot: File,
         captureChannelCount: Int = channelStrips.maxOfOrNull { it.index }?.plus(1) ?: 1,
         liveCaptureStagingFile: File? = null,
+        nativeBytesPerFrame: Int = 0,
     ) : this(
         primarySessionDir = primarySessionDir,
         channelStrips = channelStrips,
@@ -92,7 +93,7 @@ class ResilientSessionWriter private constructor(
         },
         liveCaptureStagingFile = liveCaptureStagingFile,
         nativePcmBytesPerFrame = if (liveCaptureStagingFile != null) {
-            captureChannelCount * 4
+            nativeBytesPerFrame.takeIf { it > 0 } ?: (captureChannelCount * 4)
         } else {
             0
         },
@@ -244,10 +245,44 @@ class ResilientSessionWriter private constructor(
     }
 
     private fun finalizeNativeStaging(raw: File, targetDir: File) {
-        val frames = liveFramesWritten
-        if (!raw.isFile || frames <= 0L) {
+        val bpf = nativePcmBytesPerFrame
+        if (!raw.isFile || bpf <= 0) {
             raw.delete()
             return
+        }
+        val fileBytes = raw.length()
+        if (fileBytes <= 0L) {
+            OmtLog.w("ResilientWriter", "native staging raw missing or empty: ${raw.absolutePath}")
+            raw.delete()
+            return
+        }
+        val fileFrameCount = fileBytes / bpf
+        if (fileFrameCount <= 0L) {
+            raw.delete()
+            return
+        }
+        if (fileBytes % bpf != 0L) {
+            OmtLog.w(
+                "ResilientWriter",
+                "native staging raw size $fileBytes not aligned to bytesPerFrame=$bpf",
+            )
+        }
+        val skip = nativeStagingSkipFrames.coerceIn(0L, fileFrameCount)
+        val available = (fileFrameCount - skip).coerceAtLeast(0L)
+        val frames = when {
+            liveFramesWritten > 0L -> liveFramesWritten.coerceIn(0L, available)
+            available > 0L -> available
+            else -> {
+                raw.delete()
+                return
+            }
+        }
+        if (skip != nativeStagingSkipFrames || frames != liveFramesWritten) {
+            OmtLog.w(
+                "ResilientWriter",
+                "native split clamped skip=$nativeStagingSkipFrames→$skip " +
+                    "frames=$liveFramesWritten→$frames fileFrames=$fileFrameCount bpf=$bpf",
+            )
         }
         runCatching {
             InterleavedRawPcmSplitter.splitToPerChannel(
@@ -256,12 +291,16 @@ class ResilientSessionWriter private constructor(
                 channelStrips = channelStrips,
                 sourceChannelCount = captureChannelCount,
                 sampleRate = sampleRateHz,
-                bytesPerFrame = nativePcmBytesPerFrame,
+                bytesPerFrame = bpf,
                 frameCount = frames,
-                sourceFrameOffset = nativeStagingSkipFrames,
+                sourceFrameOffset = skip,
             )
         }.onFailure { e ->
-            OmtLog.e("ResilientWriter", "native staging split failed: ${e.message}")
+            OmtLog.e(
+                "ResilientWriter",
+                "native staging split failed: ${e.javaClass.simpleName}: ${e.message ?: e.toString()} " +
+                    "(file=${raw.length()}B skip=$skip frames=$frames bpf=$bpf)",
+            )
         }
         raw.delete()
     }

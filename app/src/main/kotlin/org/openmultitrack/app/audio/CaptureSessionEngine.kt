@@ -494,6 +494,7 @@ class CaptureSessionEngine(
                 primaryRoot = plan.primaryRoot,
                 captureChannelCount = channelCount,
                 liveCaptureStagingFile = if (nativeActive) stagingFile else null,
+                nativeBytesPerFrame = captureBytesPerFrame,
             )
             perChannelWriter = null
         } else {

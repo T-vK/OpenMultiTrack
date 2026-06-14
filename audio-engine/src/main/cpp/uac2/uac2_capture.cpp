@@ -387,6 +387,11 @@ void Uac2Capture::stopPcmFileRecordingUnlocked() {
     file_writer_active_.store(false);
     if (file_handle_ != nullptr) {
         std::fflush(file_handle_);
+        const long pos = std::ftell(file_handle_);
+        const size_t bpf = bytesPerFrame(alt_.format);
+        if (pos > 0 && bpf > 0) {
+            file_frames_written_.store(static_cast<uint64_t>(pos / static_cast<long>(bpf)));
+        }
         std::fclose(file_handle_);
         file_handle_ = nullptr;
     }
@@ -408,12 +413,15 @@ void Uac2Capture::pcmFileWriterLoop() {
     }
     std::vector<uint8_t> scratch(2u << 20);
     const size_t max_frames = scratch.size() / bpf;
-    while (file_recording_.load()) {
+    while (true) {
         openmultitrack::SpscPcmRing* ring = file_ring_.get();
         const size_t frames =
             ring != nullptr ? ring->popPcmBytes(scratch.data(), max_frames) : 0;
         if (frames == 0) {
-            if (file_ring_ != nullptr && file_ring_->availableFrames() == 0) {
+            if (!file_recording_.load()) {
+                break;
+            }
+            if (ring != nullptr && ring->availableFrames() == 0) {
                 std::this_thread::yield();
             }
             continue;
