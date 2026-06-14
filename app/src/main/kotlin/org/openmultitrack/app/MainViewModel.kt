@@ -224,17 +224,6 @@ class MainViewModel(
         onRestorePrompt = { prompt ->
             _uiState.update { it.copy(routingRestorePrompt = prompt) }
         },
-        onStartupRestorePrompt = { pending ->
-            _uiState.update {
-                it.copy(
-                    routingRestorePrompt = RoutingRestorePromptState(
-                        pending.mixerId,
-                        pending.kind,
-                        emptyList(),
-                    ),
-                )
-            }
-        },
     )
 
     private val _uiState = MutableStateFlow(
@@ -1638,6 +1627,7 @@ class MainViewModel(
     fun cancelRoutingRestore() {
         routingHooks.cancelRestore()
         _uiState.update { it.copy(routingRestorePrompt = null) }
+        viewModelScope.launch { routingCoordinator.clearPending() }
     }
 
     fun showInputSources(show: Boolean) {

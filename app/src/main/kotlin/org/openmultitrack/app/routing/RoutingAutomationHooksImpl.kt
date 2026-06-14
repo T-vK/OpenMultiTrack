@@ -32,7 +32,6 @@ class RoutingAutomationHooksImpl(
     private val coordinator: RoutingOverrideCoordinator,
     private val onApplyPrompt: (RoutingApplyPromptState) -> Unit,
     private val onRestorePrompt: (RoutingRestorePromptState) -> Unit,
-    private val onStartupRestorePrompt: (PendingRoutingRestore) -> Unit,
 ) : RoutingAutomationHooks {
     private val applyDeferred = AtomicReference<CompletableDeferred<Boolean>?>(null)
     private val restoreDeferred = AtomicReference<CompletableDeferred<Boolean>?>(null)
@@ -239,7 +238,10 @@ class RoutingAutomationHooksImpl(
                         ),
                     )
                 }
-                if (!deferred.await()) return
+                if (!deferred.await()) {
+                    coordinator.clearPending()
+                    return
+                }
             }
             is RoutingRestoreOutcome.ReadyToRestore -> {
                 if (config.level == RoutingAutomationLevel.PROMPT) {
@@ -250,7 +252,10 @@ class RoutingAutomationHooksImpl(
                             RoutingRestorePromptState(pending.mixerId, pending.kind, emptyList()),
                         )
                     }
-                    if (!deferred.await()) return
+                    if (!deferred.await()) {
+                        coordinator.clearPending()
+                        return
+                    }
                 }
             }
         }
@@ -266,8 +271,6 @@ class RoutingAutomationHooksImpl(
         if (pending.recordingWasActive && settings.activeRecordingMixerId == pending.mixerId) {
             return
         }
-        withContext(Dispatchers.Main.immediate) {
-            onStartupRestorePrompt(pending)
-        }
+        afterRestore(pending.kind)
     }
 }

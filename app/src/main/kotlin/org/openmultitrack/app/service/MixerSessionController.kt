@@ -2992,23 +2992,27 @@ class MixerSessionController(
                 ?: return Result.failure(IllegalStateException("No audio output device"))
             return Result.success(route)
         }
+        if (_state.value.appMode == AppMode.SIMPLE_PLAY) {
+            val deviceId = descriptor.androidAudioDeviceId
+                ?: enumerator.findAndroidAudioDeviceId(descriptor, input = false)
+                ?: return Result.failure(IllegalStateException("No Android audio device for stereo playback"))
+            val cached = AudioEngineRouter.resolveOboePlaybackRoute(probe)
+            val route = cached
+                ?: AudioEngineRouter.probeOboeStereoPlayback(deviceId)
+                ?: return Result.failure(IllegalStateException("No Android stereo playback device"))
+            TransportTraceHub.mark(
+                mixerId,
+                "ensurePlayback ${(System.nanoTime() - playT0) / 1_000_000}ms backend=${route.backend} (simple)",
+            )
+            return Result.success(route)
+        }
         val device = enumerator.getUsbDevice(descriptor.deviceName)
             ?: return Result.failure(IllegalStateException("USB device not found"))
         val stream = ensureUsbStreamOpenLocked(descriptor)
             ?: return Result.failure(IllegalStateException("Could not open USB device"))
         activeUsbDevice = device
-        val route = if (_state.value.appMode == AppMode.SIMPLE_PLAY) {
-            AudioEngineRouter.resolveOboePlaybackRoute(probe, sampleRateHz = 48_000, maxChannels = 2)
-        } else {
-            AudioEngineRouter.resolvePlaybackRoute(probe, stream, channelCount)
-        }
-            ?: return Result.failure(IllegalStateException(
-                if (_state.value.appMode == AppMode.SIMPLE_PLAY) {
-                    "No Android stereo playback device"
-                } else {
-                    "No playback route"
-                },
-            ))
+        val route = AudioEngineRouter.resolvePlaybackRoute(probe, stream, channelCount)
+            ?: return Result.failure(IllegalStateException("No playback route"))
         TransportTraceHub.mark(
             mixerId,
             "ensurePlayback ${(System.nanoTime() - playT0) / 1_000_000}ms backend=${route.backend}",

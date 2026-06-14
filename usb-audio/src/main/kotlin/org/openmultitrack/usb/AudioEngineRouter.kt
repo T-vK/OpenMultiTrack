@@ -3,10 +3,12 @@ package org.openmultitrack.usb
 import android.os.SystemClock
 import org.openmultitrack.audio.NativeAudioEngine
 import org.openmultitrack.audio.NativeEngineStatus
+import org.openmultitrack.audio.NativeAudioProbe
 import org.openmultitrack.audio.NativeUac2AltSetting
 import org.openmultitrack.audio.NativeUac2Engine
 import org.openmultitrack.audio.NativeUac2Probe
 import org.openmultitrack.audio.OmtLog
+import org.openmultitrack.domain.audio.AudioDirection
 import org.openmultitrack.domain.audio.AudioEndpointProbe
 
 enum class AudioBackend { OBOE, UAC2 }
@@ -193,6 +195,26 @@ object AudioEngineRouter {
         maxChannels: Int = 2,
     ): PlaybackRoute? {
         val oboeOut = probe.output?.takeIf { it.isSuccess } ?: return null
+        return oboePlaybackRouteFromProbe(oboeOut, sampleRateHz, maxChannels)
+    }
+
+    /** Live Oboe probe — required for Simple Play when initial probe skipped Oboe (multichannel UAC2). */
+    fun probeOboeStereoPlayback(androidAudioDeviceId: Int, sampleRateHz: Int = 48_000): PlaybackRoute? {
+        val output = runCatching {
+            NativeAudioProbe.probe(androidAudioDeviceId, AudioDirection.OUTPUT)
+        }.getOrNull()?.takeIf { it.isSuccess } ?: return null
+        OmtLog.i(
+            "Router",
+            "playback → Oboe (live probe) ${output.channelCount.coerceAtMost(2)}ch deviceId=${output.deviceId}",
+        )
+        return oboePlaybackRouteFromProbe(output, sampleRateHz, maxChannels = 2)
+    }
+
+    private fun oboePlaybackRouteFromProbe(
+        oboeOut: AudioEndpointProbe,
+        sampleRateHz: Int,
+        maxChannels: Int,
+    ): PlaybackRoute? {
         val channels = minOf(maxChannels, oboeOut.channelCount).coerceAtLeast(1)
         OmtLog.i("Router", "playback → Oboe (simple) ${channels}ch deviceId=${oboeOut.deviceId}")
         return PlaybackRoute(
