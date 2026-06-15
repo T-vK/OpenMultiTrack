@@ -250,22 +250,10 @@ private fun SettingsContent(
 ) {
     val normalizedQuery = query.trim().lowercase()
     val isSearching = normalizedQuery.isNotEmpty()
-    val wantsSnapshotNames = state.showOscRoutingSettings &&
-        (
-            openCategory == SettingsCategory.OSC ||
-                state.routingAutomationConfig.method ==
-                org.openmultitrack.app.data.RoutingAutomationMethod.SNAPSHOT_SLOT
-            )
-    androidx.compose.runtime.LaunchedEffect(wantsSnapshotNames) {
-        if (wantsSnapshotNames) onRefreshMixerSnapshots()
-    }
 
     val rows = remember(
         state,
         monitorGain,
-        state.mixerSnapshots,
-        state.mixerSnapshotsLoading,
-        state.mixerSnapshotsScanned,
         state.routingAutomationConfig,
     ) {
         buildSettingsRows(
@@ -791,98 +779,6 @@ private fun <T> SettingsPickerItem(row: SettingsPickerRow<T>) {
     }
 }
 
-private data class SnapshotDropdownUi(
-    val snapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption>,
-    val loading: Boolean,
-    val scannedCount: Int,
-    val descriptionSuffix: String,
-) {
-    fun enabled(selectedSlot: Int): Boolean =
-        snapshotDropdownEnabled(loading, snapshots, selectedSlot)
-
-    fun buttonText(selectedSlot: Int): String? =
-        snapshotDropdownButtonText(selectedSlot, snapshots, loading)
-
-    val loadingMenuHint: String? get() = snapshotLoadingMenuHint(loading, scannedCount)
-}
-
-private fun snapshotSlotOptions(
-    snapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption>,
-    selectedSlot: Int,
-): List<Int> = buildList {
-    add(0)
-    snapshots.filter { it.name.isNotBlank() }.forEach { add(it.slot) }
-    if (selectedSlot > 0 && selectedSlot !in this) add(selectedSlot)
-}.distinct().sorted()
-
-private fun snapshotSlotLabel(
-    slot: Int,
-    snapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption>,
-    loading: Boolean,
-): String = when (slot) {
-    0 -> "Not set"
-    else -> {
-        val pad = slot.toString().padStart(2, '0')
-        val name = snapshots.find { it.slot == slot }?.name.orEmpty()
-        when {
-            name.isNotBlank() -> name
-            loading -> "Slot $pad…"
-            else -> "Slot $pad (empty)"
-        }
-    }
-}
-
-private fun snapshotDropdownEnabled(
-    loading: Boolean,
-    snapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption>,
-    selectedSlot: Int,
-): Boolean {
-    if (!loading) return true
-    if (selectedSlot > 0) {
-        val selectedName = snapshots.find { it.slot == selectedSlot }?.name
-        if (!selectedName.isNullOrBlank()) return true
-    }
-    return snapshots.any { it.name.isNotBlank() }
-}
-
-private fun snapshotDropdownButtonText(
-    selectedSlot: Int,
-    snapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption>,
-    loading: Boolean,
-): String? {
-    if (!loading) return null
-    if (selectedSlot == 0 && snapshots.none { it.name.isNotBlank() }) {
-        return "Loading snapshots…"
-    }
-    return null
-}
-
-private fun snapshotLoadingMenuHint(loading: Boolean, scannedCount: Int): String? = when {
-    !loading -> null
-    scannedCount >= 64 -> "Refreshing from mixer…"
-    scannedCount > 0 -> "Loading more snapshots… ($scannedCount/64 scanned)"
-    else -> null
-}
-
-private fun snapshotPickerDescription(
-    loading: Boolean,
-    namedCount: Int,
-    scannedCount: Int,
-): String = when {
-    loading && namedCount > 0 && scannedCount == 0 ->
-        "$namedCount snapshots shown — refreshing from mixer."
-    loading && namedCount == 0 && scannedCount == 0 ->
-        "Reading snapshot names from the mixer…"
-    loading && namedCount == 0 ->
-        "Reading snapshot names from the mixer… ($scannedCount/64 slots scanned)"
-    loading ->
-        "$namedCount snapshots found — still reading ($scannedCount/64 slots scanned)."
-    namedCount > 0 ->
-        "$namedCount named snapshots loaded from the mixer."
-    else ->
-        "Could not read snapshot names — check XR18 Wi‑Fi and OSC IP."
-}
-
 private fun buildSettingsRows(
     state: SettingsUiState,
     monitorGain: Float,
@@ -1073,7 +969,8 @@ private fun buildSettingsRows(
                 id = "routing_automation_level",
                 category = SettingsCategory.OSC,
                 title = "Mixer routing automation",
-                description = "Switch XR18 input sources on record/play start; restore on stop (LAN).",
+                description = "Ask before applying or restoring mixer routing changes over LAN. " +
+                    "Per-mixer method, snapshots, and restore options are in that mixer's settings.",
                 options = org.openmultitrack.app.data.RoutingAutomationLevel.entries,
                 selected = config.level,
                 label = {
@@ -1084,137 +981,6 @@ private fun buildSettingsRows(
                     }
                 },
                 onSelect = { onRoutingAutomationConfigChange(config.copy(level = it)) },
-            ),
-        )
-        add(
-            SettingsDropdownRow(
-                id = "routing_automation_method",
-                category = SettingsCategory.OSC,
-                title = "Automation method",
-                description = "Per-channel OSC or recall a named mixer snapshot.",
-                options = org.openmultitrack.app.data.RoutingAutomationMethod.entries,
-                selected = config.method,
-                label = {
-                    when (it) {
-                        org.openmultitrack.app.data.RoutingAutomationMethod.PER_CHANNEL ->
-                            "Per-channel input sources"
-                        org.openmultitrack.app.data.RoutingAutomationMethod.SNAPSHOT_SLOT ->
-                            "Mixer snapshot slots"
-                    }
-                },
-                onSelect = { onRoutingAutomationConfigChange(config.copy(method = it)) },
-            ),
-        )
-        if (config.method == org.openmultitrack.app.data.RoutingAutomationMethod.SNAPSHOT_SLOT) {
-            val namedCount = state.mixerSnapshots.count { it.name.isNotBlank() }
-            val loading = state.mixerSnapshotsLoading
-            val snapshotLabel: (Int) -> String = { slot ->
-                snapshotSlotLabel(slot, state.mixerSnapshots, loading)
-            }
-            val snapshotDescription = snapshotPickerDescription(
-                loading = loading,
-                namedCount = namedCount,
-                scannedCount = state.mixerSnapshotsScanned,
-            )
-            val snapshotDropdownUi = SnapshotDropdownUi(
-                snapshots = state.mixerSnapshots,
-                loading = loading,
-                scannedCount = state.mixerSnapshotsScanned,
-                descriptionSuffix = snapshotDescription,
-            )
-            add(
-                SettingsDropdownRow(
-                    id = "routing_trigger",
-                    category = SettingsCategory.OSC,
-                    title = "When to recall snapshots",
-                    description = "Recall on app mode change, or on record / play / stop buttons.",
-                    options = org.openmultitrack.app.data.RoutingAutomationTrigger.entries,
-                    selected = config.trigger,
-                    label = {
-                        when (it) {
-                            org.openmultitrack.app.data.RoutingAutomationTrigger.ON_MODE_ENTER ->
-                                "When entering record or soundcheck mode"
-                            org.openmultitrack.app.data.RoutingAutomationTrigger.ON_TRANSPORT_BUTTON ->
-                                "On record, play, and stop buttons"
-                        }
-                    },
-                    onSelect = { onRoutingAutomationConfigChange(config.copy(trigger = it)) },
-                ),
-            )
-            add(
-                SettingsDropdownRow(
-                    id = "routing_idle_snapshot_slot",
-                    category = SettingsCategory.OSC,
-                    title = "Idle snapshot",
-                    description = "Snapshot for when not recording or playing back. ${snapshotDropdownUi.descriptionSuffix}",
-                    options = snapshotSlotOptions(state.mixerSnapshots, config.idleSnapshotSlot),
-                    selected = config.idleSnapshotSlot,
-                    label = snapshotLabel,
-                    enabled = snapshotDropdownUi.enabled(config.idleSnapshotSlot),
-                    loading = loading,
-                    buttonText = snapshotDropdownUi.buttonText(config.idleSnapshotSlot),
-                    loadingMenuHint = snapshotDropdownUi.loadingMenuHint,
-                    onSelect = { slot ->
-                        onRoutingAutomationConfigChange(config.copy(idleSnapshotSlot = slot))
-                    },
-                ),
-            )
-            add(
-                SettingsDropdownRow(
-                    id = "routing_record_snapshot_slot",
-                    category = SettingsCategory.OSC,
-                    title = "Record snapshot",
-                    description = "Snapshot recalled when recording starts. ${snapshotDropdownUi.descriptionSuffix}",
-                    options = snapshotSlotOptions(state.mixerSnapshots, config.recordSnapshotSlot),
-                    selected = config.recordSnapshotSlot,
-                    label = snapshotLabel,
-                    enabled = snapshotDropdownUi.enabled(config.recordSnapshotSlot),
-                    loading = loading,
-                    buttonText = snapshotDropdownUi.buttonText(config.recordSnapshotSlot),
-                    loadingMenuHint = snapshotDropdownUi.loadingMenuHint,
-                    onSelect = { slot ->
-                        onRoutingAutomationConfigChange(config.copy(recordSnapshotSlot = slot))
-                    },
-                ),
-            )
-            add(
-                SettingsDropdownRow(
-                    id = "routing_soundcheck_snapshot_slot",
-                    category = SettingsCategory.OSC,
-                    title = "Soundcheck snapshot",
-                    description = "Snapshot recalled when soundcheck playback starts. ${snapshotDropdownUi.descriptionSuffix}",
-                    options = snapshotSlotOptions(state.mixerSnapshots, config.soundcheckSnapshotSlot),
-                    selected = config.soundcheckSnapshotSlot,
-                    label = snapshotLabel,
-                    enabled = snapshotDropdownUi.enabled(config.soundcheckSnapshotSlot),
-                    loading = loading,
-                    buttonText = snapshotDropdownUi.buttonText(config.soundcheckSnapshotSlot),
-                    loadingMenuHint = snapshotDropdownUi.loadingMenuHint,
-                    onSelect = { slot ->
-                        onRoutingAutomationConfigChange(config.copy(soundcheckSnapshotSlot = slot))
-                    },
-                ),
-            )
-        }
-        add(
-            SettingsDropdownRow(
-                id = "routing_restore_policy",
-                category = SettingsCategory.OSC,
-                title = "Restore policy",
-                description = "How to handle channels changed on the mixer during an override.",
-                options = org.openmultitrack.app.data.RoutingRestorePolicy.entries,
-                selected = config.restorePolicy,
-                label = {
-                    when (it) {
-                        org.openmultitrack.app.data.RoutingRestorePolicy.STRICT ->
-                            "Always restore captured baseline"
-                        org.openmultitrack.app.data.RoutingRestorePolicy.RESPECT_LIVE ->
-                            "Skip engineer-changed channels"
-                        org.openmultitrack.app.data.RoutingRestorePolicy.ASK_ON_CONFLICT ->
-                            "Ask when conflicts detected"
-                    }
-                },
-                onSelect = { onRoutingAutomationConfigChange(config.copy(restorePolicy = it)) },
             ),
         )
     }

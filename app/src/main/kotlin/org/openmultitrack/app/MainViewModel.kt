@@ -179,6 +179,7 @@ data class DawUiState(
     val inputSourcesError: String? = null,
     val inputSourcesByChannel: Map<Int, XAirChannelInputState> = emptyMap(),
     val mixerSnapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption> = emptyList(),
+    val mixerSnapshotsMixerId: String? = null,
     val mixerSnapshotsLoading: Boolean = false,
     val mixerSnapshotsScanned: Int = 0,
     val routingAutomationConfig: MixerRoutingAutomationConfig = MixerRoutingAutomationConfig(),
@@ -516,7 +517,13 @@ class MainViewModel(
 
     fun showMixerSettings(mixerId: String?) {
         _uiState.update { it.copy(mixerSettingsMixerId = mixerId) }
+        if (mixerId != null) {
+            loadCachedMixerSnapshots(mixerId)
+        }
     }
+
+    fun routingAutomationConfigForMixer(mixerId: String): MixerRoutingAutomationConfig =
+        settings.routingAutomationForMixer(mixerId)
 
     fun showRemoteControlSheet(show: Boolean) {
         if (show) {
@@ -1707,13 +1714,17 @@ class MainViewModel(
         }
     }
 
-    fun refreshMixerSnapshots() {
-        val profile = activeMixerProfile() ?: run {
+    fun refreshMixerSnapshots(mixerId: String? = null) {
+        val targetId = mixerId ?: _uiState.value.activeMixerId
+        val profile = targetId?.let { id ->
+            _uiState.value.mixers.firstOrNull { it.id == id }
+        } ?: run {
             snapshotRefreshJob?.cancel()
             snapshotRefreshHost = null
             _uiState.update {
                 it.copy(
                     mixerSnapshots = emptyList(),
+                    mixerSnapshotsMixerId = null,
                     mixerSnapshotsLoading = false,
                     mixerSnapshotsScanned = 0,
                 )
@@ -1726,6 +1737,7 @@ class MainViewModel(
             _uiState.update {
                 it.copy(
                     mixerSnapshots = emptyList(),
+                    mixerSnapshotsMixerId = targetId,
                     mixerSnapshotsLoading = false,
                     mixerSnapshotsScanned = 0,
                 )
@@ -1733,16 +1745,22 @@ class MainViewModel(
             return
         }
         val host = profile.oscHost!!
-        if (snapshotRefreshJob?.isActive == true && snapshotRefreshHost == host) return
+        val refreshKey = "${profile.id}@$host"
+        if (snapshotRefreshJob?.isActive == true && snapshotRefreshHost == refreshKey) return
 
         snapshotRefreshJob?.cancel()
-        snapshotRefreshHost = host
+        snapshotRefreshHost = refreshKey
         val generation = ++snapshotRefreshGeneration
         val cached = mixerSnapshotCache.load(profile.id, host)
-        _uiState.update {
-            it.copy(
+        _uiState.update { state ->
+            state.copy(
                 mixerSnapshotsLoading = true,
-                mixerSnapshots = cached ?: it.mixerSnapshots,
+                mixerSnapshotsMixerId = profile.id,
+                mixerSnapshots = cached ?: if (state.mixerSnapshotsMixerId == profile.id) {
+                    state.mixerSnapshots
+                } else {
+                    emptyList()
+                },
                 mixerSnapshotsScanned = 0,
             )
         }
@@ -1753,6 +1771,7 @@ class MainViewModel(
                     _uiState.update {
                         it.copy(
                             mixerSnapshots = partial,
+                            mixerSnapshotsMixerId = profile.id,
                             mixerSnapshotsScanned = scanned,
                         )
                     }
@@ -1767,11 +1786,29 @@ class MainViewModel(
             _uiState.update {
                 it.copy(
                     mixerSnapshotsLoading = false,
+                    mixerSnapshotsMixerId = profile.id,
                     mixerSnapshots = snapshots,
                     mixerSnapshotsScanned = 64,
                 )
             }
         }
+    }
+
+    private fun loadCachedMixerSnapshots(mixerId: String) {
+        val cached = loadCachedMixerSnapshotsIntoState(mixerId) ?: return
+        _uiState.update {
+            it.copy(
+                mixerSnapshots = cached.first,
+                mixerSnapshotsMixerId = cached.second,
+            )
+        }
+    }
+
+    private fun loadCachedMixerSnapshotsIntoState(mixerId: String): Pair<List<org.openmultitrack.mixer.behringer.MixerSnapshotOption>, String>? {
+        val profile = _uiState.value.mixers.firstOrNull { it.id == mixerId } ?: return null
+        val host = profile.oscHost ?: return null
+        val cached = mixerSnapshotCache.load(mixerId, host) ?: return null
+        return cached to mixerId
     }
 
     private fun maybePrefetchMixerSnapshots() {
@@ -2211,11 +2248,17 @@ class MainViewModel(
         val lastActive = settings.lastActiveMixerId
         val activeId = lastActive?.takeIf { id -> mixers.any { it.id == id } }
             ?: mixers.firstOrNull()?.id
+        val routingConfig = activeId?.let { settings.routingAutomationForMixer(it) }
+            ?: MixerRoutingAutomationConfig()
+        val cachedSnapshots = activeId?.let { loadCachedMixerSnapshotsIntoState(it) }
         _uiState.update {
             it.copy(
                 mixers = mixers,
                 activeMixerId = activeId,
                 mixerRoutingById = routingStore.loadAll(),
+                routingAutomationConfig = routingConfig,
+                mixerSnapshots = cachedSnapshots?.first ?: it.mixerSnapshots,
+                mixerSnapshotsMixerId = cachedSnapshots?.second ?: it.mixerSnapshotsMixerId,
             )
         }
         sessionClient.withManager { manager ->

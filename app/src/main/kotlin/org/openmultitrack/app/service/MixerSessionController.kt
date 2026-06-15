@@ -470,6 +470,7 @@ class MixerSessionController(
     fun loadRecordingIntoSoundcheck(sessionDir: String) {
         TransportTraceHub.mark(mixerId, "loadRecordingIntoSoundcheck ${File(sessionDir).name}")
         scope.launch {
+            var enteredSoundcheck = false
             captureMutex.withLock {
                 if (_state.value.appMode != AppMode.VIRTUAL_SOUNDCHECK) {
                     _state.update {
@@ -482,6 +483,7 @@ class MixerSessionController(
                     }
                     captureEngine.updateVuMetering(false)
                     captureEngine.setRecordModeWarmCapture(false)
+                    enteredSoundcheck = true
                 }
                 withContext(Dispatchers.IO) {
                     if (isFlow8Active()) {
@@ -515,6 +517,9 @@ class MixerSessionController(
                 prepareSoundcheckSessionUi(sessionDir, metadata, durationSec)
                 loadSoundcheckWaveformsBackground(dir, metadata)
                 warmPlaybackRouteLocked()
+            }
+            if (enteredSoundcheck) {
+                notifyAppModeEntered(AppMode.VIRTUAL_SOUNDCHECK)
             }
             refreshSoundcheckLibrary()
             TransportTraceHub.finish(mixerId, "loadRecordingIntoSoundcheck done")

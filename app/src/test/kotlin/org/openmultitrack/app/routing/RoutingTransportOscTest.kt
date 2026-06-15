@@ -5,6 +5,7 @@ import org.junit.Test
 import org.openmultitrack.app.data.MixerRoutingAutomationConfig
 import org.openmultitrack.app.data.RoutingAutomationMethod
 import org.openmultitrack.app.data.RoutingAutomationTrigger
+import org.openmultitrack.app.data.RoutingRestorePolicy
 import org.openmultitrack.domain.mixer.MixerProfile
 
 class RoutingTransportOscTest {
@@ -47,5 +48,27 @@ class RoutingTransportOscTest {
             idleSnapshotSlot = 1,
         )
         assertThat(RoutingTransportOsc.willRestoreOnTransportStop(config)).isFalse()
+    }
+
+    @Test
+    fun willRestoreOnTransportStop_falseWhenRestorePolicyNone() {
+        val config = MixerRoutingAutomationConfig(
+            method = RoutingAutomationMethod.SNAPSHOT_SLOT,
+            trigger = RoutingAutomationTrigger.ON_TRANSPORT_BUTTON,
+            idleSnapshotSlot = 1,
+            restorePolicy = RoutingRestorePolicy.NONE,
+        )
+        assertThat(RoutingTransportOsc.willRestoreOnTransportStop(config)).isFalse()
+    }
+
+    @Test
+    fun willRestoreOnTransportStop_trueWhenRecallSnapshotConfigured() {
+        val config = MixerRoutingAutomationConfig(
+            method = RoutingAutomationMethod.SNAPSHOT_SLOT,
+            trigger = RoutingAutomationTrigger.ON_TRANSPORT_BUTTON,
+            restorePolicy = RoutingRestorePolicy.RECALL_SNAPSHOT,
+            restoreSnapshotSlot = 5,
+        )
+        assertThat(RoutingTransportOsc.willRestoreOnTransportStop(config)).isTrue()
     }
 }

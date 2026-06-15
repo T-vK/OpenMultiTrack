@@ -6,6 +6,7 @@ import org.junit.Test
 import org.openmultitrack.app.data.MixerRoutingAutomationConfig
 import org.openmultitrack.app.data.RoutingAutomationLevel
 import org.openmultitrack.app.data.RoutingAutomationMethod
+import org.openmultitrack.app.data.RoutingRestorePolicy
 import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.mixer.behringer.MixerRoutingPort
 import org.openmultitrack.mixer.behringer.RoutingConfirmResult
@@ -335,6 +336,70 @@ class RoutingOverrideCoordinatorTest {
         assertThat(outcome).isEqualTo(RoutingRestoreOutcome.Restored)
         assertThat(port.lastLoadedSnapshot).isEqualTo(7)
         assertThat(store.load()).isNull()
+    }
+
+    @Test
+    fun restoreConfirmed_snapshotMode_recallsRestoreSlotWhenConfigured() = runBlocking {
+        val store = MemoryBaselineStore()
+        val port = TestRoutingPort()
+        val coordinator = RoutingOverrideCoordinator(store) { port }
+        val pending = PendingRoutingRestore(
+            transactionId = "snap",
+            mixerId = xr18Profile.id,
+            oscHost = xr18Profile.oscHost!!,
+            kind = RoutingOverrideKind.RECORD,
+            affectedChannels = emptySet(),
+            baselineByChannel = emptyMap(),
+            overrideByChannel = emptyMap(),
+            method = RoutingAutomationMethod.SNAPSHOT_SLOT,
+            snapshotSlot = 2,
+            capturedAtEpochMs = 0L,
+        )
+        store.save(pending)
+        val config = MixerRoutingAutomationConfig(
+            level = RoutingAutomationLevel.AUTO,
+            method = RoutingAutomationMethod.SNAPSHOT_SLOT,
+            restorePolicy = RoutingRestorePolicy.RECALL_SNAPSHOT,
+            restoreSnapshotSlot = 9,
+            idleSnapshotSlot = 7,
+        )
+
+        val outcome = coordinator.restoreConfirmed(config, pending)
+
+        assertThat(outcome).isEqualTo(RoutingRestoreOutcome.Restored)
+        assertThat(port.lastLoadedSnapshot).isEqualTo(9)
+    }
+
+    @Test
+    fun restoreConfirmed_nonePolicy_clearsWithoutOsc() = runBlocking {
+        val store = MemoryBaselineStore()
+        val port = TestRoutingPort(
+            channels = mutableMapOf(0 to XAirInputSourceCatalog.recordTarget(0)),
+        )
+        val coordinator = RoutingOverrideCoordinator(store) { port }
+        val baseline = XAirChannelInputState(0, 0, 1)
+        val pending = PendingRoutingRestore(
+            transactionId = "t1",
+            mixerId = xr18Profile.id,
+            oscHost = xr18Profile.oscHost!!,
+            kind = RoutingOverrideKind.RECORD,
+            affectedChannels = setOf(0),
+            baselineByChannel = mapOf(0 to baseline),
+            overrideByChannel = mapOf(0 to XAirInputSourceCatalog.recordTarget(0)),
+            method = RoutingAutomationMethod.PER_CHANNEL,
+            capturedAtEpochMs = 0L,
+        )
+        store.save(pending)
+        val config = MixerRoutingAutomationConfig(
+            level = RoutingAutomationLevel.AUTO,
+            restorePolicy = RoutingRestorePolicy.NONE,
+        )
+
+        val outcome = coordinator.restoreConfirmed(config, pending)
+
+        assertThat(outcome).isEqualTo(RoutingRestoreOutcome.Restored)
+        assertThat(store.load()).isNull()
+        assertThat(port.readChannelInput(0)).isEqualTo(XAirInputSourceCatalog.recordTarget(0))
     }
 
     @Test

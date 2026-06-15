@@ -228,7 +228,10 @@ fun DawMainScreen(
     onMinFreeStorageBytesChange: (Long) -> Unit = {},
     onOpenBatterySettings: () -> Unit = {},
     onRoutingAutomationConfigChange: (org.openmultitrack.app.data.MixerRoutingAutomationConfig) -> Unit = {},
+    onRoutingAutomationConfigForMixer: (String, org.openmultitrack.app.data.MixerRoutingAutomationConfig) -> Unit = { _, _ -> },
+    routingAutomationConfigForMixer: (String) -> org.openmultitrack.app.data.MixerRoutingAutomationConfig = { org.openmultitrack.app.data.MixerRoutingAutomationConfig() },
     onRefreshMixerSnapshots: () -> Unit = {},
+    onRefreshMixerSnapshotsForMixer: (String) -> Unit = {},
     onOpenInputSources: () -> Unit = {},
     onCloseInputSources: () -> Unit = {},
     onRefreshInputSources: () -> Unit = {},
@@ -367,6 +370,9 @@ fun DawMainScreen(
     mixerSettingsMixerId?.let { settingsMixerId ->
         val profile = state.mixers.firstOrNull { it.id == settingsMixerId }
         val sessionForSettings = state.sessionByMixer[settingsMixerId]
+        val mixerSupportsOsc = profile?.let {
+            ScribbleImportSupport.supportsOsc(it) && !it.oscHost.isNullOrBlank()
+        } == true
         if (profile != null) {
             MixerSettingsScreen(
                 mixerName = profile.displayName,
@@ -393,6 +399,16 @@ fun DawMainScreen(
                 isSoundcheckPlaying = sessionForSettings?.isPlaying == true,
                 onToggleUsbTestTone = { ch -> onToggleUsbTestTone(settingsMixerId, ch) },
                 onStopUsbTestTone = { onStopUsbTestTone(settingsMixerId) },
+                supportsOscRouting = mixerSupportsOsc,
+                routingAutomationConfig = routingAutomationConfigForMixer(settingsMixerId),
+                mixerSnapshots = state.mixerSnapshots,
+                mixerSnapshotsForThisMixer = state.mixerSnapshotsMixerId == settingsMixerId,
+                mixerSnapshotsLoading = state.mixerSnapshotsLoading,
+                mixerSnapshotsScanned = state.mixerSnapshotsScanned,
+                onRoutingAutomationConfigChange = { config ->
+                    onRoutingAutomationConfigForMixer(settingsMixerId, config)
+                },
+                onRefreshMixerSnapshots = { onRefreshMixerSnapshotsForMixer(settingsMixerId) },
                 onDismiss = onCloseMixerSettings,
                 onSave = { onSaveMixerRouting(settingsMixerId, it) },
             )

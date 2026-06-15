@@ -59,6 +59,10 @@ import org.openmultitrack.mixer.behringer.ScribbleStripLabel
 import org.openmultitrack.usb.LabeledAudioDevice
 import androidx.compose.ui.platform.testTag
 import org.openmultitrack.app.audio.UsbPlaybackToneGenerator
+import org.openmultitrack.app.data.MixerRoutingAutomationConfig
+import org.openmultitrack.app.ui.routing.OscMixerRoutingSettingsPage
+import org.openmultitrack.mixer.behringer.MixerSnapshotOption
+import androidx.compose.runtime.LaunchedEffect
 
 private sealed interface MixerSettingsPage {
     data object Menu : MixerSettingsPage
@@ -68,6 +72,7 @@ private sealed interface MixerSettingsPage {
     data object HiddenSoundcheck : MixerSettingsPage
     data object HiddenRecord : MixerSettingsPage
     data object UsbTestTones : MixerSettingsPage
+    data object OscRouting : MixerSettingsPage
 }
 
 private val LabelColumnWidth = 112.dp
@@ -97,6 +102,14 @@ fun MixerSettingsScreen(
     isSoundcheckPlaying: Boolean = false,
     onToggleUsbTestTone: (Int) -> Unit = {},
     onStopUsbTestTone: () -> Unit = {},
+    supportsOscRouting: Boolean = false,
+    routingAutomationConfig: MixerRoutingAutomationConfig = MixerRoutingAutomationConfig(),
+    mixerSnapshots: List<MixerSnapshotOption> = emptyList(),
+    mixerSnapshotsForThisMixer: Boolean = true,
+    mixerSnapshotsLoading: Boolean = false,
+    mixerSnapshotsScanned: Int = 0,
+    onRoutingAutomationConfigChange: (MixerRoutingAutomationConfig) -> Unit = {},
+    onRefreshMixerSnapshots: () -> Unit = {},
     onDismiss: () -> Unit,
     onSave: (MixerRoutingConfig) -> Unit,
 ) {
@@ -160,10 +173,12 @@ fun MixerSettingsScreen(
         ) {
             when (page) {
                 MixerSettingsPage.Menu -> SettingsMenu(
+                    supportsOscRouting = supportsOscRouting,
                     onMonitor = { page = MixerSettingsPage.Monitor },
                     onInputMatrix = { page = MixerSettingsPage.InputMatrix },
                     onOutputMatrix = { page = MixerSettingsPage.OutputMatrix },
                     onUsbTestTones = { page = MixerSettingsPage.UsbTestTones },
+                    onOscRouting = { page = MixerSettingsPage.OscRouting },
                     onHiddenSoundcheck = { page = MixerSettingsPage.HiddenSoundcheck },
                     onHiddenRecord = { page = MixerSettingsPage.HiddenRecord },
                 )
@@ -216,6 +231,16 @@ fun MixerSettingsScreen(
                     onToggleChannel = onToggleUsbTestTone,
                     onStopAll = onStopUsbTestTone,
                 )
+                MixerSettingsPage.OscRouting -> {
+                    LaunchedEffect(Unit) { onRefreshMixerSnapshots() }
+                    OscMixerRoutingSettingsPage(
+                        config = routingAutomationConfig,
+                        snapshots = if (mixerSnapshotsForThisMixer) mixerSnapshots else emptyList(),
+                        snapshotsLoading = mixerSnapshotsLoading && mixerSnapshotsForThisMixer,
+                        snapshotsScanned = if (mixerSnapshotsForThisMixer) mixerSnapshotsScanned else 0,
+                        onConfigChange = onRoutingAutomationConfigChange,
+                    )
+                }
             }
         }
     }
@@ -229,14 +254,17 @@ private fun pageTitle(page: MixerSettingsPage): String = when (page) {
     MixerSettingsPage.HiddenSoundcheck -> "Hidden channels (soundcheck)"
     MixerSettingsPage.HiddenRecord -> "Hidden channels (recording mode)"
     MixerSettingsPage.UsbTestTones -> "USB test tones"
+    MixerSettingsPage.OscRouting -> "LAN routing automation"
 }
 
 @Composable
 private fun SettingsMenu(
+    supportsOscRouting: Boolean,
     onMonitor: () -> Unit,
     onInputMatrix: () -> Unit,
     onOutputMatrix: () -> Unit,
     onUsbTestTones: () -> Unit,
+    onOscRouting: () -> Unit,
     onHiddenSoundcheck: () -> Unit,
     onHiddenRecord: () -> Unit,
 ) {
@@ -245,6 +273,9 @@ private fun SettingsMenu(
         SettingsMenuItem("Input matrix", onInputMatrix)
         SettingsMenuItem("Output matrix", onOutputMatrix)
         SettingsMenuItem("USB test tones", onUsbTestTones)
+        if (supportsOscRouting) {
+            SettingsMenuItem("LAN routing automation", onOscRouting)
+        }
         SettingsMenuItem("Hidden channels (soundcheck)", onHiddenSoundcheck)
         SettingsMenuItem("Hidden channels (recording mode)", onHiddenRecord)
     }

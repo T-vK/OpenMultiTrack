@@ -9,6 +9,7 @@ import org.openmultitrack.app.data.MixerRoutingAutomationConfig
 import org.openmultitrack.app.data.RoutingAutomationLevel
 import org.openmultitrack.app.data.RoutingAutomationMethod
 import org.openmultitrack.app.data.RoutingAutomationTrigger
+import org.openmultitrack.app.data.snapshotRestoreSlot
 import org.openmultitrack.app.util.AppLogBuffer
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.mixer.MixerProfile
@@ -312,7 +313,7 @@ class RoutingAutomationHooksImpl(
     ): Boolean {
         val needsPrompt = when {
             config.method == RoutingAutomationMethod.SNAPSHOT_SLOT ->
-                config.level == RoutingAutomationLevel.PROMPT && config.idleSnapshotSlot in 1..64
+                config.level == RoutingAutomationLevel.PROMPT && config.snapshotRestoreSlot() != null
             conflicts.isNotEmpty() ->
                 RoutingOverrideCoordinator.shouldAskConflicts(config, conflicts)
             else -> config.level == RoutingAutomationLevel.PROMPT

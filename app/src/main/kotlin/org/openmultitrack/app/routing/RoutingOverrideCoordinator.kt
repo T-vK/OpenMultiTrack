@@ -4,6 +4,7 @@ import org.openmultitrack.app.data.MixerRoutingAutomationConfig
 import org.openmultitrack.app.data.RoutingAutomationLevel
 import org.openmultitrack.app.data.RoutingAutomationMethod
 import org.openmultitrack.app.data.RoutingRestorePolicy
+import org.openmultitrack.app.data.snapshotRestoreSlot
 import org.openmultitrack.app.scribble.ScribbleImportSupport
 import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.mixer.behringer.MixerRoutingPort
@@ -140,10 +141,14 @@ class RoutingOverrideCoordinator(
         port: MixerRoutingPort,
     ): RoutingRestoreOutcome {
         if (config.level == RoutingAutomationLevel.OFF) return RoutingRestoreOutcome.NothingPending
+        if (config.restorePolicy == RoutingRestorePolicy.NONE) {
+            baselineStore.clear()
+            return RoutingRestoreOutcome.Restored
+        }
         if (!port.probe()) return RoutingRestoreOutcome.SkippedUnreachable
         if (pending.method == RoutingAutomationMethod.SNAPSHOT_SLOT) {
-            val restoreSlot = config.idleSnapshotSlot
-            if (restoreSlot !in 1..64) {
+            val restoreSlot = config.snapshotRestoreSlot()
+            if (restoreSlot == null) {
                 baselineStore.clear()
                 return RoutingRestoreOutcome.Restored
             }
@@ -358,8 +363,8 @@ class RoutingOverrideCoordinator(
         live: Map<Int, XAirChannelInputState>,
     ): RoutingRestoreOutcome {
         if (pending.method == RoutingAutomationMethod.SNAPSHOT_SLOT) {
-            val restoreSlot = config.idleSnapshotSlot
-            if (restoreSlot !in 1..64) {
+            val restoreSlot = config.snapshotRestoreSlot()
+            if (restoreSlot == null) {
                 baselineStore.clear()
                 return RoutingRestoreOutcome.Restored
             }
@@ -368,8 +373,12 @@ class RoutingOverrideCoordinator(
                 baselineStore.clear()
                 RoutingRestoreOutcome.Restored
             } else {
-                RoutingRestoreOutcome.Failed("Failed to recall idle snapshot slot $restoreSlot")
+                RoutingRestoreOutcome.Failed("Failed to recall snapshot slot $restoreSlot")
             }
+        }
+        if (config.restorePolicy == RoutingRestorePolicy.NONE) {
+            baselineStore.clear()
+            return RoutingRestoreOutcome.Restored
         }
         val conflicts = detectConflicts(pending, live)
         val channelsToRestore = when {

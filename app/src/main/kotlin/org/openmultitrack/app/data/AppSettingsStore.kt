@@ -425,6 +425,7 @@ class AppSettingsStore(context: Context) {
                 idleSnapshotSlot = o.optInt("idleSnapshotSlot", 0),
                 recordSnapshotSlot = o.optInt("recordSnapshotSlot", 0),
                 soundcheckSnapshotSlot = o.optInt("soundcheckSnapshotSlot", 0),
+                restoreSnapshotSlot = o.optInt("restoreSnapshotSlot", 0),
                 forceRestoreOnConflict = o.optBoolean("forceRestoreOnConflict", false),
             )
         }.getOrDefault(MixerRoutingAutomationConfig())
@@ -444,6 +445,7 @@ class AppSettingsStore(context: Context) {
                 .put("idleSnapshotSlot", config.idleSnapshotSlot)
                 .put("recordSnapshotSlot", config.recordSnapshotSlot)
                 .put("soundcheckSnapshotSlot", config.soundcheckSnapshotSlot)
+                .put("restoreSnapshotSlot", config.restoreSnapshotSlot)
                 .put("forceRestoreOnConflict", config.forceRestoreOnConflict),
         )
         prefs.edit().putString(KEY_ROUTING_AUTOMATION_BY_MIXER, root.toString()).apply()

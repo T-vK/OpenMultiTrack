@@ -4,6 +4,7 @@ import org.openmultitrack.app.data.MixerRoutingAutomationConfig
 import org.openmultitrack.app.data.RoutingAutomationLevel
 import org.openmultitrack.app.data.RoutingAutomationMethod
 import org.openmultitrack.app.data.RoutingAutomationTrigger
+import org.openmultitrack.app.data.shouldRestoreOnTransportStop
 import org.openmultitrack.domain.mixer.MixerProfile
 import org.openmultitrack.mixer.behringer.XAirInputSourceCatalog
 
@@ -39,13 +40,6 @@ object RoutingTransportOsc {
         }
     }
 
-    fun willRestoreOnTransportStop(config: MixerRoutingAutomationConfig): Boolean {
-        if (config.level == RoutingAutomationLevel.OFF) return false
-        if (config.trigger != RoutingAutomationTrigger.ON_TRANSPORT_BUTTON) return false
-        return when (config.method) {
-            RoutingAutomationMethod.SNAPSHOT_SLOT ->
-                config.idleSnapshotSlot in 1..64
-            RoutingAutomationMethod.PER_CHANNEL -> true
-        }
-    }
+    fun willRestoreOnTransportStop(config: MixerRoutingAutomationConfig): Boolean =
+        config.shouldRestoreOnTransportStop()
 }

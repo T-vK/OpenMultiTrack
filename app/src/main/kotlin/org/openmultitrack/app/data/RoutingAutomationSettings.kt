@@ -27,6 +27,10 @@ enum class RoutingRestorePolicy {
     RESPECT_LIVE,
     /** Show diff and let user choose (PROMPT level only). */
     ASK_ON_CONFLICT,
+    /** Skip restore on transport stop / mode exit. */
+    NONE,
+    /** Recall [MixerRoutingAutomationConfig.restoreSnapshotSlot] (snapshot mode). */
+    RECALL_SNAPSHOT,
 }
 
 data class MixerRoutingAutomationConfig(
@@ -37,6 +41,27 @@ data class MixerRoutingAutomationConfig(
     val idleSnapshotSlot: Int = 0,
     val recordSnapshotSlot: Int = 0,
     val soundcheckSnapshotSlot: Int = 0,
+    /** Snapshot recalled on restore when [restorePolicy] is [RoutingRestorePolicy.RECALL_SNAPSHOT]. */
+    val restoreSnapshotSlot: Int = 0,
     /** When true, restore even if live routing diverged (expert). */
     val forceRestoreOnConflict: Boolean = false,
 )
+
+fun MixerRoutingAutomationConfig.snapshotRestoreSlot(): Int? {
+    if (restorePolicy == RoutingRestorePolicy.NONE) return null
+    if (method != RoutingAutomationMethod.SNAPSHOT_SLOT) return null
+    return when (restorePolicy) {
+        RoutingRestorePolicy.RECALL_SNAPSHOT ->
+            restoreSnapshotSlot.takeIf { it in 1..64 }
+        else -> idleSnapshotSlot.takeIf { it in 1..64 }
+    }
+}
+
+fun MixerRoutingAutomationConfig.shouldRestoreOnTransportStop(): Boolean {
+    if (level == RoutingAutomationLevel.OFF) return false
+    if (trigger != RoutingAutomationTrigger.ON_TRANSPORT_BUTTON) return false
+    return when (method) {
+        RoutingAutomationMethod.SNAPSHOT_SLOT -> snapshotRestoreSlot() != null
+        RoutingAutomationMethod.PER_CHANNEL -> restorePolicy != RoutingRestorePolicy.NONE
+    }
+}
