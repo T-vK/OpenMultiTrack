@@ -29,19 +29,6 @@ object Flow8StateDecoder {
     private const val ICON_MARKER_PLAIN = 0x00
     private const val RECORD_MAGIC = 0x6A
 
-    private val PRESET_TO_MS_ICON = mapOf(
-        Pair(INPUT_TYPE_DYNAMIC_MIC, 4) to MixingStationIcons.HANDHELD_MIC,
-        Pair(INPUT_TYPE_DYNAMIC_MIC, 7) to MixingStationIcons.HANDHELD_MIC,
-        Pair(INPUT_TYPE_LINE_INSTRUMENT, 4) to MixingStationIcons.VIOLIN,
-        Pair(INPUT_TYPE_GUITAR_OR_BASS, 2) to MixingStationIcons.ACOUSTIC_GUITAR,
-        Pair(INPUT_TYPE_GUITAR_PAGE, 2) to MixingStationIcons.ACOUSTIC_GUITAR,
-        Pair(INPUT_TYPE_PLAYBACK, 7) to MixingStationIcons.TAPE,
-    )
-
-    private val PLAIN_PRESET_TO_MS_ICON = mapOf(
-        0x02 to MixingStationIcons.ELECTRIC_BASS,
-        0x04 to MixingStationIcons.VIOLIN,
-    )
 
     fun decodeNames(buf: ByteArray): List<String> {
         if (usesSysexNameRegion(buf)) {
@@ -132,7 +119,7 @@ object Flow8StateDecoder {
             return resolvePresetIcon(inputType, preset)
         }
         if (marker == ICON_MARKER_PLAIN) {
-            PLAIN_PRESET_TO_MS_ICON[preset]?.let { return it }
+            Flow8IconPresets.resolvePlainPreset(preset)?.let { return it }
             return preset.takeIf { it in 1..MixingStationIcons.MAX_ID }
         }
         return when {
@@ -247,5 +234,5 @@ object Flow8StateDecoder {
         (0 until MIXER_NAME_COUNT).map { records[it].orEmpty() }
 
     private fun resolvePresetIcon(inputType: Int, preset: Int): Int? =
-        PRESET_TO_MS_ICON[inputType to preset]
+        Flow8IconPresets.resolve(inputType, preset)
 }

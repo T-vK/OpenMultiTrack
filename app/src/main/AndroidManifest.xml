@@ -34,6 +34,11 @@
         android:name="android.hardware.usb.host"
         android:required="false" />
 
+    <!-- Flow Mix is optional; package visibility is required on Android 11+ for scribble icon extraction. -->
+    <queries>
+        <package android:name="com.musicgroup.xairbt" />
+    </queries>
+
     <application
         android:name=".OpenMultiTrackApp"
         android:allowBackup="true"

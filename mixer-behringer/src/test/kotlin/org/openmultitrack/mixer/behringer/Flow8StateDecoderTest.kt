@@ -39,7 +39,7 @@ class Flow8StateDecoderTest {
     }
 
     @Test
-    fun decodeIconGroup_returnsNullForUnknownTypedPresetInsteadOfDrumFallback() {
+    fun decodeIconGroup_resolvesTypedPresetFromDefaultMicCategoryTable() {
         val icon = Flow8StateDecoder.decodeIconGroup(
             stripIndex = 4,
             marker = 0x03,
@@ -48,7 +48,8 @@ class Flow8StateDecoderTest {
             nameOffsets = emptyMap(),
         )
 
-        assertThat(icon).isNull()
+        assertThat(icon).isEqualTo(48)
+        assertThat(icon).isNotEqualTo(2)
     }
 
     @Test

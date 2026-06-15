@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from mixing_station_icons import (
     ACOUSTIC_GUITAR,
+    ELECTRIC_BASS,
     HANDHELD_MIC,
     ICON_MAX,
     ICON_MIN,
@@ -34,8 +35,17 @@ NAME_LEN_MIN = 2
 NAME_LEN_MAX = 18
 RECORD_MAGIC = 0x6A
 
-# (input_type, preset_index) -> Mixing Station scribble icon id (1–74).
-# Hardware-validated on FLOW 8 firmware v11749 (2026-06-08 capture).
+# Per-type preset tables — mirrors Flow8IconPresets.kt in mixer-behringer.
+PRESET_ICON_TABLES: list[list[int]] = [
+    [1, 47, 48, 49, 50, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59],
+    [47, 48, 49, 48, 49, 53, 54, 55, 56, 57, 58],
+    [17, 18, 23, 20, 21, 22, 23, 24, 25, 26, 17, 18, 19, 20, 21, 22, 23, 26],
+    [27, 28, 29, 30, 39, 35, 36, 37, 38, 40, 15, 16, 13, 14, 31, 32, 33, 34],
+    [20, 21, 23, 24, 25, 26, 17, 18],
+    [60, 61, 62, 63, 64, 65, 66, 67, 54, 55, 62, 60],
+]
+
+# Hardware-validated overrides (firmware v11749, 2026-06-08 capture).
 PRESET_TO_MS_ICON: dict[tuple[int, int], int] = {
     (INPUT_TYPE_DYNAMIC_MIC, 4): HANDHELD_MIC,
     (INPUT_TYPE_DYNAMIC_MIC, 7): HANDHELD_MIC,
@@ -43,6 +53,11 @@ PRESET_TO_MS_ICON: dict[tuple[int, int], int] = {
     (INPUT_TYPE_GUITAR_OR_BASS, 2): ACOUSTIC_GUITAR,
     (INPUT_TYPE_GUITAR_PAGE, 2): ACOUSTIC_GUITAR,
     (INPUT_TYPE_PLAYBACK, 7): TAPE,
+}
+
+PLAIN_PRESET_TO_MS_ICON: dict[int, int] = {
+    0x02: ELECTRIC_BASS,
+    0x04: VIOLIN,
 }
 
 # Flow Mix UI labels (what the official app shows in the icon picker).
@@ -97,6 +112,12 @@ def resolve_preset_icon(input_type: int, preset: int) -> int | None:
     key = (input_type, preset)
     if key in PRESET_TO_MS_ICON:
         return PRESET_TO_MS_ICON[key]
+    if 0 <= input_type < len(PRESET_ICON_TABLES):
+        table = PRESET_ICON_TABLES[input_type]
+        if 0 <= preset < len(table):
+            icon = table[preset]
+            if ICON_MIN <= icon <= ICON_MAX:
+                return icon
     return None
 
 
@@ -136,12 +157,8 @@ def decode_icon_group(
         return resolve_preset_icon(input_type, preset)
 
     if marker == ICON_MARKER_PLAIN:
-        legacy = {
-            0x02: 17,
-            0x04: 39,
-        }
-        if preset in legacy:
-            return legacy[preset]
+        if preset in PLAIN_PRESET_TO_MS_ICON:
+            return PLAIN_PRESET_TO_MS_ICON[preset]
         return preset if ICON_MIN <= preset <= ICON_MAX else None
 
     if ICON_MIN <= marker <= ICON_MAX:

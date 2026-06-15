@@ -3,6 +3,7 @@ package org.openmultitrack.app.ui.daw
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -47,7 +48,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -156,7 +159,7 @@ internal fun stripLabelColumnWidth(
     } ?: 0
 
     val showsIcon = iconMode != StripIconMode.HIDE &&
-        strips.any { MixingStationIcons.display(it.iconId) != null }
+        strips.any { it.iconId in 1..MixingStationIcons.MAX_ID }
     val innerPad = (stripHeight * 0.12f).coerceIn(3.dp, 10.dp)
     val colorBarHeight = stripHeight - innerPad * 2
     val iconGap = 8.dp
@@ -205,13 +208,15 @@ internal fun StripIdentityCell(
         StripTextParts(strip, numberMode, iconMode)
     }
     val iconGlyph = parsed.iconGlyph
+    val iconId = parsed.iconId
     val lineText = parsed.lineText
     val iconGap = 8.dp
     val bigIconSize = iconContainerSize(colorBarHeight)
     val controlIconSize = (labelFontSize * 0.95f).coerceIn(10f, 16f).dp
     val colorBarWidth = 3.dp
-    val colorBarGap = if (iconGlyph != null) ColorBarIconGap else 0.dp
-    val iconColumnWidth = if (iconGlyph != null) bigIconSize else 0.dp
+    val showIcon = iconId != null
+    val colorBarGap = if (showIcon) ColorBarIconGap else 0.dp
+    val iconColumnWidth = if (showIcon) bigIconSize else 0.dp
     val textAreaWidth = (columnWidth - colorBarWidth - colorBarGap - iconColumnWidth - iconGap - 2.dp)
         .coerceAtLeast(24.dp)
 
@@ -230,9 +235,9 @@ internal fun StripIdentityCell(
                 .clip(RoundedCornerShape(2.dp))
                 .background(Color(strip.colorArgb)),
         )
-        if (iconGlyph != null) {
+        if (showIcon) {
             Spacer(Modifier.width(colorBarGap))
-            ScribbleStripIcon(glyph = iconGlyph, containerSize = bigIconSize)
+            ScribbleStripIcon(iconId = iconId!!, glyph = iconGlyph, containerSize = bigIconSize)
             Spacer(Modifier.width(iconGap))
         }
         Column(
@@ -291,9 +296,21 @@ internal fun StripIdentityCell(
 
 @Composable
 private fun ScribbleStripIcon(
-    glyph: MixingStationIcons.Glyph,
+    iconId: Int,
+    glyph: MixingStationIcons.Glyph?,
     containerSize: Dp,
 ) {
+    val drawable = MixingStationIconResources.drawableRes(iconId)
+    if (drawable != null) {
+        Image(
+            painter = painterResource(drawable),
+            contentDescription = null,
+            modifier = Modifier.size(containerSize),
+            contentScale = ContentScale.Fit,
+        )
+        return
+    }
+    if (glyph == null) return
     BoxWithConstraints(
         modifier = Modifier.size(containerSize),
         contentAlignment = Alignment.Center,
@@ -756,10 +773,15 @@ private fun OverlayChannelToggle(
 }
 
 private data class StripTextParts(
+    val iconId: Int?,
     val iconGlyph: MixingStationIcons.Glyph?,
     val lineText: String,
 ) {
     constructor(strip: ChannelStripState, numberMode: StripNumberMode, iconMode: StripIconMode) : this(
+        iconId = when (iconMode) {
+            StripIconMode.HIDE -> null
+            else -> strip.iconId?.takeIf { it in 1..MixingStationIcons.MAX_ID }
+        },
         iconGlyph = when (iconMode) {
             StripIconMode.HIDE -> null
             else -> MixingStationIcons.display(strip.iconId)
