@@ -626,7 +626,11 @@ class MainViewModel(
         refreshPrerequisites()
         refreshBatteryOptimizationState()
         viewModelScope.launch(Dispatchers.IO) {
-            org.openmultitrack.app.data.RecordingSpillSync.syncAll(storageResolver, settings)
+            runCatching {
+                org.openmultitrack.app.data.RecordingSpillSync.syncAll(storageResolver, settings)
+            }.onFailure { e ->
+                org.openmultitrack.audio.OmtLog.w("ViewModel", "Spill sync failed: ${e.message}")
+            }
         }
     }
 
@@ -1848,7 +1852,11 @@ class MainViewModel(
                 )
             }
             withContext(Dispatchers.IO) {
-                org.openmultitrack.app.data.RecordingSpillSync.syncAll(storageResolver, settings)
+                runCatching {
+                    org.openmultitrack.app.data.RecordingSpillSync.syncAll(storageResolver, settings)
+                }.onFailure { e ->
+                    org.openmultitrack.audio.OmtLog.w("ViewModel", "Spill sync failed: ${e.message}")
+                }
             }
         }
     }

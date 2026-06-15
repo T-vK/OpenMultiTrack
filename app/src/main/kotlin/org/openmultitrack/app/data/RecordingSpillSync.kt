@@ -53,14 +53,16 @@ object RecordingSpillSync {
                     add(File(root, "${meta.mixerFolderName}/${spillSessionDir.name}"))
                 }
         }
-        spillSessionDir.listFiles { f -> f.extension.equals("wav", ignoreCase = true) }
-            ?.forEach { spillWav ->
-                targets.forEach { targetDir ->
-                    if (!ensureDirectory(targetDir)) return@forEach
-                    val targetWav = File(targetDir, spillWav.name)
-                    copyIfSpillAhead(spillWav, targetWav)
-                }
+        val spillWavs = spillSessionDir.listFiles { f ->
+            f.isFile && f.extension.equals("wav", ignoreCase = true)
+        }?.toList().orEmpty()
+        spillWavs.forEach { spillWav ->
+            targets.forEach { targetDir ->
+                if (!ensureDirectory(targetDir)) return@forEach
+                val targetWav = File(targetDir, spillWav.name)
+                copyIfSpillAhead(spillWav, targetWav)
             }
+        }
         if (meta.incomplete) {
             targets.forEach { targetDir ->
                 runCatching { meta.writeTo(targetDir) }
@@ -70,6 +72,24 @@ object RecordingSpillSync {
                             "Failed writing metadata to ${targetDir.absolutePath}: ${e.message}",
                         )
                     }
+            }
+        }
+        if (spillWavs.isNotEmpty() && spillFullySynced(spillWavs, targets)) {
+            runCatching {
+                spillSessionDir.deleteRecursively()
+                OmtLog.i("SpillSync", "Removed synced spill session ${spillSessionDir.name}")
+            }.onFailure { e ->
+                OmtLog.w("SpillSync", "Failed removing spill ${spillSessionDir.name}: ${e.message}")
+            }
+        }
+    }
+
+    private fun spillFullySynced(spillWavs: List<File>, targets: List<File>): Boolean {
+        if (targets.isEmpty()) return false
+        return spillWavs.all { spillWav ->
+            targets.all { targetDir ->
+                val targetWav = File(targetDir, spillWav.name)
+                targetWav.isFile && targetWav.length() >= spillWav.length()
             }
         }
     }
