@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import org.openmultitrack.app.health.ConnectivitySummary
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.domain.mixer.HealthLevel
 import org.openmultitrack.domain.mixer.MixerHealthSnapshot
@@ -25,19 +26,23 @@ import org.openmultitrack.domain.mixer.MixerHealthSnapshot
 fun RecordSessionInfoBar(
     session: MixerSessionUiState,
     health: MixerHealthSnapshot? = null,
+    connectivitySummary: ConnectivitySummary? = null,
     onOpenConnectivity: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val activity = session.activityStatus
+    val showConnectivityIcons = activity == null &&
+        !session.isRecording &&
+        !session.isMonitoring &&
+        connectivitySummary != null
     val statusLine = when {
         activity != null -> activity.displayLabel
         session.isRecording -> "🔴 Recording to disk"
         session.isMonitoring -> "🎧 Monitoring live inputs"
-        session.probing -> "🔌 Detecting USB audio…"
-        else -> health?.primaryIssue?.detail
-            ?: session.statusMessage
-            ?: health?.usb?.probeSummary?.let { "🔌 USB ready — $it" }
-    } ?: return
+        else -> null
+    }
+
+    if (!showConnectivityIcons && statusLine == null) return
 
     val showSpinner = activity?.showSpinner == true
     val progress = activity?.progress
@@ -83,14 +88,21 @@ fun RecordSessionInfoBar(
                         strokeWidth = 2.dp,
                     )
                 }
-                Text(
-                    text = statusLine,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = statusColor,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
+                if (showConnectivityIcons) {
+                    MixerConnectivitySummaryIcons(
+                        summary = connectivitySummary,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else if (statusLine != null) {
+                    Text(
+                        text = statusLine,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = statusColor,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
             if (progress != null) {
                 LinearProgressIndicator(

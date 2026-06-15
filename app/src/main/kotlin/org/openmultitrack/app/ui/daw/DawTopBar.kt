@@ -426,7 +426,7 @@ private fun RecordTransportCluster(
     onStopRecord: () -> Unit,
 ) {
     val isRecording = session?.isRecording == true
-    val isPreparing = session?.activityStatus != null
+    val isPreparing = session?.activityStatus?.blocksTransport == true
     val hostReady = session?.probe != null || (isRemoteClient && session?.captureChannelCount?.let { it > 0 } == true)
     val elapsed = session?.recordElapsedSec ?: 0f
     val onClick = if (isRecording) onStopRecord else onStartRecord
@@ -493,7 +493,7 @@ private fun PlaybackTransportCluster(
 ) {
     val isPlaying = session?.isPlaying == true
     val sessionLoaded = session?.selectedSoundcheckDir != null
-    val isPreparingPlayback = session?.activityStatus != null
+    val isPreparingPlayback = session?.activityStatus?.blocksTransport == true
     val hostReady = session?.probe != null ||
         (isRemoteClient && session?.captureChannelCount?.let { it > 0 } == true)
     val playEnabled = sessionLoaded && (!isRemoteClient || hostReady) && !isPreparingPlayback

@@ -44,9 +44,9 @@ data class ConnectivityCheckItem(
     val label: String,
     val status: ConnectivityStatus,
     val detail: String? = null,
+    val technicalDetail: String? = null,
     val action: ConnectivityAction? = null,
     val actionLabel: String? = null,
-    val advanced: Boolean = false,
 )
 
 data class ConnectivityChecklist(
@@ -54,7 +54,6 @@ data class ConnectivityChecklist(
     val overall: HealthLevel,
     val updatedAtMs: Long,
     val sections: List<ConnectivitySection>,
-    val advancedItems: List<ConnectivityCheckItem>,
 )
 
 data class ConnectivitySection(

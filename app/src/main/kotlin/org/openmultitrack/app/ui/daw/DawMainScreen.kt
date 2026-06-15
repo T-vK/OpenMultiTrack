@@ -92,6 +92,7 @@ import androidx.compose.ui.platform.LocalContext
 import org.openmultitrack.app.data.StorageAccessHelper
 import org.openmultitrack.app.device.NetworkConnectivity
 import org.openmultitrack.app.health.ConnectivityAction
+import org.openmultitrack.app.health.ConnectivitySummaryBuilder
 import org.openmultitrack.app.health.MixerConnectivityStatusBuilder
 import org.openmultitrack.app.scribble.ScribbleImportSupport
 import org.openmultitrack.app.data.StripIconMode
@@ -286,6 +287,32 @@ fun DawMainScreen(
             oscSupported = ScribbleImportSupport.supportsOsc(profile),
         )
     }
+    val context = LocalContext.current
+    val connectivitySummary = activeProfile?.let { profile ->
+        activeMixerHealth?.let { health ->
+            remember(
+                profile.id,
+                health.updatedAtMs,
+                health.overall,
+                health.usb.probeState,
+                health.usb.attached,
+                health.usb.permissionGranted,
+                health.osc?.configured,
+                state.effectiveStorageRootPath,
+                state.batteryOptimizationIgnored,
+            ) {
+                ConnectivitySummaryBuilder.build(
+                    health = health,
+                    network = NetworkConnectivity.snapshot(context),
+                    supportsOsc = ScribbleImportSupport.supportsOsc(profile),
+                    supportsFlow8Ble = ScribbleImportSupport.supportsFlow8(profile),
+                    storageWritable = StorageAccessHelper.canWriteTo(state.effectiveStorageRootPath),
+                    batteryOptimizationIgnored = state.batteryOptimizationIgnored,
+                    context = context,
+                )
+            }
+        }
+    }
     val supportsOscRouting = activeProfile?.let {
         org.openmultitrack.app.scribble.ScribbleImportSupport.supportsOsc(it) &&
             !it.oscHost.isNullOrBlank()
@@ -378,7 +405,6 @@ fun DawMainScreen(
     }
 
     if (state.showMixerConnectivity && activeProfile != null && activeMixerHealth != null) {
-        val context = LocalContext.current
         val supportsOsc = ScribbleImportSupport.supportsOsc(activeProfile)
         val supportsFlow8 = ScribbleImportSupport.supportsFlow8(activeProfile)
         val checklist = remember(
@@ -683,6 +709,7 @@ fun DawMainScreen(
                             SoundcheckPanel(
                                 session = s,
                                 health = activeMixerHealth,
+                                connectivitySummary = connectivitySummary,
                                 onOpenConnectivity = onOpenMixerConnectivity,
                                 playbackChannelCount = MixerUsbChannelCounts.playbackChannelsForUi(
                                     profile = activeProfile ?: state.mixers.first { it.id == activeId },
@@ -717,6 +744,7 @@ fun DawMainScreen(
                                 RecordSessionInfoBar(
                                     session = s,
                                     health = activeMixerHealth,
+                                    connectivitySummary = connectivitySummary,
                                     onOpenConnectivity = onOpenMixerConnectivity,
                                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                                 )

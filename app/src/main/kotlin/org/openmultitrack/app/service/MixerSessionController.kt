@@ -215,14 +215,7 @@ class MixerSessionController(
         clearUsbDegradedState()
         val playbackCh = maxPlaybackChannelsFromProbe(probe)
         if (_state.value.isRecording) {
-            _state.update {
-                it.copy(
-                    usbDescriptor = descriptor,
-                    probe = probe,
-                    probing = false,
-                    playbackChannelCount = playbackCh,
-                )
-            }
+            _state.update { it.finishProbe(descriptor, probe, playbackCh) }
             return
         }
         val chCount = probe.uac2Caps?.maxCaptureChannels?.takeIf { it > 0 }
@@ -235,12 +228,11 @@ class MixerSessionController(
                 _state.value.channelStrips
             }
             _state.update {
-                it.copy(
-                    usbDescriptor = descriptor,
+                it.finishProbe(
+                    descriptor = descriptor,
                     probe = probe,
-                    probing = false,
+                    playbackCh = playbackCh,
                     captureChannelCount = chCount,
-                    playbackChannelCount = playbackCh,
                     channelStrips = strips,
                 )
             }
@@ -252,12 +244,11 @@ class MixerSessionController(
             _state.value.channelStrips
         }
         _state.update {
-            it.copy(
-                usbDescriptor = descriptor,
+            it.finishProbe(
+                descriptor = descriptor,
                 probe = probe,
-                probing = false,
+                playbackCh = playbackCh,
                 captureChannelCount = chCount,
-                playbackChannelCount = playbackCh,
                 channelStrips = strips,
                 statusMessage = "Ready — $chCount channels",
             )
@@ -285,18 +276,32 @@ class MixerSessionController(
         _state.update { s ->
             s.copy(
                 probing = probing,
-                activityStatus = when {
-                    probing -> SessionActivityStatus(
-                        label = "Detecting USB audio…",
-                        kind = SessionActivityKind.USB,
-                        tag = "usb-probe",
-                    )
-                    s.activityStatus?.tag == "usb-probe" -> null
-                    else -> s.activityStatus
+                activityStatus = if (!probing && s.activityStatus?.tag == "usb-probe") {
+                    null
+                } else {
+                    s.activityStatus
                 },
             )
         }
     }
+
+    private fun MixerSessionUiState.finishProbe(
+        descriptor: UsbAudioDeviceDescriptor,
+        probe: FullUsbProbeResult,
+        playbackCh: Int,
+        captureChannelCount: Int = this.captureChannelCount,
+        channelStrips: List<ChannelStripState> = this.channelStrips,
+        statusMessage: String? = this.statusMessage,
+    ): MixerSessionUiState = copy(
+        usbDescriptor = descriptor,
+        probe = probe,
+        probing = false,
+        captureChannelCount = captureChannelCount,
+        playbackChannelCount = playbackCh,
+        channelStrips = channelStrips,
+        statusMessage = statusMessage,
+        activityStatus = activityStatus?.takeUnless { it.tag == "usb-probe" },
+    )
 
     private fun setActivity(
         label: String,

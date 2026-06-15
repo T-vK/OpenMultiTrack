@@ -3,6 +3,7 @@ package org.openmultitrack.app.ui.daw
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,7 +28,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -42,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -62,7 +63,7 @@ fun MixerConnectivityScreen(
     onAction: (ConnectivityAction) -> Unit,
 ) {
     BackHandler(onBack = onDismiss)
-    var advancedOpen by remember { mutableStateOf(false) }
+    var expandedItemId by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -94,17 +95,12 @@ fun MixerConnectivityScreen(
             items(checklist.sections, key = { it.group.name }) { section ->
                 ConnectivitySectionCard(
                     section = section,
+                    expandedItemId = expandedItemId,
+                    onToggleExpand = { id ->
+                        expandedItemId = if (expandedItemId == id) null else id
+                    },
                     onAction = onAction,
                 )
-            }
-            if (checklist.advancedItems.isNotEmpty()) {
-                item {
-                    AdvancedSection(
-                        expanded = advancedOpen,
-                        onToggle = { advancedOpen = !advancedOpen },
-                        items = checklist.advancedItems,
-                    )
-                }
             }
         }
     }
@@ -148,6 +144,8 @@ private fun ConnectivitySummaryHeader(checklist: ConnectivityChecklist) {
 @Composable
 private fun ConnectivitySectionCard(
     section: ConnectivitySection,
+    expandedItemId: String?,
+    onToggleExpand: (String) -> Unit,
     onAction: (ConnectivityAction) -> Unit,
 ) {
     Surface(
@@ -170,7 +168,16 @@ private fun ConnectivitySectionCard(
                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                     )
                 }
-                ConnectivityCheckRow(item = item, onAction = onAction)
+                ConnectivityCheckRow(
+                    item = item,
+                    expanded = expandedItemId == item.id,
+                    onToggleExpand = {
+                        if (!item.technicalDetail.isNullOrBlank()) {
+                            onToggleExpand(item.id)
+                        }
+                    },
+                    onAction = onAction,
+                )
             }
         }
     }
@@ -179,37 +186,69 @@ private fun ConnectivitySectionCard(
 @Composable
 private fun ConnectivityCheckRow(
     item: ConnectivityCheckItem,
+    expanded: Boolean,
+    onToggleExpand: () -> Unit,
     onAction: (ConnectivityAction) -> Unit,
 ) {
-    Row(
+    val hasTechnical = !item.technicalDetail.isNullOrBlank()
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+            .then(
+                if (hasTechnical) {
+                    Modifier.clickable(onClick = onToggleExpand)
+                } else {
+                    Modifier
+                },
+            ),
     ) {
-        StatusGlyph(status = item.status)
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = item.label,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-            )
-            item.detail?.let { detail ->
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            StatusGlyph(status = item.status)
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = detail,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp),
+                    text = item.label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+                item.detail?.let { detail ->
+                    Text(
+                        text = detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = if (expanded) Int.MAX_VALUE else 3,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+            }
+            if (hasTechnical) {
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "Hide details" else "Show details",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
                 )
             }
-        }
-        item.action?.let { action ->
-            TextButton(onClick = { onAction(action) }) {
-                Text(item.actionLabel ?: "Fix")
+            item.action?.let { action ->
+                TextButton(onClick = { onAction(action) }) {
+                    Text(item.actionLabel ?: "Fix")
+                }
             }
+        }
+        AnimatedVisibility(visible = expanded && hasTechnical) {
+            Text(
+                text = item.technicalDetail.orEmpty(),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 56.dp, end = 16.dp, bottom = 10.dp),
+            )
         }
     }
 }
@@ -263,60 +302,5 @@ private fun StatusGlyph(status: ConnectivityStatus) {
             tint = fg,
             modifier = Modifier.size(16.dp),
         )
-    }
-}
-
-@Composable
-private fun AdvancedSection(
-    expanded: Boolean,
-    onToggle: () -> Unit,
-    items: List<ConnectivityCheckItem>,
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerLowest,
-    ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = onToggle) {
-                    Text("Advanced details")
-                }
-                Icon(
-                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (expanded) "Collapse" else "Expand",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            AnimatedVisibility(visible = expanded) {
-                Column(Modifier.padding(bottom = 8.dp)) {
-                    items.forEach { item ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 6.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Text(
-                                text = item.label,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.weight(0.45f),
-                            )
-                            Text(
-                                text = item.detail.orEmpty(),
-                                style = MaterialTheme.typography.labelMedium,
-                                modifier = Modifier.weight(0.55f),
-                            )
-                        }
-                    }
-                }
-            }
-        }
     }
 }

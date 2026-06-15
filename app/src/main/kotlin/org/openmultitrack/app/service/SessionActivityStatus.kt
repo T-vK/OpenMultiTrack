@@ -28,4 +28,8 @@ data class SessionActivityStatus(
     val tag: String? = null,
 ) {
     val displayLabel: String get() = "${kind.glyph} $label"
+
+    /** True when this activity should disable record/play until it clears. */
+    val blocksTransport: Boolean
+        get() = tag != "usb-probe"
 }

@@ -69,6 +69,7 @@ internal val WaveformTimeRulerHeight = 22.dp
 fun SoundcheckPanel(
     session: MixerSessionUiState,
     health: MixerHealthSnapshot? = null,
+    connectivitySummary: org.openmultitrack.app.health.ConnectivitySummary? = null,
     onOpenConnectivity: (() -> Unit)? = null,
     playbackChannelCount: Int = session.playbackChannelCount,
     showTrackmarks: Boolean = false,
@@ -98,6 +99,7 @@ fun SoundcheckPanel(
         SoundcheckSessionInfoBar(
             session = session,
             health = health,
+            connectivitySummary = connectivitySummary,
             onOpenConnectivity = onOpenConnectivity,
         )
         if (session.soundcheckWaveformsLoading) {

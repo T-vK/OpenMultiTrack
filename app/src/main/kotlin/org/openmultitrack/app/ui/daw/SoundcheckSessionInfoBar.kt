@@ -20,6 +20,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import org.openmultitrack.app.health.ConnectivitySummary
 import org.openmultitrack.app.service.MixerSessionUiState
 import org.openmultitrack.domain.mixer.HealthLevel
 import org.openmultitrack.domain.mixer.MixerHealthSnapshot
@@ -28,6 +29,7 @@ import org.openmultitrack.domain.mixer.MixerHealthSnapshot
 fun SoundcheckSessionInfoBar(
     session: MixerSessionUiState,
     health: MixerHealthSnapshot? = null,
+    connectivitySummary: ConnectivitySummary? = null,
     onOpenConnectivity: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -37,11 +39,10 @@ fun SoundcheckSessionInfoBar(
     val duration = session.playbackDurationSec
     val hasSession = session.selectedSoundcheckDir != null
     val activity = session.activityStatus
+    val showConnectivityIcons = activity == null && connectivitySummary != null
     val statusLine = when {
         activity != null -> activity.displayLabel
-        else -> health?.primaryIssue?.detail
-            ?: session.statusMessage
-            ?: health?.usb?.probeSummary?.let { "🔌 USB ready — $it" }
+        else -> null
     }
 
     Surface(
@@ -95,12 +96,11 @@ fun SoundcheckSessionInfoBar(
                         },
                 )
             }
-            if (!statusLine.isNullOrBlank()) {
+            if (!statusLine.isNullOrBlank() || showConnectivityIcons) {
                 val statusColor = when {
                     activity != null -> MaterialTheme.colorScheme.onSecondaryContainer
                     health?.primaryIssue?.severity == HealthLevel.BLOCKED -> MaterialTheme.colorScheme.error
                     health?.primaryIssue?.severity == HealthLevel.DEGRADED -> MaterialTheme.colorScheme.tertiary
-                    health?.overall == HealthLevel.OK -> MaterialTheme.colorScheme.onSurfaceVariant
                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                 }
                 Row(
@@ -116,14 +116,21 @@ fun SoundcheckSessionInfoBar(
                             strokeWidth = 2.dp,
                         )
                     }
-                    Text(
-                        text = statusLine,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = statusColor,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
+                    if (showConnectivityIcons) {
+                        MixerConnectivitySummaryIcons(
+                            summary = connectivitySummary,
+                            modifier = Modifier.weight(1f),
+                        )
+                    } else if (!statusLine.isNullOrBlank()) {
+                        Text(
+                            text = statusLine,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = statusColor,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
             }
         }

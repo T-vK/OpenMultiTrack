@@ -57,6 +57,10 @@ object MixerConnectivityStatusBuilder {
                 else -> ConnectivityStatus.ERROR
             },
             detail = if (usb.attached) "Mixer detected on USB" else "Plug in the USB cable",
+            technicalDetail = listOfNotNull(
+                usb.deviceName?.let { "Device path\n$it" },
+                usb.stableId?.let { "Stable ID\n$it" },
+            ).joinToString("\n\n").takeIf { it.isNotBlank() },
         )
         items += item(
             id = "usb_permission",
@@ -95,6 +99,17 @@ object MixerConnectivityStatusBuilder {
                 ProbeState.FAILED -> "Could not open USB audio"
                 ProbeState.NONE -> if (usb.permissionGranted) "Tap Refresh or start record/playback" else null
             },
+            technicalDetail = when {
+                usb.probeState == ProbeState.OK && probe != null -> buildString {
+                    usb.probeSummary?.let { append(it) }
+                    probe.uac2Caps?.let {
+                        if (isNotEmpty()) append("\n\n")
+                        append("UAC 2.0: ${it.maxCaptureChannels} capture / ${it.maxPlaybackChannels} playback")
+                    }
+                }.takeIf { it.isNotBlank() }
+                usb.probeState == ProbeState.FAILED -> usb.probeSummary
+                else -> null
+            },
             action = if (usb.probeState == ProbeState.NONE && usb.permissionGranted) {
                 ConnectivityAction.REFRESH
             } else {
@@ -120,7 +135,7 @@ object MixerConnectivityStatusBuilder {
         )
         items += item(
             id = "usb_capture_open",
-            group = ConnectivityGroup.USB,
+            group = ConnectivityGroup.AUDIO,
             label = "USB recording interface",
             status = when {
                 audio == null -> ConnectivityStatus.UNKNOWN
@@ -139,7 +154,7 @@ object MixerConnectivityStatusBuilder {
         )
         items += item(
             id = "usb_capture_streaming",
-            group = ConnectivityGroup.USB,
+            group = ConnectivityGroup.AUDIO,
             label = "USB recording stream",
             status = when {
                 audio == null -> ConnectivityStatus.UNKNOWN
@@ -157,7 +172,7 @@ object MixerConnectivityStatusBuilder {
         )
         items += item(
             id = "usb_playback_open",
-            group = ConnectivityGroup.USB,
+            group = ConnectivityGroup.AUDIO,
             label = "USB playback interface",
             status = when {
                 audio == null -> ConnectivityStatus.UNKNOWN
@@ -175,7 +190,7 @@ object MixerConnectivityStatusBuilder {
         )
         items += item(
             id = "usb_playback_streaming",
-            group = ConnectivityGroup.USB,
+            group = ConnectivityGroup.AUDIO,
             label = "USB playback stream",
             status = when {
                 audio == null -> ConnectivityStatus.UNKNOWN
@@ -198,6 +213,7 @@ object MixerConnectivityStatusBuilder {
                 else -> ConnectivityStatus.OFF
             },
             detail = if (audio?.isMonitoring == true) "Monitoring live USB inputs" else "Off",
+            technicalDetail = audio?.activityLabel,
         )
 
         // --- Network / OSC ---
@@ -429,52 +445,8 @@ object MixerConnectivityStatusBuilder {
             )
         }
 
-        val advanced = listOfNotNull(
-            usb.deviceName?.let {
-                item(
-                    id = "adv_usb_path",
-                    group = ConnectivityGroup.USB,
-                    label = "USB device path",
-                    status = ConnectivityStatus.UNKNOWN,
-                    detail = it,
-                    advanced = true,
-                )
-            },
-            usb.stableId?.let {
-                item(
-                    id = "adv_stable_id",
-                    group = ConnectivityGroup.USB,
-                    label = "USB stable ID",
-                    status = ConnectivityStatus.UNKNOWN,
-                    detail = it,
-                    advanced = true,
-                )
-            },
-            usb.probeSummary?.let {
-                item(
-                    id = "adv_probe_summary",
-                    group = ConnectivityGroup.USB,
-                    label = "USB capabilities",
-                    status = ConnectivityStatus.UNKNOWN,
-                    detail = it,
-                    advanced = true,
-                )
-            },
-            audio?.activityLabel?.let {
-                item(
-                    id = "adv_activity",
-                    group = ConnectivityGroup.AUDIO,
-                    label = "Session activity",
-                    status = ConnectivityStatus.UNKNOWN,
-                    detail = it,
-                    advanced = true,
-                )
-            },
-        )
-
-        val mainItems = items.filter { !it.advanced }
         val sections = ConnectivityGroup.entries.mapNotNull { group ->
-            val groupItems = mainItems.filter { it.group == group }
+            val groupItems = items.filter { it.group == group }
             if (groupItems.isEmpty()) return@mapNotNull null
             ConnectivitySection(
                 group = group,
@@ -488,7 +460,6 @@ object MixerConnectivityStatusBuilder {
             overall = health.overall,
             updatedAtMs = health.updatedAtMs,
             sections = sections,
-            advancedItems = advanced,
         )
     }
 
@@ -498,18 +469,18 @@ object MixerConnectivityStatusBuilder {
         label: String,
         status: ConnectivityStatus,
         detail: String? = null,
+        technicalDetail: String? = null,
         action: ConnectivityAction? = null,
         actionLabel: String? = null,
-        advanced: Boolean = false,
     ) = ConnectivityCheckItem(
         id = id,
         group = group,
         label = label,
         status = status,
         detail = detail,
+        technicalDetail = technicalDetail,
         action = action,
         actionLabel = actionLabel,
-        advanced = advanced,
     )
 
     private fun ConnectivityGroup.title(): String = when (this) {
