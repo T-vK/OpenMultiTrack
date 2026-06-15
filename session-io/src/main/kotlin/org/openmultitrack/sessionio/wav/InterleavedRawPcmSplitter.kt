@@ -19,10 +19,6 @@ object InterleavedRawPcmSplitter {
         frameCount: Long,
         sourceFrameOffset: Long = 0L,
     ) {
-        require(bytesPerFrame == sourceChannelCount * 4) {
-            "expected 32-bit interleaved PCM bytesPerFrame=$bytesPerFrame"
-        }
-        require(sourceFrameOffset >= 0L) { "sourceFrameOffset must be non-negative" }
         val armed = channelStrips.filter { it.armed }
         val writers = armed.associate { strip ->
             strip.index to WavWriter(
@@ -31,13 +27,36 @@ object InterleavedRawPcmSplitter {
                 sampleRate,
             )
         }
+        appendRangeToWriters(
+            rawFile = rawFile,
+            writers = writers,
+            sourceChannelCount = sourceChannelCount,
+            bytesPerFrame = bytesPerFrame,
+            sourceFrameOffset = sourceFrameOffset,
+            frameCount = frameCount,
+        )
+        writers.values.forEach { it.close() }
+    }
+
+    /** Appends a frame range from [rawFile] into already-open per-channel [writers]. */
+    fun appendRangeToWriters(
+        rawFile: File,
+        writers: Map<Int, WavWriter>,
+        sourceChannelCount: Int,
+        bytesPerFrame: Int,
+        sourceFrameOffset: Long,
+        frameCount: Long,
+    ) {
+        require(bytesPerFrame == sourceChannelCount * 4) {
+            "expected 32-bit interleaved PCM bytesPerFrame=$bytesPerFrame"
+        }
+        require(sourceFrameOffset >= 0L) { "sourceFrameOffset must be non-negative" }
+        if (frameCount <= 0L || writers.isEmpty()) return
         val scratch = ByteArray(SCRATCH_FRAMES * bytesPerFrame)
         val channelScratch = ByteArray(SCRATCH_FRAMES * 3)
         var framesRemaining = frameCount
         RandomAccessFile(rawFile, "r").use { input ->
-            if (sourceFrameOffset > 0L) {
-                input.seek(sourceFrameOffset * bytesPerFrame)
-            }
+            input.seek(sourceFrameOffset * bytesPerFrame)
             while (framesRemaining > 0) {
                 val chunkFrames = minOf(framesRemaining, SCRATCH_FRAMES.toLong()).toInt()
                 val chunkBytes = chunkFrames * bytesPerFrame
@@ -57,6 +76,5 @@ object InterleavedRawPcmSplitter {
                 framesRemaining -= chunkFrames
             }
         }
-        writers.values.forEach { it.close() }
     }
 }

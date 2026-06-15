@@ -2,9 +2,11 @@ package org.openmultitrack.app.audio
 
 import android.hardware.usb.UsbDevice
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -91,6 +93,7 @@ class CaptureSessionEngine(
     private val lifecycleMutex = Mutex()
     private var captureScope: CoroutineScope? = null
     private var fanoutJob: Job? = null
+    private var stagingPumpJob: Job? = null
     private var diskWriteExecutor: ExecutorService? = null
     private var diskWriteFuture: Future<*>? = null
     private val diskWriteQueue = LinkedBlockingQueue<RecordingWriteRequest>(DISK_WRITE_QUEUE_CAPACITY)
@@ -516,6 +519,8 @@ class CaptureSessionEngine(
         }
         if (!nativePcmRecordingActive) {
             startRecordingWriteLoop()
+        } else {
+            startStagingPumpJob()
         }
 
         val armedCount = config.channelStrips.count { it.armed }
@@ -682,6 +687,9 @@ class CaptureSessionEngine(
         sessionWriter?.setLiveFramesWritten(0L)
         nativeTimelineBaselineReady = true
         recordingStartedAtEpochMs = System.currentTimeMillis()
+        if (nativePcmRecordingActive && stagingPumpJob == null) {
+            startStagingPumpJob()
+        }
         OmtLog.i("CaptureSession", "recording timeline anchored")
     }
 
@@ -726,6 +734,7 @@ class CaptureSessionEngine(
                 "queueDepth=${diskWriteQueue.size}",
         )
         acceptRecordingWrites = false
+        trace?.timedSuspend("stagingPumpJob.cancelAndJoin") { stopStagingPumpJob() }
         trace?.timed("stopRecordingWriteLoop") { stopRecordingWriteLoop(trace) }
         val nativeFrames = trace?.let { t ->
             var frames = 0L
@@ -800,6 +809,7 @@ class CaptureSessionEngine(
     }
 
     suspend fun stopCapture() = lifecycleMutex.withLock {
+        stopStagingPumpJob()
         stopRecordingWriteLoop()
         stopNativePcmRecordingIfActive()
         val resilient = sessionWriter
@@ -1263,6 +1273,38 @@ class CaptureSessionEngine(
         }
     }
 
+    private fun startStagingPumpJob() {
+        if (stagingPumpJob != null) return
+        if (!nativePcmRecordingActive) return
+        val backend = activeBackend ?: return
+        if (backend != AudioBackend.UAC2) return
+        val scope = captureScope ?: return
+        stagingPumpJob = scope.launch(Dispatchers.IO) {
+            OmtLog.i("CaptureSession", "native staging pump started")
+            while (isActive) {
+                try {
+                    if (nativeTimelineBaselineReady && nativePcmRecordingActive) {
+                        val writer = sessionWriter
+                        if (writer != null) {
+                            val nativeFrames = AudioEngineRouter.nativePcmFileFramesWritten(backend)
+                            writer.pumpNativeStagingIfNeeded(nativeFrames)
+                        }
+                    }
+                } catch (e: Exception) {
+                    OmtLog.w("CaptureSession", "staging pump failed: ${e.message}")
+                }
+                delay(STAGING_PUMP_INTERVAL_MS)
+            }
+        }
+    }
+
+    private suspend fun stopStagingPumpJob() {
+        val job = stagingPumpJob ?: return
+        job.cancelAndJoin()
+        stagingPumpJob = null
+        OmtLog.i("CaptureSession", "native staging pump stopped")
+    }
+
     private fun stopRecordingWriteLoop(trace: RecordStopTrace? = null) {
         val queueDepth = diskWriteQueue.size
         val hadWriter = diskWriteFuture != null
@@ -1720,6 +1762,7 @@ class CaptureSessionEngine(
         private const val INTERLEAVED_LIVE_THRESHOLD = 8
         /** Drain up to ~680 ms of audio per fanout pass when the native ring has backlog. */
         private const val MAX_FRAMES_PER_FANOUT_PASS = 32_768
+        private const val STAGING_PUMP_INTERVAL_MS = 200L
 
         private val captureFanoutDispatcher = Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "capture-fanout").apply {

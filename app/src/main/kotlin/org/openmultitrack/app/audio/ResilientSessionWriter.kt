@@ -2,6 +2,7 @@ package org.openmultitrack.app.audio
 
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.channel.ChannelStripState
+import org.openmultitrack.sessionio.session.ChannelFileNaming
 import org.openmultitrack.sessionio.session.SessionMetadata
 import org.openmultitrack.sessionio.wav.InterleavedRawPcmSplitter
 import org.openmultitrack.sessionio.wav.InterleavedWavSplitter
@@ -13,8 +14,8 @@ import java.io.File
  * Writes session WAVs to a primary location, optional mirror roots, and a local spill copy.
  * During capture only the primary (or spill fallback) is written live; mirrors are synced on [close].
  *
- * For 8+ channel UAC2 capture, live PCM is appended to a single interleaved temp WAV and split
- * into per-channel files on [close] so the disk thread avoids per-channel deinterleave work.
+ * For 8+ channel UAC2 capture, native code streams interleaved PCM to a staging raw file.
+ * Per-channel WAVs are built incrementally during capture (and only a short tail on stop).
  */
 class ResilientSessionWriter private constructor(
     private val primarySessionDir: File,
@@ -27,6 +28,7 @@ class ResilientSessionWriter private constructor(
     private val liveSpill: WavWriter?,
     private val liveCaptureStagingFile: File?,
     private val nativePcmBytesPerFrame: Int,
+    private val stagingChannelWriters: Map<Int, WavWriter>?,
     private val mirrorSessionDirs: List<File>,
     private val spillSessionDir: File?,
     private val minFreeBytes: Long,
@@ -35,6 +37,7 @@ class ResilientSessionWriter private constructor(
     private var primaryHealthy = true
     private var liveFramesWritten: Long = 0
     private var nativeStagingSkipFrames: Long = 0
+    private var stagingSplitSessionFrames: Long = 0
 
     fun setNativeStagingSkipFrames(frames: Long) {
         nativeStagingSkipFrames = frames.coerceAtLeast(0L)
@@ -96,6 +99,19 @@ class ResilientSessionWriter private constructor(
             nativeBytesPerFrame.takeIf { it > 0 } ?: (captureChannelCount * 4)
         } else {
             0
+        },
+        stagingChannelWriters = if (
+            liveCaptureStagingFile != null && captureChannelCount >= INTERLEAVED_LIVE_THRESHOLD
+        ) {
+            channelStrips.filter { it.armed }.associate { strip ->
+                strip.index to WavWriter(
+                    File(primarySessionDir, ChannelFileNaming.fileName(strip.index, strip.label)),
+                    1,
+                    sampleRate,
+                )
+            }
+        } else {
+            null
         },
         mirrorSessionDirs = mirrorSessionDirs,
         spillSessionDir = spillSessionDir,
@@ -208,6 +224,7 @@ class ResilientSessionWriter private constructor(
     }
 
     fun totalFramesWritten(): Long {
+        if (stagingSplitSessionFrames > 0L) return stagingSplitSessionFrames
         if (liveFramesWritten > 0L) return liveFramesWritten
         val primaryFrames = primary?.totalFramesWritten() ?: 0L
         if (primaryHealthy && primaryFrames > 0L) return primaryFrames
@@ -219,6 +236,34 @@ class ResilientSessionWriter private constructor(
     fun hasNativeStaging(): Boolean = liveCaptureStagingFile != null
 
     fun hasInterleavedLive(): Boolean = livePrimary != null
+
+    /**
+     * While native PCM is recording to [liveCaptureStagingFile], copy new frames into open
+     * per-channel WAVs so stop only finalizes a short tail.
+     */
+    fun pumpNativeStagingIfNeeded(nativeFileFramesWritten: Long) {
+        val raw = liveCaptureStagingFile ?: return
+        val writers = stagingChannelWriters ?: return
+        val bpf = nativePcmBytesPerFrame
+        if (bpf <= 0) return
+        val skip = nativeStagingSkipFrames
+        val sessionFramesAvailable = (nativeFileFramesWritten - skip).coerceAtLeast(0L)
+        val pending = sessionFramesAvailable - stagingSplitSessionFrames
+        if (pending < PUMP_MIN_FRAMES) return
+        val rawFramesOnDisk = raw.length() / bpf
+        val maxSafe = (rawFramesOnDisk - skip - stagingSplitSessionFrames).coerceAtLeast(0L)
+        val toPump = minOf(pending, maxSafe)
+        if (toPump <= 0L) return
+        InterleavedRawPcmSplitter.appendRangeToWriters(
+            rawFile = raw,
+            writers = writers,
+            sourceChannelCount = captureChannelCount,
+            bytesPerFrame = bpf,
+            sourceFrameOffset = skip + stagingSplitSessionFrames,
+            frameCount = toPump,
+        )
+        stagingSplitSessionFrames += toPump
+    }
 
     fun primarySessionDir(): File = primary?.filePaths()?.firstOrNull()?.let { File(it).parentFile }
         ?: primarySessionDir
@@ -233,6 +278,11 @@ class ResilientSessionWriter private constructor(
         trace?.timed("livePrimary.close") { livePrimary?.close() }
         trace?.timed("liveSpill.close") { liveSpill?.close() }
         when {
+            liveCaptureStagingFile != null && stagingChannelWriters != null -> {
+                trace?.timed("finalizeNativeStagingIncremental") {
+                    finalizeNativeStagingIncremental(trace)
+                }
+            }
             liveCaptureStagingFile != null -> {
                 trace?.timed("finalizeNativeStaging") {
                     finalizeNativeStaging(liveCaptureStagingFile, primarySessionDir)
@@ -322,6 +372,33 @@ class ResilientSessionWriter private constructor(
                 "native staging split failed: ${e.javaClass.simpleName}: ${e.message ?: e.toString()} " +
                     "(file=${raw.length()}B skip=$skip frames=$frames bpf=$bpf)",
             )
+        }
+        raw.delete()
+    }
+
+    private fun finalizeNativeStagingIncremental(trace: RecordStopTrace?) {
+        val raw = liveCaptureStagingFile ?: return
+        val writers = stagingChannelWriters ?: return
+        val bpf = nativePcmBytesPerFrame
+        val targetFrames = liveFramesWritten.coerceAtLeast(stagingSplitSessionFrames)
+        val pending = targetFrames - stagingSplitSessionFrames
+        trace?.mark(
+            "staging incremental tail=$pending alreadySplit=$stagingSplitSessionFrames " +
+                "target=$targetFrames skip=$nativeStagingSkipFrames",
+        )
+        if (pending > 0 && bpf > 0) {
+            InterleavedRawPcmSplitter.appendRangeToWriters(
+                rawFile = raw,
+                writers = writers,
+                sourceChannelCount = captureChannelCount,
+                bytesPerFrame = bpf,
+                sourceFrameOffset = nativeStagingSkipFrames + stagingSplitSessionFrames,
+                frameCount = pending,
+            )
+            stagingSplitSessionFrames = targetFrames
+        }
+        trace?.timed("stagingChannelWriters.close count=${writers.size}") {
+            writers.values.forEach { it.close() }
         }
         raw.delete()
     }
@@ -420,6 +497,8 @@ class ResilientSessionWriter private constructor(
     companion object {
         private const val INTERLEAVED_LIVE_THRESHOLD = 8
         private const val INTERLEAVED_TMP_NAME = ".capture_interleaved.tmp"
+        /** ~85 ms @ 48 kHz — batch enough to amortize IO without lagging far behind capture. */
+        private const val PUMP_MIN_FRAMES = 4096L
 
         fun openForResume(
             primarySessionDir: File,
@@ -439,6 +518,7 @@ class ResilientSessionWriter private constructor(
             liveSpill = null,
             liveCaptureStagingFile = null,
             nativePcmBytesPerFrame = 0,
+            stagingChannelWriters = null,
             mirrorSessionDirs = mirrorSessionDirs,
             spillSessionDir = spillSessionDir,
             minFreeBytes = minFreeBytes,
