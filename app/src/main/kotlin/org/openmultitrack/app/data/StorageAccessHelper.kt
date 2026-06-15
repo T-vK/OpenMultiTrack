@@ -16,21 +16,36 @@ object StorageAccessHelper {
         return dir.isDirectory && dir.canWrite()
     }
 
+    fun hasManageAllFilesAccess(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return true
+        return Environment.isExternalStorageManager()
+    }
+
+    fun isAppScopedStoragePath(context: Context, path: String): Boolean {
+        val appRoot = context.getExternalFilesDir(null)?.absolutePath ?: return false
+        return path.startsWith(appRoot)
+    }
+
+    fun requiresManageAllFilesAccess(context: Context, path: String): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+        if (isAppScopedStoragePath(context, path)) return false
+        if (hasManageAllFilesAccess(context)) return false
+        val root = Environment.getExternalStorageDirectory().absolutePath
+        return path.startsWith(root) ||
+            path.startsWith("/storage/") ||
+            path.startsWith("/mnt/")
+    }
+
     fun needsLegacyStoragePermission(context: Context, path: String): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) return false
         val root = Environment.getExternalStorageDirectory().absolutePath
         if (!path.startsWith(root)) return false
-        return !Environment.isExternalStorageManager()
+        return !hasManageAllFilesAccess(context)
     }
 
-    fun needsManageAllFilesAccess(context: Context, path: String): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
-        val root = Environment.getExternalStorageDirectory().absolutePath
-        if (!path.startsWith(root) && !path.startsWith("/storage/") && !path.startsWith("/mnt/")) {
-            return false
-        }
-        return !Environment.isExternalStorageManager() && !canWriteTo(path)
-    }
+    @Deprecated("Use requiresManageAllFilesAccess", ReplaceWith("requiresManageAllFilesAccess(context, path)"))
+    fun needsManageAllFilesAccess(context: Context, path: String): Boolean =
+        requiresManageAllFilesAccess(context, path)
 
     fun openManageAllFilesSettings(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

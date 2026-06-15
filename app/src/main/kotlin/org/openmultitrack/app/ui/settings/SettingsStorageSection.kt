@@ -139,6 +139,14 @@ fun SettingsStorageSection(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    if (option.label == "Shared storage") {
+                        Text(
+                            "Requires All files access on Android 11+",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
                 }
             }
         }

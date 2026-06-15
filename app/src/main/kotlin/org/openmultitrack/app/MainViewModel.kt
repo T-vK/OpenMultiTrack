@@ -625,6 +625,7 @@ class MainViewModel(
         refreshUsbAndOutputs(recordingSafe = true)
         refreshPrerequisites()
         refreshBatteryOptimizationState()
+        refreshStorageWritableState()
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 org.openmultitrack.app.data.RecordingSpillSync.syncAll(storageResolver, settings)
@@ -1960,14 +1961,32 @@ class MainViewModel(
         }
         path?.let { maybeRequestStorageAccess(it) }
         refreshLibrariesAfterStorageChange()
+        refreshStorageWritableState()
+    }
+
+    private fun refreshStorageWritableState() {
+        val customPath = _uiState.value.storageRootPath ?: return
+        val root = storageResolver.defaultRecordingRoot().absolutePath
+        val helper = org.openmultitrack.app.data.StorageAccessHelper
+        if (helper.canWriteTo(root)) return
+        val message = if (helper.requiresManageAllFilesAccess(appContext, customPath)) {
+            "Recording folder is not writable yet. Enable All files access for OpenMultiTrack, then return here."
+        } else {
+            "Recording folder is not writable. Check the path or choose App storage."
+        }
+        showStatus(message)
     }
 
     private fun maybeRequestStorageAccess(path: String) {
         val helper = org.openmultitrack.app.data.StorageAccessHelper
-        if (!helper.canWriteTo(path) ||
-            helper.needsManageAllFilesAccess(appContext, path) ||
-            helper.needsLegacyStoragePermission(appContext, path)
-        ) {
+        if (helper.requiresManageAllFilesAccess(appContext, path)) {
+            showStatus(
+                "Shared storage needs All files access. Enable OpenMultiTrack in the next screen.",
+            )
+            requestStorageAccessForPath(path)
+            return
+        }
+        if (!helper.canWriteTo(path) || helper.needsLegacyStoragePermission(appContext, path)) {
             requestStorageAccessForPath(path)
         }
     }

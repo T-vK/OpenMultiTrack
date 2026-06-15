@@ -567,7 +567,7 @@ class MainActivity : ComponentActivity() {
     private fun requestStorageAccessForPath(path: String) {
         val helper = org.openmultitrack.app.data.StorageAccessHelper
         when {
-            helper.needsManageAllFilesAccess(this, path) -> helper.openManageAllFilesSettings(this)
+            helper.requiresManageAllFilesAccess(this, path) -> helper.openManageAllFilesSettings(this)
             helper.needsLegacyStoragePermission(this, path) -> {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     helper.openManageAllFilesSettings(this)
