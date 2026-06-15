@@ -583,7 +583,14 @@ class CaptureSessionEngine(
     }
 
     suspend fun stopRecording(): RecordingSession? = lifecycleMutex.withLock {
-        closeRecordingWritersLocked(markComplete = true)
+        val trace = RecordStopTrace(
+            "captureEngine ch=$channelCount nativePcm=$nativePcmRecordingActive " +
+                "queueDepth=${diskWriteQueue.size}",
+        )
+        trace.mark("lifecycleMutex acquired")
+        val session = closeRecordingWritersLocked(markComplete = true, trace = trace)
+        trace.finish("engine stop complete")
+        session
     }
 
     private fun stopNativePcmRecordingIfActive(): Long {
@@ -694,7 +701,10 @@ class CaptureSessionEngine(
         return true
     }
 
-    private suspend fun closeRecordingWritersLocked(markComplete: Boolean): RecordingSession? {
+    private suspend fun closeRecordingWritersLocked(
+        markComplete: Boolean,
+        trace: RecordStopTrace? = null,
+    ): RecordingSession? {
         val dir = sessionDir
         val config = recordingConfig
         val rate = sampleRate
@@ -702,10 +712,28 @@ class CaptureSessionEngine(
         val resilient = sessionWriter
         val writer = perChannelWriter
         val legacy = legacyWavWriter
+        val writerKind = when {
+            resilient?.hasNativeStaging() == true -> "nativeStaging"
+            resilient?.hasInterleavedLive() == true -> "interleavedLive"
+            resilient != null -> "perChannelResilient"
+            writer != null -> "perChannel"
+            legacy != null -> "legacy"
+            else -> "none"
+        }
+        trace?.mark(
+            "close begin markComplete=$markComplete writer=$writerKind " +
+                "captured=$capturedFrames written=$framesWritten dropped=$droppedFrames " +
+                "queueDepth=${diskWriteQueue.size}",
+        )
         acceptRecordingWrites = false
-        stopRecordingWriteLoop()
-        val nativeFrames = stopNativePcmRecordingIfActive()
+        trace?.timed("stopRecordingWriteLoop") { stopRecordingWriteLoop(trace) }
+        val nativeFrames = trace?.let { t ->
+            var frames = 0L
+            t.timed("stopNativePcmRecordingIfActive") { frames = stopNativePcmRecordingIfActive() }
+            frames
+        } ?: stopNativePcmRecordingIfActive()
         if (nativeFrames > 0L) {
+            trace?.mark("nativeFrames=$nativeFrames baseline=$nativeFramesBaselineAtRecordingStart")
             val sessionFrames = (nativeFrames - nativeFramesBaselineAtRecordingStart).coerceAtLeast(0L)
             resilient?.setLiveFramesWritten(sessionFrames)
             framesCaptured = sessionFrames.coerceAtLeast(framesCaptured)
@@ -722,11 +750,11 @@ class CaptureSessionEngine(
                 "dropped=$droppedFrames rate=$rate markComplete=$markComplete",
         )
         sessionWriter = null
-        resilient?.close()
+        trace?.timed("resilientSessionWriter.close") { resilient?.close(trace) }
         perChannelWriter = null
-        writer?.close()
+        trace?.timed("perChannelWriter.close") { writer?.close() }
         legacyWavWriter = null
-        legacy?.close()
+        trace?.timed("legacyWavWriter.close") { legacy?.close() }
         recordingConfig = null
         sessionDir = null
         recordingStartedAtEpochMs = null
@@ -736,25 +764,29 @@ class CaptureSessionEngine(
         resetLiveWaveformBuffers()
 
         if (dir != null && config != null) {
-            buildSessionMetadata(config, rate, recordedFrames).writeTo(dir)
-            val hasChannelWavs = dir.listFiles()?.any { file ->
-                file.isFile && file.extension.equals("wav", ignoreCase = true)
-            } == true
-            if (markComplete && hasChannelWavs) {
-                SessionMetadata.read(dir)?.markComplete(dir)
-            } else if (!markComplete) {
-                SessionMetadata.read(dir)?.copy(incomplete = true)?.writeTo(dir)
-            } else {
-                OmtLog.e(
-                    "CaptureSession",
-                    "recording close produced no channel WAVs; leaving session incomplete",
-                )
-                SessionMetadata.read(dir)?.copy(incomplete = true)?.writeTo(dir)
+            trace?.timed("metadata write + markComplete") {
+                buildSessionMetadata(config, rate, recordedFrames).writeTo(dir)
+                val hasChannelWavs = dir.listFiles()?.any { file ->
+                    file.isFile && file.extension.equals("wav", ignoreCase = true)
+                } == true
+                if (markComplete && hasChannelWavs) {
+                    SessionMetadata.read(dir)?.markComplete(dir)
+                } else if (!markComplete) {
+                    SessionMetadata.read(dir)?.copy(incomplete = true)?.writeTo(dir)
+                } else {
+                    OmtLog.e(
+                        "CaptureSession",
+                        "recording close produced no channel WAVs; leaving session incomplete",
+                    )
+                    SessionMetadata.read(dir)?.copy(incomplete = true)?.writeTo(dir)
+                }
             }
         }
 
         if (!needsCapture()) {
-            stopCaptureInternalLocked()
+            trace?.timedSuspend("stopCaptureInternalLocked") { stopCaptureInternalLocked(trace) }
+        } else {
+            trace?.mark("capture left running (monitor/vu still needed)")
         }
 
         return dir?.let {
@@ -900,18 +932,27 @@ class CaptureSessionEngine(
         return Result.success(Unit)
     }
 
-    private suspend fun stopCaptureInternalLocked() {
+    private suspend fun stopCaptureInternalLocked(trace: RecordStopTrace? = null) {
         val backend = activeBackend
-        fanoutJob?.cancelAndJoin()
-        fanoutJob = null
-        stopMonitorOutput()
-        if (virtualMicOutputRunning) {
-            NativeAudioEngine.stopPlayback()
-            virtualMicOutputRunning = false
+        trace?.timedSuspend("fanoutJob.cancelAndJoin") {
+            fanoutJob?.cancelAndJoin()
+            fanoutJob = null
+        } ?: run {
+            fanoutJob?.cancelAndJoin()
+            fanoutJob = null
         }
-        disarmNativePcmPrearm()
+        trace?.timed("stopMonitorOutput") { stopMonitorOutput() }
+        if (virtualMicOutputRunning) {
+            trace?.timed("stopVirtualMicPlayback") {
+                NativeAudioEngine.stopPlayback()
+                virtualMicOutputRunning = false
+            }
+        }
+        trace?.timed("disarmNativePcmPrearm") { disarmNativePcmPrearm() }
         if (backend != null) {
-            AudioEngineRouter.stopRecording(backend, ownerId)
+            trace?.timed("AudioEngineRouter.stopRecording backend=$backend") {
+                AudioEngineRouter.stopRecording(backend, ownerId)
+            }
         }
         activeBackend = null
         activeRoute = null
@@ -1222,7 +1263,10 @@ class CaptureSessionEngine(
         }
     }
 
-    private fun stopRecordingWriteLoop() {
+    private fun stopRecordingWriteLoop(trace: RecordStopTrace? = null) {
+        val queueDepth = diskWriteQueue.size
+        val hadWriter = diskWriteFuture != null
+        trace?.mark("writeLoop shutdown begin queueDepth=$queueDepth hadWriter=$hadWriter")
         acceptRecordingWrites = false
         runCatching {
             diskWriteQueue.put(RecordingWriteRequest.Shutdown)
@@ -1231,6 +1275,7 @@ class CaptureSessionEngine(
             diskWriteFuture?.get(120, TimeUnit.SECONDS)
         }.onFailure { e ->
             OmtLog.w("CaptureSession", "disk writer drain timed out: ${e.message}")
+            trace?.mark("writeLoop drain TIMED OUT: ${e.message}")
         }
         diskWriteFuture = null
         diskWriteExecutor?.shutdownNow()
@@ -1238,6 +1283,7 @@ class CaptureSessionEngine(
         diskWriteQueue.clear()
         activeRecordingWriters = null
         acceptRecordingWrites = true
+        trace?.mark("writeLoop shutdown end queueDepth=${diskWriteQueue.size}")
     }
 
     private fun writeRecordingFrames(scratch: FloatArray, frames: Int, channels: Int) {

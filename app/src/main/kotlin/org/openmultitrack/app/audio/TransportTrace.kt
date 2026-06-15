@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * Filter while testing:
  * ```
- * adb logcat -s TransportTrace:I Xr18Routing:I
+ * adb logcat -s TransportTrace:I RecordStop:I Xr18Routing:I
  * ```
  *
  * Each line: `[label] #step +totalMs (ΔdeltaMs) phase`

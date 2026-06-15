@@ -216,32 +216,48 @@ class ResilientSessionWriter private constructor(
 
     fun isPrimaryHealthy(): Boolean = primaryHealthy
 
+    fun hasNativeStaging(): Boolean = liveCaptureStagingFile != null
+
+    fun hasInterleavedLive(): Boolean = livePrimary != null
+
     fun primarySessionDir(): File = primary?.filePaths()?.firstOrNull()?.let { File(it).parentFile }
         ?: primarySessionDir
 
-    override fun close() {
-        livePrimary?.close()
-        liveSpill?.close()
+    override fun close() = close(trace = null)
+
+    fun close(trace: RecordStopTrace?) {
+        trace?.mark(
+            "ResilientWriter.close nativeStaging=${liveCaptureStagingFile != null} " +
+                "interleavedLive=${livePrimary != null} perChannel=${primary != null}",
+        )
+        trace?.timed("livePrimary.close") { livePrimary?.close() }
+        trace?.timed("liveSpill.close") { liveSpill?.close() }
         when {
             liveCaptureStagingFile != null -> {
-                finalizeNativeStaging(liveCaptureStagingFile, primarySessionDir)
+                trace?.timed("finalizeNativeStaging") {
+                    finalizeNativeStaging(liveCaptureStagingFile, primarySessionDir)
+                }
             }
             livePrimary != null -> {
-                finalizeInterleavedLive(livePrimary, primarySessionDir)
+                trace?.timed("finalizeInterleavedLive.primary") {
+                    finalizeInterleavedLive(livePrimary, primarySessionDir)
+                }
                 liveSpill?.let { spillFile ->
                     if (spillSessionDir != null && !primaryHealthy) {
-                        finalizeInterleavedLive(spillFile, spillSessionDir)
+                        trace?.timed("finalizeInterleavedLive.spill") {
+                            finalizeInterleavedLive(spillFile, spillSessionDir)
+                        }
                     } else {
                         File(spillFile.outputFile.absolutePath).delete()
                     }
                 }
             }
             else -> {
-                primary?.close()
-                spill?.close()
+                trace?.timed("primaryPerChannel.close") { primary?.close() }
+                trace?.timed("spillPerChannel.close") { spill?.close() }
             }
         }
-        syncRedundantCopies()
+        trace?.timed("syncRedundantCopies mirrors=${mirrorSessionDirs.size}") { syncRedundantCopies() }
     }
 
     private fun finalizeNativeStaging(raw: File, targetDir: File) {
@@ -284,6 +300,11 @@ class ResilientSessionWriter private constructor(
                     "frames=$liveFramesWritten→$frames fileFrames=$fileFrameCount bpf=$bpf",
             )
         }
+        OmtLog.i(
+            "RecordStop",
+            "finalizeNativeStaging fileBytes=$fileBytes frames=$frames skip=$skip bpf=$bpf " +
+                "target=${targetDir.absolutePath}",
+        )
         runCatching {
             InterleavedRawPcmSplitter.splitToPerChannel(
                 rawFile = raw,
@@ -311,6 +332,11 @@ class ResilientSessionWriter private constructor(
             tmp.delete()
             return
         }
+        OmtLog.i(
+            "RecordStop",
+            "finalizeInterleavedLive frames=${writer.framesWritten} " +
+                "fileBytes=${tmp.length()} target=${targetDir.absolutePath}",
+        )
         runCatching {
             InterleavedWavSplitter.splitToPerChannel(
                 interleavedFile = tmp,
