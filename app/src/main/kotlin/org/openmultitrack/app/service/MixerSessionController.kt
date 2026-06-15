@@ -1948,52 +1948,60 @@ class MixerSessionController(
         }
         TransportTraceHub.mark(mixerId, "stopRecording restoreRouting=$restoreRouting")
         scope.launch {
-            setActivity("Stopping recording…", SessionActivityKind.DISK, tag = "record-stop")
-            val session = captureMutex.withLock {
-                TransportTraceHub.mark(mixerId, "captureMutex acquired for stop")
-                withContext(Dispatchers.IO) {
-                    TransportTraceHub.mark(mixerId, "captureEngine.stopRecording")
-                    val ended = captureEngine.stopRecording()
-                    TransportTraceHub.mark(mixerId, "captureEngine.stopRecording done path=${ended?.filePath}")
-                    if (restoreRouting && needsOscRoutingRestoreOnTransportStop()) {
-                        setActivity(
-                            "Restoring mixer routing…",
-                            SessionActivityKind.LAN,
-                            tag = "record-stop",
-                        )
-                        TransportTraceHub.mark(mixerId, "routing.afterRecordRestore")
-                        RoutingAutomationBridge.hooks?.afterRecordRestore()
-                        TransportTraceHub.mark(mixerId, "routing.afterRecordRestore done")
-                    } else if (restoreRouting) {
-                        RoutingAutomationBridge.hooks?.afterRecordRestore()
+            try {
+                setActivity("Flushing audio to disk…", SessionActivityKind.DISK, tag = "record-stop")
+                val session = captureMutex.withLock {
+                    TransportTraceHub.mark(mixerId, "captureMutex acquired for stop")
+                    withContext(Dispatchers.IO) {
+                        TransportTraceHub.mark(mixerId, "captureEngine.stopRecording")
+                        val ended = captureEngine.stopRecording()
+                        TransportTraceHub.mark(mixerId, "captureEngine.stopRecording done path=${ended?.filePath}")
+                        if (restoreRouting && needsOscRoutingRestoreOnTransportStop()) {
+                            withContext(Dispatchers.Main.immediate) {
+                                setActivity(
+                                    "Restoring mixer routing…",
+                                    SessionActivityKind.LAN,
+                                    tag = "record-stop",
+                                )
+                            }
+                            TransportTraceHub.mark(mixerId, "routing.afterRecordRestore")
+                            RoutingAutomationBridge.hooks?.afterRecordRestore()
+                            TransportTraceHub.mark(mixerId, "routing.afterRecordRestore done")
+                        } else if (restoreRouting) {
+                            RoutingAutomationBridge.hooks?.afterRecordRestore()
+                        }
+                        ended
                     }
-                    ended
                 }
+                settings.clearActiveRecording()
+                releaseRecordingWakeLock()
+                lastMediaProgressSec = -1
+                TransportTraceHub.mark(mixerId, "UI isRecording=false")
+                _state.update {
+                    it.copy(
+                        isRecording = false,
+                        transportState = TransportState.IDLE,
+                        lastRecordingPath = session?.filePath ?: it.lastRecordingPath,
+                        statusMessage = session?.let { s -> "Saved → ${s.filePath}" } ?: "Stopped",
+                        recordStartedAtEpochMs = 0L,
+                        waveformPeaks = emptyMap(),
+                        recordElapsedSec = 0f,
+                    )
+                }
+                resetRecordViewAfterStop()
+                withContext(Dispatchers.Main.immediate) {
+                    setActivity("Reopening USB capture…", SessionActivityKind.USB, tag = "record-stop")
+                }
+                syncVuMeterCapture()
+                if (_state.value.appMode.isPlaybackMode) {
+                    TransportTraceHub.mark(mixerId, "refreshSoundcheckLibrary (playback mode)")
+                    refreshSoundcheckLibrary()
+                }
+                AudioSessionBridge.rebuildNotification()
+                TransportTraceHub.mark(mixerId, "stopRecording session layer done")
+            } finally {
+                clearActivity("record-stop")
             }
-            settings.clearActiveRecording()
-            releaseRecordingWakeLock()
-            lastMediaProgressSec = -1
-            clearActivity("record-stop")
-            TransportTraceHub.mark(mixerId, "UI isRecording=false")
-            _state.update {
-                it.copy(
-                    isRecording = false,
-                    transportState = TransportState.IDLE,
-                    lastRecordingPath = session?.filePath ?: it.lastRecordingPath,
-                    statusMessage = session?.let { s -> "Saved → ${s.filePath}" } ?: "Stopped",
-                    recordStartedAtEpochMs = 0L,
-                    waveformPeaks = emptyMap(),
-                    recordElapsedSec = 0f,
-                )
-            }
-            resetRecordViewAfterStop()
-            syncVuMeterCapture()
-            if (_state.value.appMode.isPlaybackMode) {
-                TransportTraceHub.mark(mixerId, "refreshSoundcheckLibrary (playback mode)")
-                refreshSoundcheckLibrary()
-            }
-            AudioSessionBridge.rebuildNotification()
-            TransportTraceHub.mark(mixerId, "stopRecording session layer done")
         }
     }
 
