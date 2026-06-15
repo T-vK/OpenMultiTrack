@@ -1949,7 +1949,7 @@ class MixerSessionController(
         TransportTraceHub.mark(mixerId, "stopRecording restoreRouting=$restoreRouting")
         scope.launch {
             try {
-                setActivity("Flushing audio to disk…", SessionActivityKind.DISK, tag = "record-stop")
+                setActivity("Finalizing recording files…", SessionActivityKind.DISK, tag = "record-stop")
                 val session = captureMutex.withLock {
                     TransportTraceHub.mark(mixerId, "captureMutex acquired for stop")
                     withContext(Dispatchers.IO) {
