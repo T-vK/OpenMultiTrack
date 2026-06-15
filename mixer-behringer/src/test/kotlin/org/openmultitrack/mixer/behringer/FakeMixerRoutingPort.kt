@@ -101,5 +101,7 @@ class FakeMixerRoutingPort(
         return true
     }
 
-    override suspend fun listSnapshots(): List<MixerSnapshotOption> = snapshots
+    override suspend fun listSnapshots(
+        onProgress: (List<MixerSnapshotOption>) -> Unit,
+    ): List<MixerSnapshotOption> = snapshots
 }

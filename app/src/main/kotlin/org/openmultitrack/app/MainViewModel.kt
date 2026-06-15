@@ -268,6 +268,7 @@ class MainViewModel(
     private val scribbleImportMutex = Mutex()
     private var usbRecoveryJob: Job? = null
     private var refreshUsbDebounceJob: Job? = null
+    private var snapshotRefreshJob: Job? = null
     private val interruptedRecoveryJobs = mutableMapOf<String, Job>()
     private var sessionAttached = false
 
@@ -1705,9 +1706,17 @@ class MainViewModel(
             _uiState.update { it.copy(mixerSnapshots = emptyList(), mixerSnapshotsLoading = false) }
             return
         }
-        _uiState.update { it.copy(mixerSnapshotsLoading = true) }
-        viewModelScope.launch(Dispatchers.IO) {
-            val snapshots = routingCoordinator.listMixerSnapshots(profile.oscHost!!)
+        snapshotRefreshJob?.cancel()
+        _uiState.update { it.copy(mixerSnapshotsLoading = true, mixerSnapshots = emptyList()) }
+        snapshotRefreshJob = viewModelScope.launch(Dispatchers.IO) {
+            val host = profile.oscHost!!
+            val snapshots = routingCoordinator.listMixerSnapshots(host) { partial ->
+                _uiState.update { it.copy(mixerSnapshots = partial) }
+            }
+            val named = snapshots.count { it.name.isNotBlank() }
+            org.openmultitrack.mixer.behringer.Xr18RoutingLog.info(
+                "snapshot names loaded $named/${snapshots.size} from $host",
+            )
             _uiState.update {
                 it.copy(
                     mixerSnapshotsLoading = false,

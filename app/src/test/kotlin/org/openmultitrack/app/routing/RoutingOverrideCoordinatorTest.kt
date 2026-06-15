@@ -107,8 +107,9 @@ class RoutingOverrideCoordinatorTest {
 
         override suspend fun loadSnapshot(slot: Int): Boolean = true
 
-        override suspend fun listSnapshots(): List<org.openmultitrack.mixer.behringer.MixerSnapshotOption> =
-            emptyList()
+        override suspend fun listSnapshots(
+            onProgress: (List<org.openmultitrack.mixer.behringer.MixerSnapshotOption>) -> Unit,
+        ): List<org.openmultitrack.mixer.behringer.MixerSnapshotOption> = emptyList()
     }
 
     private class MemoryBaselineStore : RoutingPendingStore {

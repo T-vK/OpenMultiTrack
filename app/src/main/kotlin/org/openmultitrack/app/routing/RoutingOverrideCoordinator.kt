@@ -133,11 +133,12 @@ class RoutingOverrideCoordinator(
         return port.readAllChannelInputs()
     }
 
-    suspend fun listMixerSnapshots(host: String): List<MixerSnapshotOption> {
+    suspend fun listMixerSnapshots(
+        host: String,
+        onProgress: (List<MixerSnapshotOption>) -> Unit = {},
+    ): List<MixerSnapshotOption> {
         val port = routingFactory(host)
-        val emptySlots = { (1..64).map { MixerSnapshotOption(it, "") } }
-        if (!port.probe()) return emptySlots()
-        return port.listSnapshots().ifEmpty { emptySlots() }
+        return port.listSnapshots(onProgress)
     }
 
     /**

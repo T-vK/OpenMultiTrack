@@ -213,10 +213,12 @@ class Xr18RoutingService(
         }.getOrDefault(false)
     }
 
-    override suspend fun listSnapshots(): List<MixerSnapshotOption> = withContext(Dispatchers.IO) {
+    override suspend fun listSnapshots(
+        onProgress: (List<MixerSnapshotOption>) -> Unit,
+    ): List<MixerSnapshotOption> = withContext(Dispatchers.IO) {
         runCatching {
             openClient().use { client ->
-                Xr18RoutingOsc.readAllSnapshotNames(client)
+                Xr18RoutingOsc.readAllSnapshotNames(client, onProgress)
             }
         }.getOrElse { emptyList() }
     }

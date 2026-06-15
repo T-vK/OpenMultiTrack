@@ -755,7 +755,14 @@ private fun <T> SettingsPickerItem(row: SettingsPickerRow<T>) {
     }
 }
 
-private val ALL_SNAPSHOT_SLOT_OPTIONS: List<Int> = (0..64).toList()
+private fun snapshotSlotOptions(
+    snapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption>,
+    selectedSlot: Int,
+): List<Int> = buildList {
+    add(0)
+    snapshots.filter { it.name.isNotBlank() }.forEach { add(it.slot) }
+    if (selectedSlot > 0 && selectedSlot !in this) add(selectedSlot)
+}.distinct().sorted()
 
 private fun snapshotSlotLabel(
     slot: Int,
@@ -1018,7 +1025,7 @@ private fun buildSettingsRows(
                     category = SettingsCategory.OSC,
                     title = "Record snapshot",
                     description = "Snapshot recalled when recording starts. $snapshotDescription",
-                    options = ALL_SNAPSHOT_SLOT_OPTIONS,
+                    options = snapshotSlotOptions(state.mixerSnapshots, config.recordSnapshotSlot),
                     selected = config.recordSnapshotSlot,
                     label = snapshotLabel,
                     onSelect = { slot ->
@@ -1032,7 +1039,7 @@ private fun buildSettingsRows(
                     category = SettingsCategory.OSC,
                     title = "Soundcheck snapshot",
                     description = "Snapshot recalled when soundcheck playback starts. $snapshotDescription",
-                    options = ALL_SNAPSHOT_SLOT_OPTIONS,
+                    options = snapshotSlotOptions(state.mixerSnapshots, config.soundcheckSnapshotSlot),
                     selected = config.soundcheckSnapshotSlot,
                     label = snapshotLabel,
                     onSelect = { slot ->
