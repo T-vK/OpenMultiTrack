@@ -1929,7 +1929,6 @@ class MainViewModel(
         if (!overlaysBlockHeavySessionUpdates()) return session
         return session.copy(
             waveformPeaks = emptyMap(),
-            waveformDisplayColumns = emptyMap(),
         )
     }
 

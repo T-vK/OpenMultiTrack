@@ -757,7 +757,6 @@ fun DawMainScreen(
                                 soundcheckMode = false,
                                 normalized = recordWaveformNormalized,
                                 waveformPeaks = s.waveformPeaks,
-                                waveformDisplayColumns = s.waveformDisplayColumns,
                                 recordWaveformWindowSec = recordWaveformWindowSec,
                                 recordWaveformHistorySec = recordWaveformHistorySec,
                                 recordViewStartSec = s.recordViewStartSec,
@@ -1030,7 +1029,6 @@ private fun ChannelStripList(
     soundcheckMode: Boolean,
     normalized: Boolean,
     waveformPeaks: Map<Int, LiveWaveformSnapshot>,
-    waveformDisplayColumns: Map<Int, FloatArray>,
     recordWaveformWindowSec: Float,
     recordWaveformHistorySec: Float,
     recordViewStartSec: Float,
@@ -1200,12 +1198,6 @@ private fun ChannelStripList(
                     } else {
                         null
                     },
-                    waveformDisplayColumns = if (showLiveWaveforms) {
-                        val usbIndex = routing.inputSource(strip.index)
-                        waveformDisplayColumns[usbIndex]
-                    } else {
-                        null
-                    },
                     recordWaveformHistorySec = recordWaveformHistorySec,
                     recordViewStartSec = displayViewStart,
                     recordViewWindowSec = displayViewWindow,
@@ -1274,7 +1266,6 @@ private fun ChannelStripRow(
     labelFontSize: Float,
     labelColumnWidth: Dp,
     waveform: LiveWaveformSnapshot?,
-    waveformDisplayColumns: FloatArray?,
     recordWaveformHistorySec: Float,
     recordViewStartSec: Float,
     recordViewWindowSec: Float,
@@ -1332,7 +1323,6 @@ private fun ChannelStripRow(
                 normalized = normalized,
                 viewStartSec = recordViewStartSec,
                 viewWindowSec = recordViewWindowSec,
-                displayColumns = waveformDisplayColumns,
                 modifier = Modifier
                     .weight(1f)
                     .height(colorBarHeight)

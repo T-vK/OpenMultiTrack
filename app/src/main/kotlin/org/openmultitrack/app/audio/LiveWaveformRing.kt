@@ -44,22 +44,10 @@ class LiveWaveformRing(
     }
 
     /** Returns peaks oldest→newest for UI (may be shorter than [capacity] until the window fills). */
-    fun snapshot(normalize: Boolean = false): LiveWaveformSnapshot =
-        snapshotPeaks(maxCount = filled, normalize = normalize)
-
-    /** Returns the most recent [maxCount] peaks oldest→newest (for viewport-sized UI copies). */
-    fun snapshotRecent(maxCount: Int, normalize: Boolean = false): LiveWaveformSnapshot =
-        snapshotPeaks(maxCount = maxCount.coerceAtLeast(0), normalize = normalize)
-
-    private fun snapshotPeaks(maxCount: Int, normalize: Boolean): LiveWaveformSnapshot = lock.read {
-        val count = minOf(filled, maxCount)
-        val out = FloatArray(count)
-        val start = when {
-            count <= 0 -> 0
-            filled < capacityPeaks -> maxOf(0, filled - count)
-            else -> (writeIndex - count + capacityPeaks) % capacityPeaks
-        }
-        for (i in 0 until count) {
+    fun snapshot(normalize: Boolean = false): LiveWaveformSnapshot = lock.read {
+        val out = FloatArray(filled)
+        val start = if (filled < capacityPeaks) 0 else writeIndex
+        for (i in 0 until filled) {
             out[i] = peaks[(start + i) % capacityPeaks]
         }
         if (normalize && out.isNotEmpty()) {

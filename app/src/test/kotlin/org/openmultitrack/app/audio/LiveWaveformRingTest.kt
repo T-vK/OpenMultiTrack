@@ -25,14 +25,4 @@ class LiveWaveformRingTest {
         assertThat(snap.peaks[0]).isWithin(1e-6f).of(0.2f)
         assertThat(snap.peaks[2]).isWithin(1e-6f).of(0.4f)
     }
-
-    @Test
-    fun snapshotRecent_returnsTrailingPeaks() {
-        val ring = LiveWaveformRing(capacityPeaks = 10)
-        ring.seedPeaks(FloatArray(8) { (it + 1) / 10f })
-        val snap = ring.snapshotRecent(3)
-        assertThat(snap.peaks).hasLength(3)
-        assertThat(snap.peaks[0]).isWithin(1e-6f).of(0.6f)
-        assertThat(snap.peaks[2]).isWithin(1e-6f).of(0.8f)
-    }
 }
