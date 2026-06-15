@@ -5,6 +5,8 @@ import org.openmultitrack.app.data.RoutingAutomationMethod
 import org.openmultitrack.mixer.behringer.XAirChannelInputState
 
 enum class RoutingOverrideKind {
+    /** Baseline mixer state when not recording or playing back. */
+    IDLE,
     RECORD,
     SOUNDCHECK,
 }

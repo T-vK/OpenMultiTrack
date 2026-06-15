@@ -1,5 +1,12 @@
 package org.openmultitrack.app.data
 
+enum class RoutingAutomationTrigger {
+    /** Recall when switching app mode (multitrack record ↔ soundcheck). */
+    ON_MODE_ENTER,
+    /** Recall on record / stop / play / stop transport buttons. */
+    ON_TRANSPORT_BUTTON,
+}
+
 enum class RoutingAutomationLevel {
     OFF,
     PROMPT,
@@ -25,7 +32,9 @@ enum class RoutingRestorePolicy {
 data class MixerRoutingAutomationConfig(
     val level: RoutingAutomationLevel = RoutingAutomationLevel.PROMPT,
     val method: RoutingAutomationMethod = RoutingAutomationMethod.PER_CHANNEL,
+    val trigger: RoutingAutomationTrigger = RoutingAutomationTrigger.ON_TRANSPORT_BUTTON,
     val restorePolicy: RoutingRestorePolicy = RoutingRestorePolicy.RESPECT_LIVE,
+    val idleSnapshotSlot: Int = 0,
     val recordSnapshotSlot: Int = 0,
     val soundcheckSnapshotSlot: Int = 0,
     /** When true, restore even if live routing diverged (expert). */

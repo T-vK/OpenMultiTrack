@@ -12,6 +12,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import org.openmultitrack.app.data.RoutingAutomationMethod
 import org.openmultitrack.app.routing.RoutingApplyPromptState
 import org.openmultitrack.app.routing.RoutingOverrideKind
 import org.openmultitrack.app.routing.RoutingRestorePromptState
@@ -23,24 +24,19 @@ fun RoutingApplyDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val title = when (prompt.kind) {
-        RoutingOverrideKind.RECORD -> "Route armed channels for recording?"
-        RoutingOverrideKind.SOUNDCHECK -> "Route channels for soundcheck playback?"
-    }
-    val body = when (prompt.kind) {
-        RoutingOverrideKind.RECORD ->
-            "Temporarily switch ${prompt.channelCount} armed channel(s) to A/D input. " +
-                "Original mixer routing will be restored when recording stops."
-        RoutingOverrideKind.SOUNDCHECK ->
-            "Temporarily switch ${prompt.channelCount} channel(s) with tracks to USB playback input. " +
-                "Original routing will be restored when playback stops."
+    val (title, body) = if (prompt.method == RoutingAutomationMethod.SNAPSHOT_SLOT) {
+        snapshotApplyCopy(prompt)
+    } else {
+        perChannelApplyCopy(prompt)
     }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = { Text(body) },
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text("Apply") }
+            TextButton(onClick = onConfirm) {
+                Text(if (prompt.method == RoutingAutomationMethod.SNAPSHOT_SLOT) "Recall" else "Apply")
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Skip") }
@@ -54,15 +50,17 @@ fun RoutingRestoreDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val (title, body) = if (prompt.method == RoutingAutomationMethod.SNAPSHOT_SLOT) {
+        snapshotRestoreCopy(prompt)
+    } else {
+        perChannelRestoreCopy(prompt)
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Restore mixer input routing?") },
+        title = { Text(title) },
         text = {
             Column {
-                Text(
-                    "Revert temporary routing changes from ${prompt.kind.name.lowercase()} mode.",
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
+                Text(body, modifier = Modifier.padding(bottom = 8.dp))
                 if (prompt.conflicts.isNotEmpty()) {
                     Text(
                         "Some channels were changed on the mixer during playback:",
@@ -82,13 +80,53 @@ fun RoutingRestoreDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text("Restore") }
+            TextButton(onClick = onConfirm) {
+                Text(if (prompt.method == RoutingAutomationMethod.SNAPSHOT_SLOT) "Recall" else "Restore")
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Keep current") }
         },
     )
 }
+
+private fun snapshotApplyCopy(prompt: RoutingApplyPromptState): Pair<String, String> {
+    val label = prompt.snapshotName ?: "snapshot ${prompt.snapshotSlot}"
+    return when (prompt.kind) {
+        RoutingOverrideKind.RECORD ->
+            "Recall record snapshot?" to
+                "Load mixer snapshot \"$label\" for recording?"
+        RoutingOverrideKind.SOUNDCHECK ->
+            "Recall soundcheck snapshot?" to
+                "Load mixer snapshot \"$label\" for soundcheck playback?"
+        RoutingOverrideKind.IDLE ->
+            "Recall idle snapshot?" to
+                "Load mixer snapshot \"$label\" for the current mixer state?"
+    }
+}
+
+private fun perChannelApplyCopy(prompt: RoutingApplyPromptState): Pair<String, String> = when (prompt.kind) {
+    RoutingOverrideKind.RECORD ->
+        "Route armed channels for recording?" to
+            "Temporarily switch ${prompt.channelCount} armed channel(s) to A/D input. " +
+                "Original mixer routing will be restored when recording stops."
+    RoutingOverrideKind.SOUNDCHECK ->
+        "Route channels for soundcheck playback?" to
+            "Temporarily switch ${prompt.channelCount} channel(s) with tracks to USB playback input. " +
+                "Original routing will be restored when playback stops."
+    RoutingOverrideKind.IDLE ->
+        "Restore mixer input routing?" to "Restore mixer input routing for idle mode."
+}
+
+private fun snapshotRestoreCopy(prompt: RoutingRestorePromptState): Pair<String, String> {
+    val label = prompt.snapshotName ?: "snapshot ${prompt.snapshotSlot}"
+    return "Recall idle snapshot?" to
+        "Load mixer snapshot \"$label\" now that ${prompt.kind.name.lowercase()} has stopped?"
+}
+
+private fun perChannelRestoreCopy(prompt: RoutingRestorePromptState): Pair<String, String> =
+    "Restore mixer input routing?" to
+        "Revert temporary routing changes from ${prompt.kind.name.lowercase()} mode."
 
 @Composable
 fun MixerInputSourcesScreen(

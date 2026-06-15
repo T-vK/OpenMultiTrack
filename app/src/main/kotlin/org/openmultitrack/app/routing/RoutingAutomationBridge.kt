@@ -1,6 +1,7 @@
 package org.openmultitrack.app.routing
 
 import org.openmultitrack.domain.mixer.MixerProfile
+import org.openmultitrack.domain.session.AppMode
 
 /** Set from [org.openmultitrack.app.MainViewModel]; invoked on the service/IO thread. */
 object RoutingAutomationBridge {
@@ -13,6 +14,7 @@ interface RoutingAutomationHooks {
     suspend fun beforeSoundcheckApply(profile: MixerProfile, trackChannels: Set<Int>): RoutingHookResult
     suspend fun afterSoundcheckPlaybackStarted(profile: MixerProfile): RoutingHookResult
     suspend fun afterSoundcheckRestore()
+    suspend fun onAppModeEntered(profile: MixerProfile, mode: AppMode)
     suspend fun onStartupPendingRestore()
 }
 

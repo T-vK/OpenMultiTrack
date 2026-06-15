@@ -30,6 +30,7 @@ class RoutingOverrideCoordinatorTest {
         var applyShouldSucceed: Boolean = true,
         var restoreShouldSucceed: Boolean = true,
     ) : MixerRoutingPort {
+        var lastLoadedSnapshot: Int = -1
         override suspend fun probe(timeoutMs: Long): Boolean = reachable
 
         override suspend fun readChannelInput(channelIndex: Int): XAirChannelInputState? =
@@ -105,7 +106,10 @@ class RoutingOverrideCoordinatorTest {
             }
         }
 
-        override suspend fun loadSnapshot(slot: Int): Boolean = true
+        override suspend fun loadSnapshot(slot: Int): Boolean {
+            lastLoadedSnapshot = slot
+            return true
+        }
 
         override suspend fun listSnapshots(
             onProgress: (List<org.openmultitrack.mixer.behringer.MixerSnapshotOption>) -> Unit,
@@ -299,6 +303,38 @@ class RoutingOverrideCoordinatorTest {
         val pending = store.load()
         assertThat(pending?.affectedChannels).containsExactly(0)
         assertThat(port.readChannelInput(0)?.usesUsbReturn).isFalse()
+    }
+
+    @Test
+    fun restoreConfirmed_snapshotMode_recallsIdleSlot() = runBlocking {
+        val store = MemoryBaselineStore()
+        val port = TestRoutingPort()
+        val coordinator = RoutingOverrideCoordinator(store) { port }
+        val pending = PendingRoutingRestore(
+            transactionId = "snap",
+            mixerId = xr18Profile.id,
+            oscHost = xr18Profile.oscHost!!,
+            kind = RoutingOverrideKind.RECORD,
+            affectedChannels = emptySet(),
+            baselineByChannel = emptyMap(),
+            overrideByChannel = emptyMap(),
+            method = RoutingAutomationMethod.SNAPSHOT_SLOT,
+            snapshotSlot = 2,
+            capturedAtEpochMs = 0L,
+        )
+        store.save(pending)
+        val config = MixerRoutingAutomationConfig(
+            level = RoutingAutomationLevel.AUTO,
+            method = RoutingAutomationMethod.SNAPSHOT_SLOT,
+            idleSnapshotSlot = 7,
+            recordSnapshotSlot = 2,
+        )
+
+        val outcome = coordinator.restoreConfirmed(config, pending)
+
+        assertThat(outcome).isEqualTo(RoutingRestoreOutcome.Restored)
+        assertThat(port.lastLoadedSnapshot).isEqualTo(7)
+        assertThat(store.load()).isNull()
     }
 
     @Test

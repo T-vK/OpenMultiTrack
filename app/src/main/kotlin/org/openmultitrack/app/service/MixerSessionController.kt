@@ -321,11 +321,13 @@ class MixerSessionController(
                     _state.update { it.copy(appMode = mode) }
                     refreshStorageEstimate()
                     syncVuMeterCaptureWhileLocked()
+                    notifyAppModeEntered(mode)
                 }
             }
             return
         }
         _state.update { it.copy(appMode = mode) }
+        scope.launch { notifyAppModeEntered(mode) }
         if (mode.isPlaybackMode) {
             captureEngine.updateVuMetering(false)
             _state.update {
@@ -2179,6 +2181,12 @@ class MixerSessionController(
                 }
             }
         }
+    }
+
+    private suspend fun notifyAppModeEntered(mode: AppMode) {
+        if (!supportsOscRouting()) return
+        val prof = profile ?: return
+        RoutingAutomationBridge.hooks?.onAppModeEntered(prof, mode)
     }
 
     private suspend fun routingBeforeRecordLocked(): RoutingHookResult {

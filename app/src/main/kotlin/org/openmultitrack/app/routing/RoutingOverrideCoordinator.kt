@@ -21,7 +21,7 @@ sealed class RoutingApplyOutcome {
     data object SkippedEmptyScope : RoutingApplyOutcome()
     /** Live mixer routing already matches targets; caller should still capture baseline if needed. */
     data object AlreadyMatched : RoutingApplyOutcome()
-    data class ReadyToApply(val channelCount: Int, val kind: RoutingOverrideKind) : RoutingApplyOutcome()
+    data class ReadyToApply(val channelCount: Int, val kind: RoutingOverrideKind, val snapshotSlot: Int = 0) : RoutingApplyOutcome()
     data class Applied(val transactionId: String) : RoutingApplyOutcome()
     data class Failed(val message: String) : RoutingApplyOutcome()
 }
@@ -49,6 +49,9 @@ class RoutingOverrideCoordinator(
         channelIndices: Set<Int>,
     ): RoutingApplyOutcome {
         if (!isEligible(profile, config)) return RoutingApplyOutcome.Disabled
+        if (config.method == RoutingAutomationMethod.SNAPSHOT_SLOT) {
+            return peekSnapshotApply(profile, config, kind)
+        }
         val routable = XAirInputSourceCatalog.routableIndices(channelIndices)
         if (routable.isEmpty()) return RoutingApplyOutcome.SkippedEmptyScope
         val host = profile.oscHost ?: return RoutingApplyOutcome.SkippedNoOsc
@@ -62,6 +65,42 @@ class RoutingOverrideCoordinator(
             return RoutingApplyOutcome.AlreadyMatched
         }
         return RoutingApplyOutcome.ReadyToApply(routable.size, kind)
+    }
+
+    /** Recalls a mixer snapshot without opening a restore transaction (mode-enter path). */
+    suspend fun recallSnapshot(
+        profile: MixerProfile,
+        config: MixerRoutingAutomationConfig,
+        kind: RoutingOverrideKind,
+    ): RoutingApplyOutcome {
+        if (!isEligible(profile, config)) return RoutingApplyOutcome.Disabled
+        if (config.method != RoutingAutomationMethod.SNAPSHOT_SLOT) {
+            return RoutingApplyOutcome.Disabled
+        }
+        val slot = config.snapshotSlotFor(kind)
+        if (slot !in 1..64) return RoutingApplyOutcome.SkippedEmptyScope
+        val host = profile.oscHost ?: return RoutingApplyOutcome.SkippedNoOsc
+        val port = routingFactory(host)
+        if (!port.probe(timeoutMs = 2500)) return RoutingApplyOutcome.SkippedUnreachable
+        return if (port.loadSnapshot(slot)) {
+            RoutingApplyOutcome.Applied(UUID.randomUUID().toString())
+        } else {
+            RoutingApplyOutcome.Failed("Failed to recall snapshot slot $slot")
+        }
+    }
+
+    private suspend fun peekSnapshotApply(
+        profile: MixerProfile,
+        config: MixerRoutingAutomationConfig,
+        kind: RoutingOverrideKind,
+    ): RoutingApplyOutcome {
+        val slot = config.snapshotSlotFor(kind)
+        if (slot !in 1..64) return RoutingApplyOutcome.SkippedEmptyScope
+        val host = profile.oscHost ?: return RoutingApplyOutcome.SkippedNoOsc
+        if (!routingFactory(host).probe(timeoutMs = 2500)) {
+            return RoutingApplyOutcome.SkippedUnreachable
+        }
+        return RoutingApplyOutcome.ReadyToApply(channelCount = 0, kind = kind, snapshotSlot = slot)
     }
 
     fun createRoutingPort(host: String): MixerRoutingPort = routingFactory(host)
@@ -102,6 +141,18 @@ class RoutingOverrideCoordinator(
     ): RoutingRestoreOutcome {
         if (config.level == RoutingAutomationLevel.OFF) return RoutingRestoreOutcome.NothingPending
         if (!port.probe()) return RoutingRestoreOutcome.SkippedUnreachable
+        if (pending.method == RoutingAutomationMethod.SNAPSHOT_SLOT) {
+            val restoreSlot = config.idleSnapshotSlot
+            if (restoreSlot !in 1..64) {
+                baselineStore.clear()
+                return RoutingRestoreOutcome.Restored
+            }
+            return if (config.level == RoutingAutomationLevel.PROMPT) {
+                RoutingRestoreOutcome.ReadyToRestore(conflictCount = 0)
+            } else {
+                restoreInternal(pending, config, port, emptyMap())
+            }
+        }
         val live = port.readChannelInputs(pending.affectedChannels)
         val conflicts = detectConflicts(pending, live)
         return when {
@@ -151,6 +202,19 @@ class RoutingOverrideCoordinator(
     ): RoutingApplyOutcome {
         if (config.level == RoutingAutomationLevel.OFF) return RoutingApplyOutcome.Disabled
         val port = routingFactory(pending.oscHost)
+        if (pending.method == RoutingAutomationMethod.SNAPSHOT_SLOT) {
+            val slot = pending.snapshotSlot
+            if (slot !in 1..64) {
+                return RoutingApplyOutcome.Failed("Snapshot slot not configured")
+            }
+            val ok = port.loadSnapshot(slot)
+            Xr18RoutingLog.info("reapply snapshot slot $slot ok=$ok")
+            return if (ok) {
+                RoutingApplyOutcome.Applied(pending.transactionId)
+            } else {
+                RoutingApplyOutcome.Failed("Failed to recall snapshot slot $slot")
+            }
+        }
         val channels = XAirInputSourceCatalog.routableIndices(pending.affectedChannels)
         if (channels.isEmpty()) return RoutingApplyOutcome.SkippedEmptyScope
         val t0 = System.nanoTime()
@@ -190,21 +254,25 @@ class RoutingOverrideCoordinator(
         port: MixerRoutingPort? = null,
         deferOscApply: Boolean = false,
     ): RoutingApplyOutcome {
-        val routableChannels = XAirInputSourceCatalog.routableIndices(channelIndices)
-        if (routableChannels.isEmpty()) return RoutingApplyOutcome.SkippedEmptyScope
+        val routableChannels = if (config.method == RoutingAutomationMethod.SNAPSHOT_SLOT) {
+            emptySet()
+        } else {
+            XAirInputSourceCatalog.routableIndices(channelIndices)
+        }
+        if (config.method != RoutingAutomationMethod.SNAPSHOT_SLOT && routableChannels.isEmpty()) {
+            return RoutingApplyOutcome.SkippedEmptyScope
+        }
         val host = profile.oscHost ?: return RoutingApplyOutcome.SkippedNoOsc
         val routing = port ?: routingFactory(host)
         val overrideTargets = routableChannels.associateWith { ch ->
             when (kind) {
                 RoutingOverrideKind.RECORD -> XAirInputSourceCatalog.recordTarget(ch)
                 RoutingOverrideKind.SOUNDCHECK -> XAirInputSourceCatalog.soundcheckTarget(ch)
+                RoutingOverrideKind.IDLE -> error("IDLE uses snapshot recall only")
             }
         }
 
-        val snapshotSlot = when (kind) {
-            RoutingOverrideKind.RECORD -> config.recordSnapshotSlot
-            RoutingOverrideKind.SOUNDCHECK -> config.soundcheckSnapshotSlot
-        }
+        val snapshotSlot = config.snapshotSlotFor(kind)
         val t0 = System.nanoTime()
         val (baseline, ok) = when (config.method) {
             RoutingAutomationMethod.PER_CHANNEL -> {
@@ -230,15 +298,16 @@ class RoutingOverrideCoordinator(
                 if (!routing.probe(timeoutMs = 2500)) {
                     return RoutingApplyOutcome.SkippedUnreachable
                 }
-                val live = routing.readChannelInputs(routableChannels)
-                val captured = routableChannels.mapNotNull { ch ->
-                    live[ch]?.let { ch to it }
-                }.toMap()
-                if (captured.isEmpty()) {
-                    return RoutingApplyOutcome.Failed("Could not read mixer routing")
-                }
                 if (snapshotSlot !in 1..64) {
                     return RoutingApplyOutcome.Failed("Snapshot slot not configured")
+                }
+                val captured = if (routableChannels.isEmpty()) {
+                    emptyMap()
+                } else {
+                    val live = routing.readChannelInputs(routableChannels)
+                    routableChannels.mapNotNull { ch ->
+                        live[ch]?.let { ch to it }
+                    }.toMap()
                 }
                 val loaded = if (deferOscApply) true else routing.loadSnapshot(snapshotSlot)
                 captured to loaded
@@ -288,6 +357,20 @@ class RoutingOverrideCoordinator(
         port: MixerRoutingPort,
         live: Map<Int, XAirChannelInputState>,
     ): RoutingRestoreOutcome {
+        if (pending.method == RoutingAutomationMethod.SNAPSHOT_SLOT) {
+            val restoreSlot = config.idleSnapshotSlot
+            if (restoreSlot !in 1..64) {
+                baselineStore.clear()
+                return RoutingRestoreOutcome.Restored
+            }
+            val ok = port.loadSnapshot(restoreSlot)
+            return if (ok) {
+                baselineStore.clear()
+                RoutingRestoreOutcome.Restored
+            } else {
+                RoutingRestoreOutcome.Failed("Failed to recall idle snapshot slot $restoreSlot")
+            }
+        }
         val conflicts = detectConflicts(pending, live)
         val channelsToRestore = when {
             config.forceRestoreOnConflict || config.restorePolicy == RoutingRestorePolicy.STRICT ->
@@ -315,6 +398,7 @@ class RoutingOverrideCoordinator(
             val target = when (kind) {
                 RoutingOverrideKind.RECORD -> XAirInputSourceCatalog.recordTarget(ch)
                 RoutingOverrideKind.SOUNDCHECK -> XAirInputSourceCatalog.soundcheckTarget(ch)
+                RoutingOverrideKind.IDLE -> return false
             }
             live[ch]?.matchesRouting(target) == true
         }

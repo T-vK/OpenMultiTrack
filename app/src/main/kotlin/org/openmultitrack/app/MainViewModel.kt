@@ -71,11 +71,12 @@ import org.openmultitrack.app.routing.LanOscRoutingPort
 import org.openmultitrack.app.routing.OscLanSession
 import org.openmultitrack.app.routing.RoutingAutomationBridge
 import org.openmultitrack.app.routing.RoutingAutomationHooksImpl
+import org.openmultitrack.app.routing.RoutingRestorePromptState
+import org.openmultitrack.app.routing.withSnapshotName
 import org.openmultitrack.app.routing.RoutingBaselineStore
 import org.openmultitrack.app.routing.RoutingOverrideCoordinator
 import org.openmultitrack.mixer.behringer.RoutingConfirmResult
 import org.openmultitrack.mixer.behringer.Xr18RoutingService
-import org.openmultitrack.app.routing.RoutingRestorePromptState
 import org.openmultitrack.mixer.behringer.XAirChannelInputState
 import org.openmultitrack.usb.UsbAudioEnumerator
 import org.openmultitrack.usb.UsbAudioProbeService
@@ -225,10 +226,14 @@ class MainViewModel(
         settings = settings,
         coordinator = routingCoordinator,
         onApplyPrompt = { prompt ->
-            _uiState.update { it.copy(routingApplyPrompt = prompt) }
+            _uiState.update {
+                it.copy(routingApplyPrompt = prompt.withSnapshotName(it.mixerSnapshots))
+            }
         },
         onRestorePrompt = { prompt ->
-            _uiState.update { it.copy(routingRestorePrompt = prompt) }
+            _uiState.update {
+                it.copy(routingRestorePrompt = prompt.withSnapshotName(it.mixerSnapshots))
+            }
         },
     )
 

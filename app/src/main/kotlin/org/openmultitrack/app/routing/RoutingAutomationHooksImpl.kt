@@ -3,25 +3,34 @@ package org.openmultitrack.app.routing
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.openmultitrack.app.audio.TransportTraceHub
 import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.data.MixerRoutingAutomationConfig
 import org.openmultitrack.app.data.RoutingAutomationLevel
+import org.openmultitrack.app.data.RoutingAutomationMethod
+import org.openmultitrack.app.data.RoutingAutomationTrigger
+import org.openmultitrack.app.util.AppLogBuffer
 import org.openmultitrack.audio.OmtLog
 import org.openmultitrack.domain.mixer.MixerProfile
-import org.openmultitrack.app.audio.TransportTraceHub
-import org.openmultitrack.app.util.AppLogBuffer
+import org.openmultitrack.domain.session.AppMode
 import java.util.concurrent.atomic.AtomicReference
 
 data class RoutingApplyPromptState(
     val mixerId: String,
     val kind: RoutingOverrideKind,
-    val channelCount: Int,
+    val method: RoutingAutomationMethod,
+    val channelCount: Int = 0,
+    val snapshotSlot: Int = 0,
+    val snapshotName: String? = null,
 )
 
 data class RoutingRestorePromptState(
     val mixerId: String,
     val kind: RoutingOverrideKind,
+    val method: RoutingAutomationMethod,
     val conflicts: List<RoutingChannelConflict>,
+    val snapshotSlot: Int = 0,
+    val snapshotName: String? = null,
 )
 
 /**
@@ -69,52 +78,63 @@ class RoutingAutomationHooksImpl(
         }
     }
 
+    override suspend fun onAppModeEntered(profile: MixerProfile, mode: AppMode) {
+        val config = settings.routingAutomationForMixer(profile.id)
+        if (config.trigger != RoutingAutomationTrigger.ON_MODE_ENTER) return
+        val kind = when (mode) {
+            AppMode.MULTITRACK_RECORD -> RoutingOverrideKind.IDLE
+            AppMode.VIRTUAL_SOUNDCHECK -> RoutingOverrideKind.SOUNDCHECK
+            AppMode.SIMPLE_PLAY -> return
+        }
+        recallForModeEnter(profile, config, kind)
+    }
+
+    private suspend fun recallForModeEnter(
+        profile: MixerProfile,
+        config: MixerRoutingAutomationConfig,
+        kind: RoutingOverrideKind,
+    ): RoutingHookResult {
+        when (val peek = coordinator.peekApply(profile, config, kind, emptySet())) {
+            is RoutingApplyOutcome.Disabled,
+            is RoutingApplyOutcome.SkippedNoOsc,
+            is RoutingApplyOutcome.SkippedEmptyScope,
+            -> return RoutingHookResult.Skipped
+            is RoutingApplyOutcome.SkippedUnreachable ->
+                return routingFailed(profile, kind, "Mixer not reachable on LAN — check Wi‑Fi and OSC IP")
+            is RoutingApplyOutcome.Applied -> return RoutingHookResult.Proceed
+            is RoutingApplyOutcome.Failed -> return routingFailed(profile, kind, peek.message)
+            is RoutingApplyOutcome.AlreadyMatched -> Unit
+            is RoutingApplyOutcome.ReadyToApply -> {
+                if (!confirmApplyPrompt(profile, config, kind, peek)) {
+                    return RoutingHookResult.Cancelled
+                }
+            }
+        }
+        return when (val outcome = coordinator.recallSnapshot(profile, config, kind)) {
+            is RoutingApplyOutcome.Applied -> RoutingHookResult.Proceed
+            is RoutingApplyOutcome.Failed -> routingFailed(profile, kind, outcome.message)
+            is RoutingApplyOutcome.SkippedUnreachable ->
+                routingFailed(profile, kind, "Mixer not reachable on LAN — check Wi‑Fi and OSC IP")
+            else -> RoutingHookResult.Skipped
+        }
+    }
+
     private suspend fun beforeCapture(
         profile: MixerProfile,
         kind: RoutingOverrideKind,
         channels: Set<Int>,
     ): RoutingHookResult {
         val config = settings.routingAutomationForMixer(profile.id)
-        when (val peek = coordinator.peekApply(profile, config, kind, channels)) {
-            is RoutingApplyOutcome.Disabled,
-            is RoutingApplyOutcome.SkippedNoOsc,
-            -> return RoutingHookResult.Skipped
-            is RoutingApplyOutcome.SkippedUnreachable ->
-                return routingFailed(profile, kind, "Mixer not reachable on LAN — check Wi‑Fi and OSC IP")
-            is RoutingApplyOutcome.SkippedEmptyScope ->
-                return routingFailed(profile, kind, "No channels in scope for routing automation")
-            is RoutingApplyOutcome.Applied -> return RoutingHookResult.Proceed
-            is RoutingApplyOutcome.Failed -> return routingFailed(profile, kind, peek.message)
-            is RoutingApplyOutcome.AlreadyMatched -> Unit
-            is RoutingApplyOutcome.ReadyToApply -> {
-                if (config.level == RoutingAutomationLevel.PROMPT) {
-                    val deferred = CompletableDeferred<Boolean>()
-                    applyDeferred.set(deferred)
-                    withContext(Dispatchers.Main.immediate) {
-                        onApplyPrompt(
-                            RoutingApplyPromptState(profile.id, kind, peek.channelCount),
-                        )
-                    }
-                    if (!deferred.await()) return RoutingHookResult.Cancelled
-                }
-            }
+        if (config.trigger != RoutingAutomationTrigger.ON_TRANSPORT_BUTTON) {
+            return RoutingHookResult.Skipped
         }
-        return when (
-            val outcome = coordinator.captureOverrideOnly(
-                profile,
-                config,
-                kind,
-                channels,
-            )
-        ) {
-            is RoutingApplyOutcome.Applied -> RoutingHookResult.Proceed
-            is RoutingApplyOutcome.Failed -> routingFailed(profile, kind, outcome.message)
-            is RoutingApplyOutcome.SkippedUnreachable ->
-                routingFailed(profile, kind, "Mixer not reachable on LAN — check Wi‑Fi and OSC IP")
-            is RoutingApplyOutcome.SkippedEmptyScope ->
-                routingFailed(profile, kind, "No channels in scope for routing automation")
-            else -> routingFailed(profile, kind, "Routing capture failed ($outcome)")
-        }
+        return runApplyFlow(
+            profile = profile,
+            config = config,
+            kind = kind,
+            channels = channels,
+            captureOnly = true,
+        )
     }
 
     private suspend fun beforeApply(
@@ -123,47 +143,83 @@ class RoutingAutomationHooksImpl(
         channels: Set<Int>,
     ): RoutingHookResult {
         val config = settings.routingAutomationForMixer(profile.id)
+        if (config.trigger != RoutingAutomationTrigger.ON_TRANSPORT_BUTTON) {
+            return RoutingHookResult.Skipped
+        }
+        return runApplyFlow(
+            profile = profile,
+            config = config,
+            kind = kind,
+            channels = channels,
+            captureOnly = false,
+        )
+    }
+
+    private suspend fun runApplyFlow(
+        profile: MixerProfile,
+        config: MixerRoutingAutomationConfig,
+        kind: RoutingOverrideKind,
+        channels: Set<Int>,
+        captureOnly: Boolean,
+    ): RoutingHookResult {
         when (val peek = coordinator.peekApply(profile, config, kind, channels)) {
             is RoutingApplyOutcome.Disabled,
             is RoutingApplyOutcome.SkippedNoOsc,
+            is RoutingApplyOutcome.SkippedEmptyScope,
             -> return RoutingHookResult.Skipped
             is RoutingApplyOutcome.SkippedUnreachable ->
                 return routingFailed(profile, kind, "Mixer not reachable on LAN — check Wi‑Fi and OSC IP")
-            is RoutingApplyOutcome.SkippedEmptyScope ->
-                return routingFailed(profile, kind, "No channels in scope for routing automation")
             is RoutingApplyOutcome.Applied -> return RoutingHookResult.Proceed
             is RoutingApplyOutcome.Failed -> return routingFailed(profile, kind, peek.message)
             is RoutingApplyOutcome.AlreadyMatched -> Unit
             is RoutingApplyOutcome.ReadyToApply -> {
-                if (config.level == RoutingAutomationLevel.PROMPT) {
-                    val deferred = CompletableDeferred<Boolean>()
-                    applyDeferred.set(deferred)
-                    withContext(Dispatchers.Main.immediate) {
-                        onApplyPrompt(
-                            RoutingApplyPromptState(profile.id, kind, peek.channelCount),
-                        )
-                    }
-                    if (!deferred.await()) return RoutingHookResult.Cancelled
+                if (!confirmApplyPrompt(profile, config, kind, peek)) {
+                    return RoutingHookResult.Cancelled
                 }
             }
         }
-        return when (
-            val outcome = coordinator.applyConfirmed(
+        val outcome = if (captureOnly) {
+            coordinator.captureOverrideOnly(profile, config, kind, channels)
+        } else {
+            coordinator.applyConfirmed(
                 profile,
                 config,
                 kind,
                 channels,
                 recordingActive = kind == RoutingOverrideKind.RECORD,
             )
-        ) {
+        }
+        return when (outcome) {
             is RoutingApplyOutcome.Applied -> RoutingHookResult.Proceed
             is RoutingApplyOutcome.Failed -> routingFailed(profile, kind, outcome.message)
             is RoutingApplyOutcome.SkippedUnreachable ->
                 routingFailed(profile, kind, "Mixer not reachable on LAN — check Wi‑Fi and OSC IP")
-            is RoutingApplyOutcome.SkippedEmptyScope ->
-                routingFailed(profile, kind, "No channels in scope for routing automation")
+            is RoutingApplyOutcome.SkippedEmptyScope -> RoutingHookResult.Skipped
             else -> routingFailed(profile, kind, "Routing apply failed ($outcome)")
         }
+    }
+
+    private suspend fun confirmApplyPrompt(
+        profile: MixerProfile,
+        config: MixerRoutingAutomationConfig,
+        kind: RoutingOverrideKind,
+        peek: RoutingApplyOutcome.ReadyToApply,
+    ): Boolean {
+        if (config.level != RoutingAutomationLevel.PROMPT) return true
+        val deferred = CompletableDeferred<Boolean>()
+        applyDeferred.set(deferred)
+        withContext(Dispatchers.Main.immediate) {
+            onApplyPrompt(
+                RoutingApplyPromptState(
+                    mixerId = profile.id,
+                    kind = kind,
+                    method = config.method,
+                    channelCount = peek.channelCount,
+                    snapshotSlot = peek.snapshotSlot,
+                ),
+            )
+        }
+        return deferred.await()
     }
 
     private fun routingFailed(
@@ -195,6 +251,9 @@ class RoutingAutomationHooksImpl(
         }
         val config = settings.routingAutomationForMixer(profile.id)
         if (config.level == RoutingAutomationLevel.OFF) return RoutingHookResult.Skipped
+        if (config.trigger != RoutingAutomationTrigger.ON_TRANSPORT_BUTTON) {
+            return RoutingHookResult.Skipped
+        }
         return when (val outcome = coordinator.reapplyOverrideOnly(config, pending)) {
             is RoutingApplyOutcome.Applied -> RoutingHookResult.Proceed.also {
                 TransportTraceHub.mark(profile.id, "routing hooks afterSoundcheckPlaybackStarted → Proceed")
@@ -227,35 +286,15 @@ class RoutingAutomationHooksImpl(
                 return
             }
             is RoutingRestoreOutcome.Conflicts -> {
-                val deferred = CompletableDeferred<Boolean>()
-                restoreDeferred.set(deferred)
-                withContext(Dispatchers.Main.immediate) {
-                    onRestorePrompt(
-                        RoutingRestorePromptState(
-                            pending.mixerId,
-                            pending.kind,
-                            peek.conflicts,
-                        ),
-                    )
-                }
-                if (!deferred.await()) {
+                if (!confirmRestorePrompt(pending, config, peek.conflicts)) {
                     coordinator.clearPending()
                     return
                 }
             }
             is RoutingRestoreOutcome.ReadyToRestore -> {
-                if (config.level == RoutingAutomationLevel.PROMPT) {
-                    val deferred = CompletableDeferred<Boolean>()
-                    restoreDeferred.set(deferred)
-                    withContext(Dispatchers.Main.immediate) {
-                        onRestorePrompt(
-                            RoutingRestorePromptState(pending.mixerId, pending.kind, emptyList()),
-                        )
-                    }
-                    if (!deferred.await()) {
-                        coordinator.clearPending()
-                        return
-                    }
+                if (!confirmRestorePrompt(pending, config, emptyList())) {
+                    coordinator.clearPending()
+                    return
                 }
             }
         }
@@ -264,6 +303,35 @@ class RoutingAutomationHooksImpl(
                 OmtLog.w("RoutingHooks", "restore confirmed failed: ${outcome.message}")
             else -> Unit
         }
+    }
+
+    private suspend fun confirmRestorePrompt(
+        pending: PendingRoutingRestore,
+        config: MixerRoutingAutomationConfig,
+        conflicts: List<RoutingChannelConflict>,
+    ): Boolean {
+        val needsPrompt = when {
+            config.method == RoutingAutomationMethod.SNAPSHOT_SLOT ->
+                config.level == RoutingAutomationLevel.PROMPT && config.idleSnapshotSlot in 1..64
+            conflicts.isNotEmpty() ->
+                RoutingOverrideCoordinator.shouldAskConflicts(config, conflicts)
+            else -> config.level == RoutingAutomationLevel.PROMPT
+        }
+        if (!needsPrompt) return true
+        val deferred = CompletableDeferred<Boolean>()
+        restoreDeferred.set(deferred)
+        withContext(Dispatchers.Main.immediate) {
+            onRestorePrompt(
+                RoutingRestorePromptState(
+                    mixerId = pending.mixerId,
+                    kind = pending.kind,
+                    method = config.method,
+                    conflicts = conflicts,
+                    snapshotSlot = config.idleSnapshotSlot,
+                ),
+            )
+        }
+        return deferred.await()
     }
 
     override suspend fun onStartupPendingRestore() {

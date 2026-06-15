@@ -1124,6 +1124,43 @@ private fun buildSettingsRows(
             )
             add(
                 SettingsDropdownRow(
+                    id = "routing_trigger",
+                    category = SettingsCategory.OSC,
+                    title = "When to recall snapshots",
+                    description = "Recall on app mode change, or on record / play / stop buttons.",
+                    options = org.openmultitrack.app.data.RoutingAutomationTrigger.entries,
+                    selected = config.trigger,
+                    label = {
+                        when (it) {
+                            org.openmultitrack.app.data.RoutingAutomationTrigger.ON_MODE_ENTER ->
+                                "When entering record or soundcheck mode"
+                            org.openmultitrack.app.data.RoutingAutomationTrigger.ON_TRANSPORT_BUTTON ->
+                                "On record, play, and stop buttons"
+                        }
+                    },
+                    onSelect = { onRoutingAutomationConfigChange(config.copy(trigger = it)) },
+                ),
+            )
+            add(
+                SettingsDropdownRow(
+                    id = "routing_idle_snapshot_slot",
+                    category = SettingsCategory.OSC,
+                    title = "Idle snapshot",
+                    description = "Snapshot for when not recording or playing back. ${snapshotDropdownUi.descriptionSuffix}",
+                    options = snapshotSlotOptions(state.mixerSnapshots, config.idleSnapshotSlot),
+                    selected = config.idleSnapshotSlot,
+                    label = snapshotLabel,
+                    enabled = snapshotDropdownUi.enabled(config.idleSnapshotSlot),
+                    loading = loading,
+                    buttonText = snapshotDropdownUi.buttonText(config.idleSnapshotSlot),
+                    loadingMenuHint = snapshotDropdownUi.loadingMenuHint,
+                    onSelect = { slot ->
+                        onRoutingAutomationConfigChange(config.copy(idleSnapshotSlot = slot))
+                    },
+                ),
+            )
+            add(
+                SettingsDropdownRow(
                     id = "routing_record_snapshot_slot",
                     category = SettingsCategory.OSC,
                     title = "Record snapshot",

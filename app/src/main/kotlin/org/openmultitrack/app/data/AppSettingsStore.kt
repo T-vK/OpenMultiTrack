@@ -419,6 +419,10 @@ class AppSettingsStore(context: Context) {
                 restorePolicy = RoutingRestorePolicy.entries.getOrElse(o.optInt("restorePolicy")) {
                     RoutingRestorePolicy.RESPECT_LIVE
                 },
+                trigger = RoutingAutomationTrigger.entries.getOrElse(o.optInt("trigger")) {
+                    RoutingAutomationTrigger.ON_TRANSPORT_BUTTON
+                },
+                idleSnapshotSlot = o.optInt("idleSnapshotSlot", 0),
                 recordSnapshotSlot = o.optInt("recordSnapshotSlot", 0),
                 soundcheckSnapshotSlot = o.optInt("soundcheckSnapshotSlot", 0),
                 forceRestoreOnConflict = o.optBoolean("forceRestoreOnConflict", false),
@@ -436,6 +440,8 @@ class AppSettingsStore(context: Context) {
                 .put("level", config.level.ordinal)
                 .put("method", config.method.ordinal)
                 .put("restorePolicy", config.restorePolicy.ordinal)
+                .put("trigger", config.trigger.ordinal)
+                .put("idleSnapshotSlot", config.idleSnapshotSlot)
                 .put("recordSnapshotSlot", config.recordSnapshotSlot)
                 .put("soundcheckSnapshotSlot", config.soundcheckSnapshotSlot)
                 .put("forceRestoreOnConflict", config.forceRestoreOnConflict),
