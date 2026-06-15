@@ -69,6 +69,7 @@ internal val WaveformTimeRulerHeight = 22.dp
 fun SoundcheckPanel(
     session: MixerSessionUiState,
     health: MixerHealthSnapshot? = null,
+    onOpenConnectivity: (() -> Unit)? = null,
     playbackChannelCount: Int = session.playbackChannelCount,
     showTrackmarks: Boolean = false,
     routing: MixerRoutingConfig = MixerRoutingConfig(),
@@ -94,7 +95,11 @@ fun SoundcheckPanel(
             .fillMaxSize()
             .padding(horizontal = 4.dp, vertical = 2.dp),
     ) {
-        SoundcheckSessionInfoBar(session = session, health = health)
+        SoundcheckSessionInfoBar(
+            session = session,
+            health = health,
+            onOpenConnectivity = onOpenConnectivity,
+        )
         if (session.soundcheckWaveformsLoading) {
             LinearProgressIndicator(
                 progress = { session.soundcheckWaveformProgress.coerceIn(0f, 1f) },

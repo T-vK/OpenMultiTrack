@@ -121,6 +121,7 @@ data class DawUiState(
     val showRemoteControlSheet: Boolean = false,
     val mixerRoutingById: Map<String, MixerRoutingConfig> = emptyMap(),
     val showSettings: Boolean = false,
+    val showMixerConnectivity: Boolean = false,
     val showLogViewer: Boolean = false,
     val showSessionPicker: Boolean = false,
     val flow8PairingDialog: Flow8PairingDialogState? = null,
@@ -1714,6 +1715,13 @@ class MainViewModel(
         }
     }
 
+    fun showMixerConnectivity(show: Boolean) {
+        _uiState.update { it.copy(showMixerConnectivity = show) }
+        if (show) {
+            refreshUsbAndOutputs()
+        }
+    }
+
     fun refreshMixerSnapshots(mixerId: String? = null) {
         val targetId = mixerId ?: _uiState.value.activeMixerId
         val profile = targetId?.let { id ->
@@ -1909,7 +1917,7 @@ class MainViewModel(
 
     private fun overlaysBlockHeavySessionUpdates(): Boolean {
         val ui = _uiState.value
-        return ui.showSettings || ui.mixerSettingsMixerId != null
+        return ui.showSettings || ui.mixerSettingsMixerId != null || ui.showMixerConnectivity
     }
 
     private fun sessionForUiWhileOverlay(session: MixerSessionUiState): MixerSessionUiState {

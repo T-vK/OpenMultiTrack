@@ -147,6 +147,9 @@ fun DawMainScreen(
     onSetAppMode: (String, AppMode) -> Unit,
     onOpenSettings: () -> Unit,
     onCloseSettings: () -> Unit,
+    onOpenMixerConnectivity: () -> Unit = {},
+    onCloseMixerConnectivity: () -> Unit = {},
+    onRefreshMixerConnectivity: () -> Unit = {},
     onOpenLog: () -> Unit,
     onCloseLog: () -> Unit,
     onMonitorGainChange: (Float) -> Unit,
@@ -267,14 +270,13 @@ fun DawMainScreen(
 
     val activeProfile = activeId?.let { id -> state.mixers.firstOrNull { it.id == id } }
     val activeMixerHealth = activeProfile?.let { profile ->
-        session?.let { mixerSession ->
-            MixerHealthCollector.collect(
-                profile = profile,
-                session = mixerSession,
-                availableUsb = state.availableUsbDevices,
-                usbPermissionGranted = state.usbPermissionByMixer[profile.id] == true,
-            )
-        }
+        MixerHealthCollector.collect(
+            profile = profile,
+            session = session,
+            availableUsb = state.availableUsbDevices,
+            usbPermissionGranted = state.usbPermissionByMixer[profile.id] == true,
+            oscSupported = ScribbleImportSupport.supportsOsc(profile),
+        )
     }
     val supportsOscRouting = activeProfile?.let {
         org.openmultitrack.app.scribble.ScribbleImportSupport.supportsOsc(it) &&
@@ -363,6 +365,23 @@ fun DawMainScreen(
                 }
             },
             onRefreshMixerSnapshots = onRefreshMixerSnapshots,
+        )
+        return
+    }
+
+    if (state.showMixerConnectivity && activeProfile != null && activeMixerHealth != null) {
+        MixerConnectivityScreen(
+            mixer = activeProfile,
+            health = activeMixerHealth,
+            appMode = session?.appMode,
+            prerequisites = state.prerequisites,
+            onDismiss = onCloseMixerConnectivity,
+            onRefresh = onRefreshMixerConnectivity,
+            onOpenMixerSettings = {
+                onCloseMixerConnectivity()
+                onOpenMixerSettings(activeProfile.id)
+            },
+            onPrerequisiteAction = onPrerequisiteAction,
         )
         return
     }
@@ -516,6 +535,7 @@ fun DawMainScreen(
                     onOpenSessionPicker = onOpenSessionPicker,
                     onOpenRemoteControl = onOpenRemoteControl,
                     onOpenSettings = onOpenSettings,
+                    onOpenMixerConnectivity = onOpenMixerConnectivity,
                     onStorageTooltipOpenChange = { storageTooltipOpen = it },
                     onOpenLog = onOpenLog,
                     onOpenInputSources = onOpenInputSources,
@@ -626,6 +646,7 @@ fun DawMainScreen(
                             SoundcheckPanel(
                                 session = s,
                                 health = activeMixerHealth,
+                                onOpenConnectivity = onOpenMixerConnectivity,
                                 playbackChannelCount = MixerUsbChannelCounts.playbackChannelsForUi(
                                     profile = activeProfile ?: state.mixers.first { it.id == activeId },
                                     sessionPlaybackCount = s.playbackChannelCount,
@@ -659,6 +680,7 @@ fun DawMainScreen(
                                 RecordSessionInfoBar(
                                     session = s,
                                     health = activeMixerHealth,
+                                    onOpenConnectivity = onOpenMixerConnectivity,
                                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                                 )
                                 Box(Modifier.weight(1f).fillMaxWidth()) {

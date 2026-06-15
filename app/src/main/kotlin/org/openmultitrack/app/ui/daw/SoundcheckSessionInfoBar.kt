@@ -1,5 +1,6 @@
 package org.openmultitrack.app.ui.daw
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,6 +28,7 @@ import org.openmultitrack.domain.mixer.MixerHealthSnapshot
 fun SoundcheckSessionInfoBar(
     session: MixerSessionUiState,
     health: MixerHealthSnapshot? = null,
+    onOpenConnectivity: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val selected = session.soundcheckSessions.firstOrNull { it.sessionDir == session.selectedSoundcheckDir }
@@ -43,7 +45,15 @@ fun SoundcheckSessionInfoBar(
     }
 
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .then(
+                if (onOpenConnectivity != null) {
+                    Modifier.clickable(onClick = onOpenConnectivity)
+                } else {
+                    Modifier
+                },
+            ),
         shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {

@@ -71,7 +71,7 @@ class Xr18RoutingAppE2eTest {
         ctrl.setAppMode(AppMode.MULTITRACK_RECORD)
         E2eWait.untilMixerState(ctrl, 30_000) { it.probe != null && !it.probing }
 
-        // Stress: USB capture on before record — must quiesce before OSC routing.
+        // Stress: USB capture on before record — OSC routing applies while USB streams.
         ctrl.startMonitoring()
         E2eWait.untilMixerState(ctrl, 30_000) { it.isMonitoring }
 

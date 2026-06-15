@@ -2,6 +2,8 @@
 
 Hardware timing captured on **2026-06-11** from a full app-path e2e run on the wireless tablet with XR18 attached.
 
+> **Note (2026-06-11):** `quiesceUsbBeforeRoutingLocked()` was removed after this run. The ~5 s “quiesceUsb” line below was monitor/capture teardown, not an OSC requirement. See [latency reduction plan](xr18-transport-latency-reduction.md).
+
 ## Test setup
 
 | Item | Value |

@@ -1199,31 +1199,6 @@ class MixerSessionController(
         OmtLog.i("MixerSession", "FLOW 8 USB prepared for playback (stream held)")
     }
 
-    /** Stop USB capture/playback so XR18 accepts OSC routing changes (verified on hardware). */
-    private suspend fun quiesceUsbBeforeRoutingLocked(keepCaptureForFlow8Record: Boolean = false) {
-        if (!supportsOscRouting()) return
-        val t0 = System.nanoTime()
-        if (testTonePlayer.isPlaying) {
-            testTonePlayer.stopAndAwait()
-            _state.update { it.copy(usbTestToneActiveChannel = null) }
-        }
-        if (player.isPlaying) {
-            player.stopAndAwait()
-        }
-        if (_state.value.isMonitoring) {
-            captureEngine.updateMonitor(MonitorMixConfig(enabled = false))
-            _state.update { it.copy(isMonitoring = false) }
-        }
-        captureEngine.updateVuMetering(false)
-        _state.update { it.copy(isVuMetering = false) }
-        val keepCapture = keepCaptureForFlow8Record && isFlow8Active()
-        if (captureEngine.isCaptureActive && !isRecordingTransport() && !keepCapture) {
-            captureEngine.stopCapture()
-        }
-        org.openmultitrack.mixer.behringer.Xr18RoutingLog.info(
-            "quiesceUsb ${(System.nanoTime() - t0) / 1_000_000}ms keepCapture=$keepCapture",
-        )
-    }
 
     private suspend fun startSoundcheckPlaybackLocked(startFrame: Long, trace: TransportTrace? = null) {
         val descriptor = activeDescriptor
@@ -1415,7 +1390,6 @@ class MixerSessionController(
             withContext(Dispatchers.IO) { restoreAndroidPlaybackInterfaceLocked() }
         }
         if (restoreRouting && supportsOscRouting() && _state.value.appMode != AppMode.SIMPLE_PLAY) {
-            quiesceUsbBeforeRoutingLocked()
             RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
         }
         if (!skipStateUpdate) {
@@ -1632,7 +1606,6 @@ class MixerSessionController(
             )
         }
         if (restoreRouting && needsOscRoutingRestoreOnTransportStop()) {
-            quiesceUsbBeforeRoutingLocked()
             RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
         } else if (restoreRouting) {
             RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
@@ -1654,7 +1627,6 @@ class MixerSessionController(
         }
         stopUsbTestToneLocked(restoreRouting = false)
         withContext(Dispatchers.IO) {
-            quiesceUsbBeforeRoutingLocked()
             when (val routing = routingBeforeUsbTestToneLocked(usbChannelIndex)) {
                 RoutingHookResult.Cancelled ->
                     throw IllegalStateException("USB test tone routing cancelled")
@@ -1770,13 +1742,6 @@ class MixerSessionController(
                         val needsRoutingOsc = needsOscRoutingOnRecordStart()
                         if (needsRoutingOsc) {
                             setActivity(
-                                "Releasing USB for mixer routing…",
-                                SessionActivityKind.USB,
-                                tag = "record-start",
-                            )
-                            TransportTraceHub.mark(mixerId, "quiesceUsb")
-                            quiesceUsbBeforeRoutingLocked(keepCaptureForFlow8Record = true)
-                            setActivity(
                                 "Applying mixer routing…",
                                 SessionActivityKind.LAN,
                                 tag = "record-start",
@@ -1796,9 +1761,6 @@ class MixerSessionController(
                             }
                         } else if (supportsOscRouting()) {
                             TransportTraceHub.mark(mixerId, "routing.beforeRecord skipped (not on transport button)")
-                            org.openmultitrack.mixer.behringer.Xr18RoutingLog.info(
-                                "record start: skip USB quiesce — routing uses mode-enter trigger",
-                            )
                         }
                         setActivity("Opening USB capture…", SessionActivityKind.USB, tag = "record-start")
                         when {
@@ -1995,7 +1957,6 @@ class MixerSessionController(
                             tag = "record-stop",
                         )
                         TransportTraceHub.mark(mixerId, "routing.afterRecordRestore")
-                        quiesceUsbBeforeRoutingLocked()
                         RoutingAutomationBridge.hooks?.afterRecordRestore()
                         TransportTraceHub.mark(mixerId, "routing.afterRecordRestore done")
                     } else if (restoreRouting) {
@@ -2292,7 +2253,6 @@ class MixerSessionController(
                     restoreAndroidPlaybackInterfaceLocked()
                 }
                 if (restoreRouting && needsOscRoutingRestoreOnTransportStop() && _state.value.appMode != AppMode.SIMPLE_PLAY) {
-                    quiesceUsbBeforeRoutingLocked()
                     RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
                 } else if (restoreRouting && _state.value.appMode != AppMode.SIMPLE_PLAY) {
                     RoutingAutomationBridge.hooks?.afterSoundcheckRestore()

@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Input
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -934,6 +935,7 @@ internal fun DawNavigationDrawer(
     onOpenSessionPicker: () -> Unit,
     onOpenRemoteControl: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenMixerConnectivity: () -> Unit = {},
     onStorageTooltipOpenChange: (Boolean) -> Unit,
     onOpenLog: () -> Unit,
     onOpenInputSources: () -> Unit = {},
@@ -982,6 +984,27 @@ internal fun DawNavigationDrawer(
                 onClick = {
                     if (mixerSettingsEnabled) {
                         closeAnd(onOpenMixerSettings)
+                    }
+                },
+                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+            )
+            NavigationDrawerItem(
+                icon = {
+                    Icon(
+                        Icons.Default.Link,
+                        contentDescription = null,
+                        tint = if (mixerSettingsEnabled) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        },
+                    )
+                },
+                label = { Text("Mixer connectivity") },
+                selected = false,
+                onClick = {
+                    if (mixerSettingsEnabled) {
+                        closeAnd(onOpenMixerConnectivity)
                     }
                 },
                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
