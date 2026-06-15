@@ -732,7 +732,11 @@ class MainViewModel(
         return false
     }
 
-    fun refreshUsbAndOutputs(recordingSafe: Boolean = false, scanAllUsb: Boolean = false) {
+    fun refreshUsbAndOutputs(
+        recordingSafe: Boolean = false,
+        scanAllUsb: Boolean = false,
+        probeMixerIds: Set<String>? = null,
+    ) {
         viewModelScope.launch {
             val profiles = mixerStore.listMixers()
             val usb = withContext(Dispatchers.IO) {
@@ -765,12 +769,15 @@ class MainViewModel(
             syncMixerUsbNames(usb)
             sessionClient.withManager { mgr ->
                 val recordingActive = isAnyMixerRecording(mgr)
+                val profilesToProbe = probeMixerIds?.let { ids ->
+                    mixerStore.listMixers().filter { it.id in ids }
+                } ?: mixerStore.listMixers()
                 if (recordingSafe && recordingActive) {
-                    mixerStore.listMixers().forEach { profile ->
+                    profilesToProbe.forEach { profile ->
                         refreshInterruptedRecording(profile.id, mgr)
                     }
                 } else {
-                    mixerStore.listMixers().forEach { autoProbeMixer(it, mgr, usb) }
+                    profilesToProbe.forEach { autoProbeMixer(it, mgr, usb) }
                 }
             }
             scheduleUsbRecoveryIfNeeded()
@@ -1568,34 +1575,28 @@ class MainViewModel(
     fun onUsbPermissionGranted(deviceName: String) {
         OmtLog.i("ViewModel", "USB permission granted for $deviceName")
         val usbDevice = enumerator.getUsbDevice(deviceName)
+        var grantedProfileIds: Set<String> = emptySet()
         if (usbDevice != null) {
             val usbManager = appContext.getSystemService(android.content.Context.USB_SERVICE)
                 as android.hardware.usb.UsbManager
             org.openmultitrack.usb.UsbPermissionCoordinator.markGranted(usbManager, usbDevice)
             val serial = runCatching { usbDevice.serialNumber }.getOrNull()?.takeIf { it.isNotBlank() }
-            mixerStore.listMixers()
+            val matching = mixerStore.listMixers()
                 .filter { profile -> profileMatchesUsbDevice(profile, usbDevice) }
-                .forEach { profile ->
-                    val updated = profile.copy(
-                        usbDeviceName = usbDevice.deviceName,
-                        serialNumber = serial ?: profile.serialNumber,
-                        productName = usbDevice.productName ?: profile.productName,
-                    )
-                    if (updated != profile) {
-                        mixerStore.saveMixer(updated)
-                    }
+            grantedProfileIds = matching.map { it.id }.toSet()
+            matching.forEach { profile ->
+                val updated = profile.copy(
+                    usbDeviceName = usbDevice.deviceName,
+                    serialNumber = serial ?: profile.serialNumber,
+                    productName = usbDevice.productName ?: profile.productName,
+                )
+                if (updated != profile) {
+                    mixerStore.saveMixer(updated)
                 }
+            }
             loadMixers()
         }
-        sessionClient.withManager { mgr ->
-            val usb = enumerator.listUsbDevices()
-            mixerStore.listMixers()
-                .filter { profile ->
-                    usbDevice != null && profileMatchesUsbDevice(profile, usbDevice)
-                }
-                .forEach { autoProbeMixer(it, mgr, usb) }
-        }
-        scheduleRefreshUsbAndOutputs()
+        scheduleRefreshUsbAndOutputs(probeMixerIds = grantedProfileIds.takeIf { it.isNotEmpty() })
     }
 
     private fun profileMatchesUsbDevice(
@@ -1612,11 +1613,11 @@ class MainViewModel(
         return profile.usbDeviceName == null || profile.usbDeviceName == device.deviceName
     }
 
-    private fun scheduleRefreshUsbAndOutputs() {
+    private fun scheduleRefreshUsbAndOutputs(probeMixerIds: Set<String>? = null) {
         refreshUsbDebounceJob?.cancel()
         refreshUsbDebounceJob = viewModelScope.launch {
             delay(300)
-            refreshUsbAndOutputs()
+            refreshUsbAndOutputs(probeMixerIds = probeMixerIds)
         }
     }
 

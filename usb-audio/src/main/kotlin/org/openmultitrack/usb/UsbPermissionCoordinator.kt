@@ -27,13 +27,24 @@ object UsbPermissionCoordinator {
         return computeStableKey(device).also { stableKeyByDeviceName[device.deviceName] = it }
     }
 
-    private fun computeStableKey(device: UsbDevice): String {
-        val serial = runCatching { device.serialNumber }.getOrNull()?.takeIf { it.isNotBlank() }
-        return if (serial != null) {
-            "${device.vendorId}:${device.productId}:$serial"
-        } else {
-            "${device.vendorId}:${device.productId}:${device.deviceName}"
-        }
+    private fun computeStableKey(device: UsbDevice): String =
+        stableKeyForParts(
+            vendorId = device.vendorId,
+            productId = device.productId,
+            serial = runCatching { device.serialNumber }.getOrNull()?.takeIf { it.isNotBlank() },
+            deviceName = device.deviceName,
+        )
+
+    /** Stable identity for permission dedupe and mixer profile matching. */
+    fun stableKeyForParts(
+        vendorId: Int,
+        productId: Int,
+        serial: String?,
+        deviceName: String,
+    ): String = if (!serial.isNullOrBlank()) {
+        "$vendorId:$productId:$serial"
+    } else {
+        "$vendorId:$productId:$deviceName"
     }
 
     fun registerDevice(usbManager: UsbManager, device: UsbDevice) {

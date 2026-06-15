@@ -26,7 +26,7 @@ Each phase is independently shippable.
 | Area | Status | Notes |
 |------|--------|-------|
 | USB permission queue | **Done** | `UsbPermissionQueue` in `usb-audio`; `MainActivity` drains one device at a time |
-| Stable USB device id | **Partial** | `UsbPermissionCoordinator.stableKey()`; grant debounce on `onUsbPermissionGranted` still open |
+| Stable USB device id | **Done** | `UsbPermissionCoordinator.stableKeyForParts()`; grant debounce probes only granted mixer |
 | Flow 8 playback profile | **Done** | `Flow8UsbPlaybackProfile` — 2/4ch playback, capture release before play, post-stop delays |
 | Flow 8 torture test | **Open** | Instrumented 10× play/stop gate not yet in CI |
 | USB quiesce before OSC | **Removed (obsolete)** | Was ~5 s monitor/capture teardown misattributed as “needed for OSC”; OSC works while USB streams |
@@ -134,8 +134,9 @@ flowchart LR
 
 **Remaining:**
 
-- `MainViewModel.onUsbPermissionGranted`: probe only the granted profile (not all mixers); debounce `refreshUsbAndOutputs` ~300 ms.
-- `UsbPermissionQueueTest` + manual dual-mixer script in `docs/development/testing.md`.
+- Manual dual-mixer script in `docs/development/testing.md` (hardware).
+
+**Implemented:** `UsbPermissionQueue`, sequential drain in `MainActivity`, `stableKeyForParts()`, grant debounce (300 ms), `onUsbPermissionGranted` probes only the granted mixer profile(s), `UsbPermissionQueueTest` + `UsbPermissionCoordinatorStableKeyTest`.
 
 **Acceptance:** Cold start with XR18 + Flow 8: **≤2** system dialogs, never a third for XR18.
 
@@ -286,7 +287,7 @@ Manual scripts in `docs/development/testing.md`: dual-mixer permission count, Fl
 - [x] Mixer connectivity screen + info bar navigation
 - [x] Transport activity status in info bar
 - [x] Per-mixer routing automation settings + restore policy
-- [ ] Phase 0.1: grant debounce + `UsbPermissionQueueTest` — no duplicate XR18 prompt
+- [x] Phase 0.1: grant debounce + queue tests — probe only granted mixer on grant
 - [ ] Phase 0.2: Flow 8 10× play/stop torture — no brick
 - [ ] Phase 0.3: soundcheck `peekApply` capture-only fix
 - [ ] Phase 1: collapsed OK summary in info bar; reduce permission toasts

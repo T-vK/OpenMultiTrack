@@ -12,6 +12,7 @@ import org.openmultitrack.domain.mixer.ProbeState
 import org.openmultitrack.domain.mixer.UsbHealth
 import org.openmultitrack.domain.session.isPlaybackMode
 import org.openmultitrack.usb.MixerUsbChannelCounts
+import org.openmultitrack.usb.UsbPermissionCoordinator
 
 object MixerHealthCollector {
     fun collect(
@@ -50,9 +51,12 @@ object MixerHealthCollector {
             probeSummary = probeSummary,
             deviceName = matchedUsb?.deviceName ?: profile.usbDeviceName,
             stableId = matchedUsb?.let { usb ->
-                usb.serialNumber?.takeIf { it.isNotBlank() }?.let { serial ->
-                    "${usb.vendorId}:${usb.productId}:$serial"
-                } ?: "${usb.vendorId}:${usb.productId}:${usb.deviceName}"
+                UsbPermissionCoordinator.stableKeyForParts(
+                    vendorId = usb.vendorId,
+                    productId = usb.productId,
+                    serial = usb.serialNumber,
+                    deviceName = usb.deviceName,
+                )
             },
         )
         val osc = if (oscSupported || !profile.oscHost.isNullOrBlank()) {
