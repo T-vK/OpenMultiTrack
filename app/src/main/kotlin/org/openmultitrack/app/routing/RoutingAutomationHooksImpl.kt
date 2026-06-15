@@ -334,6 +334,8 @@ class RoutingAutomationHooksImpl(
         return deferred.await()
     }
 
+    override suspend fun hasPendingRestore(): Boolean = coordinator.loadPending() != null
+
     override suspend fun onStartupPendingRestore() {
         val pending = coordinator.loadPending() ?: return
         if (pending.recordingWasActive && settings.activeRecordingMixerId == pending.mixerId) {

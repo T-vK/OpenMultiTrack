@@ -38,6 +38,7 @@ import org.openmultitrack.app.data.AppSettingsStore
 import org.openmultitrack.app.data.RecordingWritePlan
 import org.openmultitrack.app.data.RecordingStorageResolver
 import org.openmultitrack.app.routing.RoutingOverrideCoordinator
+import org.openmultitrack.app.routing.RoutingTransportOsc
 import org.openmultitrack.app.root.LoopbackSetup
 import org.openmultitrack.app.root.RootShell
 import org.openmultitrack.audio.OmtLog
@@ -950,6 +951,28 @@ class MixerSessionController(
         return RoutingOverrideCoordinator.isEligible(prof, settings.routingAutomationForMixer(prof.id))
     }
 
+    private fun routingAutomationConfig() =
+        profile?.let { settings.routingAutomationForMixer(it.id) }
+
+    private fun needsOscRoutingOnRecordStart(): Boolean {
+        val prof = profile ?: return false
+        val config = routingAutomationConfig() ?: return false
+        val armed = _state.value.channelStrips.filter { it.armed }.map { it.index }.toSet()
+        return RoutingTransportOsc.willApplyOnRecordButton(prof, config, armed)
+    }
+
+    private fun needsOscRoutingOnSoundcheckPlay(trackChannels: Set<Int>): Boolean {
+        val prof = profile ?: return false
+        val config = routingAutomationConfig() ?: return false
+        return RoutingTransportOsc.willApplyOnSoundcheckPlay(prof, config, trackChannels)
+    }
+
+    private suspend fun needsOscRoutingRestoreOnTransportStop(): Boolean {
+        val config = routingAutomationConfig() ?: return false
+        if (!RoutingTransportOsc.willRestoreOnTransportStop(config)) return false
+        return RoutingAutomationBridge.hooks?.hasPendingRestore() == true
+    }
+
     /**
      * FLOW 8 firmware requires normal multitrack capture to stop before playback.
      */
@@ -1207,14 +1230,19 @@ class MixerSessionController(
                 }
             }
             val ui = _state.value
+            val trackChannels = SoundcheckTrackChannels.indicesWithTracks(dir, metadata)
             if (ui.appMode != AppMode.SIMPLE_PLAY) {
-                trace?.mark("soundcheck routing before playback USB route")
-                when (val routing = routingBeforeSoundcheckLocked(dir, metadata)) {
-                    RoutingHookResult.Cancelled ->
-                        throw IllegalStateException("Soundcheck routing cancelled")
-                    is RoutingHookResult.Failed ->
-                        throw IllegalStateException(routing.message)
-                    else -> Unit
+                if (needsOscRoutingOnSoundcheckPlay(trackChannels)) {
+                    trace?.mark("soundcheck routing before playback USB route")
+                    when (val routing = routingBeforeSoundcheckLocked(dir, metadata)) {
+                        RoutingHookResult.Cancelled ->
+                            throw IllegalStateException("Soundcheck routing cancelled")
+                        is RoutingHookResult.Failed ->
+                            throw IllegalStateException(routing.message)
+                        else -> Unit
+                    }
+                } else {
+                    trace?.mark("soundcheck routing skipped (not on transport button)")
                 }
             } else {
                 trace?.mark("simple play — skip OSC routing")
@@ -1226,7 +1254,7 @@ class MixerSessionController(
             trace?.mark("ensurePlaybackRoute usbStream=${usbStream != null} fd=${usbStream?.fd}")
             val route = ensurePlaybackLocked(descriptor, probe, usbOutputs).getOrThrow()
             trace?.mark("route resolved backend=${route.backend}")
-            if (ui.appMode != AppMode.SIMPLE_PLAY) {
+            if (ui.appMode != AppMode.SIMPLE_PLAY && needsOscRoutingOnSoundcheckPlay(trackChannels)) {
                 when (val routingRetry = routingAfterSoundcheckPlaybackStartedLocked()) {
                     RoutingHookResult.Cancelled ->
                         throw IllegalStateException("Soundcheck routing cancelled")
@@ -1549,8 +1577,10 @@ class MixerSessionController(
                 statusMessage = "USB test tone off",
             )
         }
-        if (restoreRouting && supportsOscRouting()) {
+        if (restoreRouting && needsOscRoutingRestoreOnTransportStop()) {
             quiesceUsbBeforeRoutingLocked()
+            RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
+        } else if (restoreRouting) {
             RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
         }
         AudioSessionBridge.rebuildNotification()
@@ -1682,22 +1712,28 @@ class MixerSessionController(
                 captureMutex.withLock {
                     TransportTraceHub.mark(mixerId, "captureMutex acquired")
                     withContext(Dispatchers.IO) {
-                        if (supportsOscRouting()) {
+                        val needsRoutingOsc = needsOscRoutingOnRecordStart()
+                        if (needsRoutingOsc) {
                             TransportTraceHub.mark(mixerId, "quiesceUsb")
                             quiesceUsbBeforeRoutingLocked(keepCaptureForFlow8Record = true)
                             TransportTraceHub.mark(mixerId, "routing.beforeRecord")
-                        }
-                        when (val routing = routingBeforeRecordLocked()) {
-                            RoutingHookResult.Cancelled -> {
-                                TransportTraceHub.finish(mixerId, "cancelled at routing")
-                                return@withContext
+                            when (val routing = routingBeforeRecordLocked()) {
+                                RoutingHookResult.Cancelled -> {
+                                    TransportTraceHub.finish(mixerId, "cancelled at routing")
+                                    return@withContext
+                                }
+                                is RoutingHookResult.Failed -> {
+                                    TransportTraceHub.finish(mixerId, "routing failed")
+                                    _state.update { it.copy(warningMessage = routing.message) }
+                                    return@withContext
+                                }
+                                else -> TransportTraceHub.mark(mixerId, "routing.beforeRecord → $routing")
                             }
-                            is RoutingHookResult.Failed -> {
-                                TransportTraceHub.finish(mixerId, "routing failed")
-                                _state.update { it.copy(warningMessage = routing.message) }
-                                return@withContext
-                            }
-                            else -> TransportTraceHub.mark(mixerId, "routing.beforeRecord → $routing")
+                        } else if (supportsOscRouting()) {
+                            TransportTraceHub.mark(mixerId, "routing.beforeRecord skipped (not on transport button)")
+                            org.openmultitrack.mixer.behringer.Xr18RoutingLog.info(
+                                "record start: skip USB quiesce — routing uses mode-enter trigger",
+                            )
                         }
                         when {
                             captureEngine.isCaptureActive -> {
@@ -1880,11 +1916,13 @@ class MixerSessionController(
                     TransportTraceHub.mark(mixerId, "captureEngine.stopRecording")
                     val ended = captureEngine.stopRecording()
                     TransportTraceHub.mark(mixerId, "captureEngine.stopRecording done path=${ended?.filePath}")
-                    if (restoreRouting && supportsOscRouting()) {
+                    if (restoreRouting && needsOscRoutingRestoreOnTransportStop()) {
                         TransportTraceHub.mark(mixerId, "routing.afterRecordRestore")
                         quiesceUsbBeforeRoutingLocked()
                         RoutingAutomationBridge.hooks?.afterRecordRestore()
                         TransportTraceHub.mark(mixerId, "routing.afterRecordRestore done")
+                    } else if (restoreRouting) {
+                        RoutingAutomationBridge.hooks?.afterRecordRestore()
                     }
                     ended
                 }
@@ -2175,8 +2213,10 @@ class MixerSessionController(
                 } else if (releaseNative && _state.value.appMode == AppMode.SIMPLE_PLAY) {
                     restoreAndroidPlaybackInterfaceLocked()
                 }
-                if (restoreRouting && supportsOscRouting() && _state.value.appMode != AppMode.SIMPLE_PLAY) {
+                if (restoreRouting && needsOscRoutingRestoreOnTransportStop() && _state.value.appMode != AppMode.SIMPLE_PLAY) {
                     quiesceUsbBeforeRoutingLocked()
+                    RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
+                } else if (restoreRouting && _state.value.appMode != AppMode.SIMPLE_PLAY) {
                     RoutingAutomationBridge.hooks?.afterSoundcheckRestore()
                 }
             }

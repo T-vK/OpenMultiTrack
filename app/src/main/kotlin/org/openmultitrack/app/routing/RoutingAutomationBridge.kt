@@ -16,6 +16,7 @@ interface RoutingAutomationHooks {
     suspend fun afterSoundcheckRestore()
     suspend fun onAppModeEntered(profile: MixerProfile, mode: AppMode)
     suspend fun onStartupPendingRestore()
+    suspend fun hasPendingRestore(): Boolean
 }
 
 sealed class RoutingHookResult {
