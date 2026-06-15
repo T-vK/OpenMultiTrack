@@ -26,6 +26,7 @@ import org.openmultitrack.app.data.StorageVolumeOption
 import org.openmultitrack.app.data.MixerDeviceStore
 import org.openmultitrack.app.data.PostRecordBehavior
 import org.openmultitrack.app.data.MixerRoutingStore
+import org.openmultitrack.app.data.MixerSnapshotCache
 import org.openmultitrack.app.data.ScribbleStripCache
 import org.openmultitrack.app.remote.RemoteSnapshotMapper
 import org.openmultitrack.app.service.AudioSessionBridge
@@ -178,6 +179,7 @@ data class DawUiState(
     val inputSourcesByChannel: Map<Int, XAirChannelInputState> = emptyMap(),
     val mixerSnapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption> = emptyList(),
     val mixerSnapshotsLoading: Boolean = false,
+    val mixerSnapshotsScanned: Int = 0,
     val routingAutomationConfig: MixerRoutingAutomationConfig = MixerRoutingAutomationConfig(),
 )
 
@@ -205,6 +207,7 @@ class MainViewModel(
     private val sessionClient: AudioSessionClient,
 ) : ViewModel() {
     private val storageResolver = RecordingStorageResolver(appContext, settings)
+    private val mixerSnapshotCache = MixerSnapshotCache(appContext)
     private val routingBaselineStore = RoutingBaselineStore(appContext)
     private val routingCoordinator = RoutingOverrideCoordinator(
         routingBaselineStore,
@@ -1703,13 +1706,25 @@ class MainViewModel(
         val profile = activeMixerProfile() ?: run {
             snapshotRefreshJob?.cancel()
             snapshotRefreshHost = null
-            _uiState.update { it.copy(mixerSnapshots = emptyList(), mixerSnapshotsLoading = false) }
+            _uiState.update {
+                it.copy(
+                    mixerSnapshots = emptyList(),
+                    mixerSnapshotsLoading = false,
+                    mixerSnapshotsScanned = 0,
+                )
+            }
             return
         }
         if (!ScribbleImportSupport.supportsOsc(profile) || profile.oscHost.isNullOrBlank()) {
             snapshotRefreshJob?.cancel()
             snapshotRefreshHost = null
-            _uiState.update { it.copy(mixerSnapshots = emptyList(), mixerSnapshotsLoading = false) }
+            _uiState.update {
+                it.copy(
+                    mixerSnapshots = emptyList(),
+                    mixerSnapshotsLoading = false,
+                    mixerSnapshotsScanned = 0,
+                )
+            }
             return
         }
         val host = profile.oscHost!!
@@ -1718,12 +1733,24 @@ class MainViewModel(
         snapshotRefreshJob?.cancel()
         snapshotRefreshHost = host
         val generation = ++snapshotRefreshGeneration
-        _uiState.update { it.copy(mixerSnapshotsLoading = true) }
+        val cached = mixerSnapshotCache.load(profile.id, host)
+        _uiState.update {
+            it.copy(
+                mixerSnapshotsLoading = true,
+                mixerSnapshots = cached ?: it.mixerSnapshots,
+                mixerSnapshotsScanned = 0,
+            )
+        }
         snapshotRefreshJob = viewModelScope.launch(Dispatchers.IO) {
             val snapshots = OscLanSession.withMulticastLock(appContext) {
-                Xr18SnapshotNameImporter().fetchSnapshotNames(host) { partial ->
+                Xr18SnapshotNameImporter().fetchSnapshotNames(host) { partial, scanned ->
                     if (generation != snapshotRefreshGeneration) return@fetchSnapshotNames
-                    _uiState.update { it.copy(mixerSnapshots = partial) }
+                    _uiState.update {
+                        it.copy(
+                            mixerSnapshots = partial,
+                            mixerSnapshotsScanned = scanned,
+                        )
+                    }
                 }
             }
             if (generation != snapshotRefreshGeneration) return@launch
@@ -1731,13 +1758,21 @@ class MainViewModel(
             org.openmultitrack.mixer.behringer.Xr18RoutingLog.info(
                 "snapshot names loaded $named/${snapshots.size} from $host",
             )
+            mixerSnapshotCache.save(profile.id, host, snapshots)
             _uiState.update {
                 it.copy(
                     mixerSnapshotsLoading = false,
                     mixerSnapshots = snapshots,
+                    mixerSnapshotsScanned = 64,
                 )
             }
         }
+    }
+
+    private fun maybePrefetchMixerSnapshots() {
+        val profile = activeMixerProfile() ?: return
+        if (!ScribbleImportSupport.supportsOsc(profile) || profile.oscHost.isNullOrBlank()) return
+        refreshMixerSnapshots()
     }
 
     private fun refreshStorageVolumeOptionsAsync() {
@@ -2184,6 +2219,7 @@ class MainViewModel(
             }
         }
         refreshPrerequisites()
+        maybePrefetchMixerSnapshots()
     }
 
     /**

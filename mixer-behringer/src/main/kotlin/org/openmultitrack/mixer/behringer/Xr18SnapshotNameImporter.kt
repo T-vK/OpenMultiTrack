@@ -13,7 +13,7 @@ class Xr18SnapshotNameImporter(
 ) {
     suspend fun fetchSnapshotNames(
         host: String,
-        onProgress: (List<MixerSnapshotOption>) -> Unit = {},
+        onProgress: (List<MixerSnapshotOption>, scannedSlots: Int) -> Unit = { _, _ -> },
     ): List<MixerSnapshotOption> = withContext(Dispatchers.IO) {
         OscUdpClient(host, port).use { client ->
             Xr18RoutingOsc.readAllSnapshotNames(client, onProgress)

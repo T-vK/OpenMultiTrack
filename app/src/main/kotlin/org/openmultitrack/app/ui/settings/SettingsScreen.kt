@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,6 +22,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedButton
@@ -80,6 +83,7 @@ data class SettingsUiState(
     val showOscRoutingSettings: Boolean = false,
     val mixerSnapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption> = emptyList(),
     val mixerSnapshotsLoading: Boolean = false,
+    val mixerSnapshotsScanned: Int = 0,
     val routingAutomationConfig: org.openmultitrack.app.data.MixerRoutingAutomationConfig =
         org.openmultitrack.app.data.MixerRoutingAutomationConfig(),
 )
@@ -261,6 +265,7 @@ private fun SettingsContent(
         monitorGain,
         state.mixerSnapshots,
         state.mixerSnapshotsLoading,
+        state.mixerSnapshotsScanned,
         state.routingAutomationConfig,
     ) {
         buildSettingsRows(
@@ -605,6 +610,10 @@ private data class SettingsDropdownRow<T>(
     val selected: T,
     val label: (T) -> String,
     val onSelect: (T) -> Unit,
+    val enabled: Boolean = true,
+    val loading: Boolean = false,
+    val buttonText: String? = null,
+    val loadingMenuHint: String? = null,
 ) : SettingsRowModel {
     override val searchText: String =
         "$title $description ${options.joinToString { label(it) }}".lowercase()
@@ -704,9 +713,17 @@ private fun <T> SettingsDropdownItem(row: SettingsDropdownRow<T>) {
         Box {
             OutlinedButton(
                 onClick = { expanded = true },
+                enabled = row.enabled,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(row.label(row.selected))
+                if (row.loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(row.buttonText ?: row.label(row.selected))
             }
             DropdownMenu(
                 expanded = expanded,
@@ -719,6 +736,19 @@ private fun <T> SettingsDropdownItem(row: SettingsDropdownRow<T>) {
                             expanded = false
                             if (option != row.selected) row.onSelect(option)
                         },
+                    )
+                }
+                if (row.loadingMenuHint != null) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                row.loadingMenuHint,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                        onClick = {},
+                        enabled = false,
                     )
                 }
             }
@@ -761,6 +791,21 @@ private fun <T> SettingsPickerItem(row: SettingsPickerRow<T>) {
     }
 }
 
+private data class SnapshotDropdownUi(
+    val snapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption>,
+    val loading: Boolean,
+    val scannedCount: Int,
+    val descriptionSuffix: String,
+) {
+    fun enabled(selectedSlot: Int): Boolean =
+        snapshotDropdownEnabled(loading, snapshots, selectedSlot)
+
+    fun buttonText(selectedSlot: Int): String? =
+        snapshotDropdownButtonText(selectedSlot, snapshots, loading)
+
+    val loadingMenuHint: String? get() = snapshotLoadingMenuHint(loading, scannedCount)
+}
+
 private fun snapshotSlotOptions(
     snapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption>,
     selectedSlot: Int,
@@ -787,12 +832,56 @@ private fun snapshotSlotLabel(
     }
 }
 
-private fun snapshotPickerDescription(loading: Boolean, namedCount: Int): String =
-    when {
-        loading -> "Loading snapshot names from the mixer…"
-        namedCount > 0 -> "$namedCount named snapshots loaded from the mixer."
-        else -> "Could not read snapshot names — check XR18 Wi‑Fi and OSC IP."
+private fun snapshotDropdownEnabled(
+    loading: Boolean,
+    snapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption>,
+    selectedSlot: Int,
+): Boolean {
+    if (!loading) return true
+    if (selectedSlot > 0) {
+        val selectedName = snapshots.find { it.slot == selectedSlot }?.name
+        if (!selectedName.isNullOrBlank()) return true
     }
+    return snapshots.any { it.name.isNotBlank() }
+}
+
+private fun snapshotDropdownButtonText(
+    selectedSlot: Int,
+    snapshots: List<org.openmultitrack.mixer.behringer.MixerSnapshotOption>,
+    loading: Boolean,
+): String? {
+    if (!loading) return null
+    if (selectedSlot == 0 && snapshots.none { it.name.isNotBlank() }) {
+        return "Loading snapshots…"
+    }
+    return null
+}
+
+private fun snapshotLoadingMenuHint(loading: Boolean, scannedCount: Int): String? = when {
+    !loading -> null
+    scannedCount >= 64 -> "Refreshing from mixer…"
+    scannedCount > 0 -> "Loading more snapshots… ($scannedCount/64 scanned)"
+    else -> null
+}
+
+private fun snapshotPickerDescription(
+    loading: Boolean,
+    namedCount: Int,
+    scannedCount: Int,
+): String = when {
+    loading && namedCount > 0 && scannedCount == 0 ->
+        "$namedCount snapshots shown — refreshing from mixer."
+    loading && namedCount == 0 && scannedCount == 0 ->
+        "Reading snapshot names from the mixer…"
+    loading && namedCount == 0 ->
+        "Reading snapshot names from the mixer… ($scannedCount/64 slots scanned)"
+    loading ->
+        "$namedCount snapshots found — still reading ($scannedCount/64 slots scanned)."
+    namedCount > 0 ->
+        "$namedCount named snapshots loaded from the mixer."
+    else ->
+        "Could not read snapshot names — check XR18 Wi‑Fi and OSC IP."
+}
 
 private fun buildSettingsRows(
     state: SettingsUiState,
@@ -1018,22 +1107,34 @@ private fun buildSettingsRows(
         )
         if (config.method == org.openmultitrack.app.data.RoutingAutomationMethod.SNAPSHOT_SLOT) {
             val namedCount = state.mixerSnapshots.count { it.name.isNotBlank() }
+            val loading = state.mixerSnapshotsLoading
             val snapshotLabel: (Int) -> String = { slot ->
-                snapshotSlotLabel(slot, state.mixerSnapshots, state.mixerSnapshotsLoading)
+                snapshotSlotLabel(slot, state.mixerSnapshots, loading)
             }
             val snapshotDescription = snapshotPickerDescription(
-                loading = state.mixerSnapshotsLoading,
+                loading = loading,
                 namedCount = namedCount,
+                scannedCount = state.mixerSnapshotsScanned,
+            )
+            val snapshotDropdownUi = SnapshotDropdownUi(
+                snapshots = state.mixerSnapshots,
+                loading = loading,
+                scannedCount = state.mixerSnapshotsScanned,
+                descriptionSuffix = snapshotDescription,
             )
             add(
                 SettingsDropdownRow(
                     id = "routing_record_snapshot_slot",
                     category = SettingsCategory.OSC,
                     title = "Record snapshot",
-                    description = "Snapshot recalled when recording starts. $snapshotDescription",
+                    description = "Snapshot recalled when recording starts. ${snapshotDropdownUi.descriptionSuffix}",
                     options = snapshotSlotOptions(state.mixerSnapshots, config.recordSnapshotSlot),
                     selected = config.recordSnapshotSlot,
                     label = snapshotLabel,
+                    enabled = snapshotDropdownUi.enabled(config.recordSnapshotSlot),
+                    loading = loading,
+                    buttonText = snapshotDropdownUi.buttonText(config.recordSnapshotSlot),
+                    loadingMenuHint = snapshotDropdownUi.loadingMenuHint,
                     onSelect = { slot ->
                         onRoutingAutomationConfigChange(config.copy(recordSnapshotSlot = slot))
                     },
@@ -1044,10 +1145,14 @@ private fun buildSettingsRows(
                     id = "routing_soundcheck_snapshot_slot",
                     category = SettingsCategory.OSC,
                     title = "Soundcheck snapshot",
-                    description = "Snapshot recalled when soundcheck playback starts. $snapshotDescription",
+                    description = "Snapshot recalled when soundcheck playback starts. ${snapshotDropdownUi.descriptionSuffix}",
                     options = snapshotSlotOptions(state.mixerSnapshots, config.soundcheckSnapshotSlot),
                     selected = config.soundcheckSnapshotSlot,
                     label = snapshotLabel,
+                    enabled = snapshotDropdownUi.enabled(config.soundcheckSnapshotSlot),
+                    loading = loading,
+                    buttonText = snapshotDropdownUi.buttonText(config.soundcheckSnapshotSlot),
+                    loadingMenuHint = snapshotDropdownUi.loadingMenuHint,
                     onSelect = { slot ->
                         onRoutingAutomationConfigChange(config.copy(soundcheckSnapshotSlot = slot))
                     },

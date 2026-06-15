@@ -321,6 +321,7 @@ fun DawMainScreen(
                 routingAutomationConfig = state.routingAutomationConfig,
                 mixerSnapshots = state.mixerSnapshots,
                 mixerSnapshotsLoading = state.mixerSnapshotsLoading,
+                mixerSnapshotsScanned = state.mixerSnapshotsScanned,
             ),
             monitorGain = monitorGain,
             onMonitorGainChange = onMonitorGainChange,

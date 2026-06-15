@@ -218,7 +218,9 @@ class Xr18RoutingService(
     ): List<MixerSnapshotOption> = withContext(Dispatchers.IO) {
         runCatching {
             openClient().use { client ->
-                Xr18RoutingOsc.readAllSnapshotNames(client, onProgress)
+                Xr18RoutingOsc.readAllSnapshotNames(client) { partial, _ ->
+                    onProgress(partial)
+                }
             }
         }.getOrElse { emptyList() }
     }

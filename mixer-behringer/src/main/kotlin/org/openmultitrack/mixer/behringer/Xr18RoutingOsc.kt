@@ -31,21 +31,33 @@ internal object Xr18RoutingOsc {
     fun snapshotNameQueryPaths(): List<String> =
         (1..64).flatMap { OscPath.snapSlotNameQueryPaths(it) }
 
+    private const val SNAPSHOT_NAME_BATCH_SLOTS = 16
+
     suspend fun readAllSnapshotNames(
         client: OscUdpClient,
-        onProgress: (List<MixerSnapshotOption>) -> Unit = {},
+        onProgress: (List<MixerSnapshotOption>, scannedSlots: Int) -> Unit = { _, _ -> },
     ): List<MixerSnapshotOption> {
         client.send(OscPath.xremote())
         Thread.sleep(SETTLE_MS)
-        val replies = client.query(
-            snapshotNameQueryPaths(),
-            timeoutMs = 6_000,
-            rounds = 4,
-            label = "snap names",
-        )
-        val results = parseSnapshotNames(replies)
-        onProgress(results)
-        return results
+        val results = Array(64) { index -> MixerSnapshotOption(index + 1, "") }
+        for (batchStart in 1..64 step SNAPSHOT_NAME_BATCH_SLOTS) {
+            val batchEnd = minOf(batchStart + SNAPSHOT_NAME_BATCH_SLOTS - 1, 64)
+            val paths = (batchStart..batchEnd).flatMap { OscPath.snapSlotNameQueryPaths(it) }
+            val replies = client.query(
+                paths,
+                timeoutMs = 2_500,
+                rounds = 3,
+                label = "snap $batchStart-$batchEnd",
+            )
+            for (slot in batchStart..batchEnd) {
+                results[slot - 1] = MixerSnapshotOption(
+                    slot,
+                    MixerSnapshotNames.resolveFromReplies(slot, replies),
+                )
+            }
+            onProgress(results.toList(), batchEnd)
+        }
+        return results.toList()
     }
 
     fun parseSnapshotNames(replies: Map<String, List<Any>>): List<MixerSnapshotOption> =
