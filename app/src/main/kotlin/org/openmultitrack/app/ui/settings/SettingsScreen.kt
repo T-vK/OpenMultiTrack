@@ -256,7 +256,13 @@ private fun SettingsContent(
         if (wantsSnapshotNames) onRefreshMixerSnapshots()
     }
 
-    val rows = remember(state, monitorGain) {
+    val rows = remember(
+        state,
+        monitorGain,
+        state.mixerSnapshots,
+        state.mixerSnapshotsLoading,
+        state.routingAutomationConfig,
+    ) {
         buildSettingsRows(
             state = state,
             monitorGain = monitorGain,

@@ -61,6 +61,7 @@ import org.openmultitrack.app.scribble.IncompleteRecordingStore
 import org.openmultitrack.app.scribble.OscLanDiscovery
 import org.openmultitrack.app.scribble.ScribbleImportSupport
 import org.openmultitrack.mixer.behringer.Xr18ScribbleImporter
+import org.openmultitrack.mixer.behringer.Xr18SnapshotNameImporter
 import org.openmultitrack.app.data.MixerRoutingAutomationConfig
 import org.openmultitrack.app.data.RoutingAutomationLevel
 import org.openmultitrack.app.routing.PendingRoutingRestore
@@ -269,6 +270,8 @@ class MainViewModel(
     private var usbRecoveryJob: Job? = null
     private var refreshUsbDebounceJob: Job? = null
     private var snapshotRefreshJob: Job? = null
+    private var snapshotRefreshHost: String? = null
+    private var snapshotRefreshGeneration: Int = 0
     private val interruptedRecoveryJobs = mutableMapOf<String, Job>()
     private var sessionAttached = false
 
@@ -1693,26 +1696,37 @@ class MainViewModel(
         _uiState.update { it.copy(showSettings = show) }
         if (show) {
             refreshStorageVolumeOptionsAsync()
-            refreshMixerSnapshots()
         }
     }
 
     fun refreshMixerSnapshots() {
         val profile = activeMixerProfile() ?: run {
+            snapshotRefreshJob?.cancel()
+            snapshotRefreshHost = null
             _uiState.update { it.copy(mixerSnapshots = emptyList(), mixerSnapshotsLoading = false) }
             return
         }
         if (!ScribbleImportSupport.supportsOsc(profile) || profile.oscHost.isNullOrBlank()) {
+            snapshotRefreshJob?.cancel()
+            snapshotRefreshHost = null
             _uiState.update { it.copy(mixerSnapshots = emptyList(), mixerSnapshotsLoading = false) }
             return
         }
+        val host = profile.oscHost!!
+        if (snapshotRefreshJob?.isActive == true && snapshotRefreshHost == host) return
+
         snapshotRefreshJob?.cancel()
-        _uiState.update { it.copy(mixerSnapshotsLoading = true, mixerSnapshots = emptyList()) }
+        snapshotRefreshHost = host
+        val generation = ++snapshotRefreshGeneration
+        _uiState.update { it.copy(mixerSnapshotsLoading = true) }
         snapshotRefreshJob = viewModelScope.launch(Dispatchers.IO) {
-            val host = profile.oscHost!!
-            val snapshots = routingCoordinator.listMixerSnapshots(host) { partial ->
-                _uiState.update { it.copy(mixerSnapshots = partial) }
+            val snapshots = OscLanSession.withMulticastLock(appContext) {
+                Xr18SnapshotNameImporter().fetchSnapshotNames(host) { partial ->
+                    if (generation != snapshotRefreshGeneration) return@fetchSnapshotNames
+                    _uiState.update { it.copy(mixerSnapshots = partial) }
+                }
             }
+            if (generation != snapshotRefreshGeneration) return@launch
             val named = snapshots.count { it.name.isNotBlank() }
             org.openmultitrack.mixer.behringer.Xr18RoutingLog.info(
                 "snapshot names loaded $named/${snapshots.size} from $host",
