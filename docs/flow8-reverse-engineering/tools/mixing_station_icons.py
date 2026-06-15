@@ -118,6 +118,13 @@ ICON_EMOJI: list[str] = [
     "🔀", "🔀", "🔀", "😊",
 ]
 
+# Prefer desk-style abbreviations where emoji are wrong (see MixingStationIcons.kt ABBREV)
+ICON_ABBREV: dict[int, str] = {
+    2: "BD", 3: "BD", 4: "SN", 5: "SN", 6: "T1", 7: "T2", 8: "FT", 9: "HH",
+    11: "DK", 12: "CB",
+    54: "XLR", 55: "TRS", 56: "T-L", 57: "T-R", 58: "C-L", 59: "C-R",
+}
+
 
 def icon_label(icon_id: int | None) -> str | None:
     if icon_id is None or not (ICON_MIN <= icon_id <= ICON_MAX):
@@ -134,6 +141,17 @@ def icon_constant(icon_id: int | None) -> str | None:
 def icon_emoji(icon_id: int | None) -> str | None:
     if icon_id is None or not (ICON_MIN <= icon_id <= ICON_MAX):
         return None
+    if icon_id in ICON_ABBREV:
+        return None
+    ch = ICON_EMOJI[icon_id]
+    return ch or None
+
+
+def icon_display(icon_id: int | None) -> str | None:
+    if icon_id is None or not (ICON_MIN <= icon_id <= ICON_MAX):
+        return None
+    if icon_id in ICON_ABBREV:
+        return ICON_ABBREV[icon_id]
     ch = ICON_EMOJI[icon_id]
     return ch or None
 

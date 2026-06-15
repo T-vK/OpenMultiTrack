@@ -13,6 +13,14 @@ import java.security.MessageDigest
 class ScribbleStripCache(context: Context) {
     private val cacheDir = File(context.filesDir, "scribble_cache").apply { mkdirs() }
 
+    fun loadCachedAtMs(mixerId: String): Long? {
+        val file = cacheFile(mixerId)
+        if (!file.isFile) return null
+        return runCatching {
+            JSONObject(file.readText()).optLong("cachedAtMs").takeIf { it > 0L }
+        }.getOrNull()
+    }
+
     fun hasCache(mixerId: String): Boolean = cacheFile(mixerId).isFile
 
     fun load(mixerId: String): List<UsbChannelScribble>? {

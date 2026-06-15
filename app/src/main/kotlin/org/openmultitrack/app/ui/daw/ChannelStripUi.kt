@@ -156,7 +156,7 @@ internal fun stripLabelColumnWidth(
     } ?: 0
 
     val showsIcon = iconMode != StripIconMode.HIDE &&
-        strips.any { MixingStationIcons.emoji(it.iconId) != null }
+        strips.any { MixingStationIcons.display(it.iconId) != null }
     val innerPad = (stripHeight * 0.12f).coerceIn(3.dp, 10.dp)
     val colorBarHeight = stripHeight - innerPad * 2
     val iconGap = 8.dp
@@ -204,14 +204,14 @@ internal fun StripIdentityCell(
     val parsed = remember(strip.label, strip.displayName, strip.iconId, numberMode, iconMode) {
         StripTextParts(strip, numberMode, iconMode)
     }
-    val iconEmoji = parsed.iconEmoji
+    val iconGlyph = parsed.iconGlyph
     val lineText = parsed.lineText
     val iconGap = 8.dp
     val bigIconSize = iconContainerSize(colorBarHeight)
     val controlIconSize = (labelFontSize * 0.95f).coerceIn(10f, 16f).dp
     val colorBarWidth = 3.dp
-    val colorBarGap = if (iconEmoji != null) ColorBarIconGap else 0.dp
-    val iconColumnWidth = if (iconEmoji != null) bigIconSize else 0.dp
+    val colorBarGap = if (iconGlyph != null) ColorBarIconGap else 0.dp
+    val iconColumnWidth = if (iconGlyph != null) bigIconSize else 0.dp
     val textAreaWidth = (columnWidth - colorBarWidth - colorBarGap - iconColumnWidth - iconGap - 2.dp)
         .coerceAtLeast(24.dp)
 
@@ -230,9 +230,9 @@ internal fun StripIdentityCell(
                 .clip(RoundedCornerShape(2.dp))
                 .background(Color(strip.colorArgb)),
         )
-        if (iconEmoji != null) {
+        if (iconGlyph != null) {
             Spacer(Modifier.width(colorBarGap))
-            ScribbleIconEmoji(emoji = iconEmoji, containerSize = bigIconSize)
+            ScribbleStripIcon(glyph = iconGlyph, containerSize = bigIconSize)
             Spacer(Modifier.width(iconGap))
         }
         Column(
@@ -290,21 +290,30 @@ internal fun StripIdentityCell(
 }
 
 @Composable
-private fun ScribbleIconEmoji(
-    emoji: String,
+private fun ScribbleStripIcon(
+    glyph: MixingStationIcons.Glyph,
     containerSize: Dp,
 ) {
     BoxWithConstraints(
         modifier = Modifier.size(containerSize),
         contentAlignment = Alignment.Center,
     ) {
+        val scale = when (glyph.style) {
+            MixingStationIcons.GlyphStyle.ABBREV -> 0.42f
+            MixingStationIcons.GlyphStyle.EMOJI -> 0.82f
+        }
         val fontSize = with(LocalDensity.current) {
-            minOf(maxWidth, maxHeight).times(0.82f).toSp()
+            minOf(maxWidth, maxHeight).times(scale).toSp()
         }
         Text(
-            text = emoji,
+            text = glyph.text,
             fontSize = fontSize,
             lineHeight = fontSize,
+            fontWeight = if (glyph.style == MixingStationIcons.GlyphStyle.ABBREV) {
+                FontWeight.SemiBold
+            } else {
+                FontWeight.Normal
+            },
             maxLines = 1,
             softWrap = false,
         )
@@ -557,7 +566,7 @@ internal fun ChannelStripControlDialog(
                 Column {
                     Text("Channel ${strip.index + 1}", style = MaterialTheme.typography.titleMedium)
                     val subtitle = buildString {
-                        parsed.iconEmoji?.let { append("$it ") }
+                        parsed.iconGlyph?.let { append("${it.text} ") }
                         val name = strip.displayName.ifBlank { strip.label }
                         if (name.isNotBlank()) append(name)
                     }
@@ -747,13 +756,13 @@ private fun OverlayChannelToggle(
 }
 
 private data class StripTextParts(
-    val iconEmoji: String?,
+    val iconGlyph: MixingStationIcons.Glyph?,
     val lineText: String,
 ) {
     constructor(strip: ChannelStripState, numberMode: StripNumberMode, iconMode: StripIconMode) : this(
-        iconEmoji = when (iconMode) {
+        iconGlyph = when (iconMode) {
             StripIconMode.HIDE -> null
-            else -> MixingStationIcons.emoji(strip.iconId)
+            else -> MixingStationIcons.display(strip.iconId)
         },
         lineText = buildStripLine(strip, numberMode, iconMode),
     )

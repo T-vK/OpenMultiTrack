@@ -1716,6 +1716,10 @@ class MainViewModel(
         }
     }
 
+    fun scribbleCacheUpdatedAt(mixerId: String): Long? = scribbleStripCache.loadCachedAtMs(mixerId)
+
+    fun hasScribbleCache(mixerId: String): Boolean = scribbleStripCache.hasCache(mixerId)
+
     fun showMixerConnectivity(show: Boolean) {
         _uiState.update { it.copy(showMixerConnectivity = show) }
         if (show) {

@@ -40,6 +40,7 @@ import org.openmultitrack.app.scribble.Flow8BlePermissions
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import org.openmultitrack.app.device.PrerequisiteKind
+import org.openmultitrack.app.health.ConnectivityAction
 import org.openmultitrack.app.service.SessionTransportActions
 import org.openmultitrack.app.ui.daw.DawMainScreen
 import org.openmultitrack.app.ui.daw.FloatingLogViewerOverlay
@@ -216,6 +217,9 @@ class MainActivity : ComponentActivity() {
                         onOpenMixerConnectivity = { viewModel.showMixerConnectivity(true) },
                         onCloseMixerConnectivity = { viewModel.showMixerConnectivity(false) },
                         onRefreshMixerConnectivity = { viewModel.refreshUsbAndOutputs() },
+                        onConnectivityAction = ::handleConnectivityAction,
+                        scribbleCacheUpdatedAt = viewModel::scribbleCacheUpdatedAt,
+                        hasScribbleCache = viewModel::hasScribbleCache,
                         onOpenLog = { viewModel.showLogViewer(true) },
                         onCloseLog = { viewModel.showLogViewer(false) },
                         onMonitorGainChange = viewModel::setMonitorGain,
@@ -467,6 +471,34 @@ class MainActivity : ComponentActivity() {
             Flow8BlePermissions.needsLocationForBleScan(this)
         ) {
             locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
+
+    private fun handleConnectivityAction(action: ConnectivityAction) {
+        when (action) {
+            ConnectivityAction.GRANT_USB,
+            ConnectivityAction.REFRESH,
+            -> viewModel.refreshUsbAndOutputs()
+            ConnectivityAction.SET_OSC_IP -> {
+                viewModel.showMixerConnectivity(false)
+                viewModel.uiState.value.activeMixerId?.let { viewModel.showMixerSettings(it) }
+            }
+            ConnectivityAction.SYNC_LABELS -> {
+                viewModel.uiState.value.activeMixerId?.let { viewModel.loadScribbleStrip(it) }
+            }
+            ConnectivityAction.REFRESH_SNAPSHOTS -> {
+                viewModel.uiState.value.activeMixerId?.let { viewModel.refreshMixerSnapshots(it) }
+            }
+            ConnectivityAction.GRANT_BLUETOOTH -> requestBluetoothPermissionsIfNeeded()
+            ConnectivityAction.GRANT_LOCATION -> {
+                locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+            }
+            ConnectivityAction.ENABLE_BLUETOOTH -> requestBluetoothEnable()
+            ConnectivityAction.GRANT_MIC -> requestAudioPermissionIfNeeded()
+            ConnectivityAction.GRANT_NOTIFICATIONS -> requestNotificationPermissionIfNeeded()
+            ConnectivityAction.CHOOSE_STORAGE -> viewModel.showSettings(true)
+            ConnectivityAction.BATTERY_SETTINGS -> viewModel.openBatterySettings()
+            ConnectivityAction.OPEN_REMOTE -> viewModel.showRemoteControlSheet(true)
         }
     }
 

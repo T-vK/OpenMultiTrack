@@ -1,8 +1,10 @@
 package org.openmultitrack.mixer.behringer
 
 /**
- * Emoji stand-ins for Behringer / Mixing Station scribble icon ids (1–74).
+ * Glyphs for Behringer / Mixing Station scribble icon ids (1–74).
  * Numbering matches the X32 / X-Air icon list (see behringer-icons on GitHub).
+ *
+ * Where Unicode emoji are misleading (drums, jacks), short desk-style abbreviations are used.
  */
 object MixingStationIcons {
     const val MAX_ID = 74
@@ -16,17 +18,28 @@ object MixingStationIcons {
     const val SPEAKER_RIGHT = 64
     const val SPEAKER_LEFT = 65
 
+    enum class GlyphStyle {
+        EMOJI,
+        /** Short label (BD, XLR, …) rendered in a smaller mono-style strip cell. */
+        ABBREV,
+    }
+
+    data class Glyph(
+        val text: String,
+        val style: GlyphStyle = GlyphStyle.EMOJI,
+    )
+
     private val EMOJI = arrayOf(
         "", // 0 unused
         "", // 1 blank
-        "🥁", // 2 kick-back
+        "🥁", // 2 kick-back — fallback; display() prefers BD
         "🥁", // 3 kick-front
         "🪘", // 4 snare-top
         "🪘", // 5 snare-bottom
         "🥁", // 6 tom-high
         "🥁", // 7 tom-medium
         "🥁", // 8 floor tom
-        "🎩", // 9 hi-hat
+        "🎩", // 9 hi-hat — fallback; display() prefers HH
         "🔔", // 10 crash
         "🥁", // 11 drum kit
         "🔔", // 12 cowbell
@@ -71,7 +84,7 @@ object MixingStationIcons {
         "🎤", // 51 wireless mic
         "🎤", // 52 podium mic
         "🎧", // 53 headset / in-ear
-        "🔌", // 54 xlr
+        "🔌", // 54 xlr — fallback; display() prefers XLR
         "🔌", // 55 trs
         "🔌", // 56 trs left
         "🔌", // 57 trs right
@@ -94,8 +107,38 @@ object MixingStationIcons {
         "😊", // 74 smiley
     )
 
-    fun emoji(iconId: Int?): String? {
+    /** Desk-style abbreviations for ids where emoji are wrong or ambiguous. */
+    private val ABBREV = mapOf(
+        2 to "BD",
+        3 to "BD",
+        4 to "SN",
+        5 to "SN",
+        6 to "T1",
+        7 to "T2",
+        8 to "FT",
+        9 to "HH",
+        11 to "DK",
+        12 to "CB",
+        54 to "XLR",
+        55 to "TRS",
+        56 to "T-L",
+        57 to "T-R",
+        58 to "C-L",
+        59 to "C-R",
+    )
+
+    fun display(iconId: Int?): Glyph? {
         if (iconId == null || iconId !in 1..MAX_ID) return null
-        return EMOJI.getOrNull(iconId)?.takeIf { it.isNotEmpty() }
+        ABBREV[iconId]?.let { return Glyph(it, GlyphStyle.ABBREV) }
+        return EMOJI.getOrNull(iconId)?.takeIf { it.isNotEmpty() }?.let { Glyph(it) }
     }
+
+    /** Legacy emoji-only lookup (abbrev icons return null). */
+    fun emoji(iconId: Int?): String? {
+        val glyph = display(iconId) ?: return null
+        return if (glyph.style == GlyphStyle.EMOJI) glyph.text else null
+    }
+
+    /** Text for strip rendering — emoji or abbreviation. */
+    fun stripText(iconId: Int?): String? = display(iconId)?.text
 }

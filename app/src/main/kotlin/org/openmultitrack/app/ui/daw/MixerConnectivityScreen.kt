@@ -1,15 +1,27 @@
 package org.openmultitrack.app.ui.daw
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -19,39 +31,38 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import org.openmultitrack.app.device.PrerequisiteItem
-import org.openmultitrack.domain.mixer.AudioTransportHealth
-import org.openmultitrack.domain.mixer.HealthIssue
+import org.openmultitrack.app.health.ConnectivityAction
+import org.openmultitrack.app.health.ConnectivityCheckItem
+import org.openmultitrack.app.health.ConnectivityChecklist
+import org.openmultitrack.app.health.ConnectivitySection
+import org.openmultitrack.app.health.ConnectivityStatus
 import org.openmultitrack.domain.mixer.HealthLevel
-import org.openmultitrack.domain.mixer.MixerHealthSnapshot
-import org.openmultitrack.domain.mixer.MixerProfile
-import org.openmultitrack.domain.mixer.OscHealth
-import org.openmultitrack.domain.mixer.ProbeState
-import org.openmultitrack.domain.mixer.UsbHealth
-import org.openmultitrack.domain.session.AppMode
-import org.openmultitrack.domain.session.displayLabel
 import java.text.DateFormat
 import java.util.Date
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MixerConnectivityScreen(
-    mixer: MixerProfile,
-    health: MixerHealthSnapshot,
-    appMode: AppMode?,
-    prerequisites: List<PrerequisiteItem>,
+    checklist: ConnectivityChecklist,
     onDismiss: () -> Unit,
-    onRefresh: () -> Unit,
-    onOpenMixerSettings: () -> Unit,
-    onPrerequisiteAction: (org.openmultitrack.app.device.PrerequisiteKind) -> Unit,
+    onAction: (ConnectivityAction) -> Unit,
 ) {
     BackHandler(onBack = onDismiss)
+    var advancedOpen by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -60,6 +71,11 @@ fun MixerConnectivityScreen(
                 navigationIcon = {
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    TextButton(onClick = { onAction(ConnectivityAction.REFRESH) }) {
+                        Text("Refresh")
                     }
                 },
             )
@@ -73,278 +89,234 @@ fun MixerConnectivityScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                OverviewSection(
-                    mixerName = mixer.displayName,
-                    health = health,
-                    appMode = appMode,
+                ConnectivitySummaryHeader(checklist)
+            }
+            items(checklist.sections, key = { it.group.name }) { section ->
+                ConnectivitySectionCard(
+                    section = section,
+                    onAction = onAction,
                 )
             }
-            item {
-                UsbSection(usb = health.usb, onRefresh = onRefresh)
-            }
-            health.osc?.let { osc ->
+            if (checklist.advancedItems.isNotEmpty()) {
                 item {
-                    OscSection(
-                        osc = osc,
-                        onOpenMixerSettings = onOpenMixerSettings,
+                    AdvancedSection(
+                        expanded = advancedOpen,
+                        onToggle = { advancedOpen = !advancedOpen },
+                        items = checklist.advancedItems,
                     )
                 }
             }
-            health.audio?.let { audio ->
-                item {
-                    AudioTransportSection(audio = audio)
-                }
-            }
-            if (health.issues.isNotEmpty()) {
-                item {
-                    IssuesSection(issues = health.issues)
-                }
-            }
-            if (prerequisites.isNotEmpty()) {
-                item {
-                    PrerequisitesSection(
-                        prerequisites = prerequisites,
-                        onAction = onPrerequisiteAction,
-                    )
-                }
-            }
-            item {
-                OutlinedButton(
-                    onClick = onRefresh,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Refresh connection status")
-                }
-            }
         }
     }
 }
 
 @Composable
-private fun OverviewSection(
-    mixerName: String,
-    health: MixerHealthSnapshot,
-    appMode: AppMode?,
-) {
-    ConnectivityCard(title = "Overview") {
-        StatusRow("Mixer", mixerName)
-        StatusRow("Overall", health.overall.label(), valueColor = health.overall.color())
-        appMode?.let { mode ->
-            StatusRow("Mode", mode.displayLabel)
-        }
-        StatusRow(
-            "Updated",
-            DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(health.updatedAtMs)),
-        )
-        val summary = buildList {
-            if (health.usb.attached) add("USB attached")
-            if (health.usb.probeState == ProbeState.OK) add("probe OK")
-            health.osc?.takeIf { it.configured }?.let { add("OSC configured") }
-            health.audio?.activityLabel?.let { add(it) }
-        }.joinToString(" · ").ifBlank { "Waiting for connection details" }
-        Text(
-            text = summary,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp),
-        )
+private fun ConnectivitySummaryHeader(checklist: ConnectivityChecklist) {
+    val (summary, summaryColor) = when (checklist.overall) {
+        HealthLevel.OK -> "All essential connections look good" to MaterialTheme.colorScheme.primary
+        HealthLevel.DEGRADED -> "Some items need attention" to MaterialTheme.colorScheme.tertiary
+        HealthLevel.BLOCKED -> "Blocked — fix items below to continue" to MaterialTheme.colorScheme.error
+        HealthLevel.UNKNOWN -> "Checking connections…" to MaterialTheme.colorScheme.onSurfaceVariant
     }
-}
-
-@Composable
-private fun UsbSection(
-    usb: UsbHealth,
-    onRefresh: () -> Unit,
-) {
-    ConnectivityCard(title = "USB") {
-        StatusRow("Attached", if (usb.attached) "Yes" else "No", valueColor = boolColor(usb.attached))
-        StatusRow(
-            "Permission",
-            if (usb.permissionGranted) "Granted" else "Required",
-            valueColor = boolColor(usb.permissionGranted),
-        )
-        usb.deviceName?.let { StatusRow("Device", it) }
-        usb.stableId?.let { StatusRow("Stable ID", it) }
-        StatusRow("Probe", usb.probeState.label())
-        usb.probeSummary?.let { StatusRow("Capabilities", it) }
-        if (!usb.permissionGranted && usb.attached) {
-            OutlinedButton(
-                onClick = onRefresh,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-            ) {
-                Text("Request USB access")
-            }
-        }
-    }
-}
-
-@Composable
-private fun OscSection(
-    osc: OscHealth,
-    onOpenMixerSettings: () -> Unit,
-) {
-    ConnectivityCard(title = "LAN / OSC") {
-        StatusRow("Supported", if (osc.supported) "Yes" else "No")
-        StatusRow(
-            "Configured",
-            if (osc.configured) "Yes" else "No",
-            valueColor = boolColor(osc.configured),
-        )
-        osc.host?.let { StatusRow("Host", it) }
-        if (osc.supported && !osc.configured) {
-            OutlinedButton(
-                onClick = onOpenMixerSettings,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-            ) {
-                Text("Set mixer IP in settings")
-            }
-        }
-    }
-}
-
-@Composable
-private fun AudioTransportSection(audio: AudioTransportHealth) {
-    ConnectivityCard(title = "Audio transport") {
-        StatusRow("Capture channels", audio.captureChannels.toString())
-        StatusRow("Playback channels", audio.playbackChannels.toString())
-        StatusRow("Recording", if (audio.isRecording) "Active" else "Idle")
-        StatusRow("Playback", if (audio.isPlaying) "Active" else "Idle")
-        StatusRow("Monitor", if (audio.isMonitoring) "On" else "Off")
-        if (audio.isUsbDegraded) {
-            StatusRow("USB stream", "Interrupted", valueColor = MaterialTheme.colorScheme.error)
-        }
-        audio.activityLabel?.let { StatusRow("Activity", it) }
-    }
-}
-
-@Composable
-private fun IssuesSection(issues: List<HealthIssue>) {
-    ConnectivityCard(title = "Issues") {
-        issues.forEachIndexed { index, issue ->
-            if (index > 0) {
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Column(Modifier.padding(16.dp)) {
             Text(
-                text = issue.title,
-                style = MaterialTheme.typography.titleSmall,
-                color = issue.severity.color(),
+                text = checklist.mixerName,
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = issue.detail,
-                style = MaterialTheme.typography.bodySmall,
+                text = summary,
+                style = MaterialTheme.typography.bodyMedium,
+                color = summaryColor,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Text(
+                text = "Updated ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(checklist.updatedAtMs))}",
+                style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp),
+                modifier = Modifier.padding(top = 6.dp),
             )
         }
     }
 }
 
 @Composable
-private fun PrerequisitesSection(
-    prerequisites: List<PrerequisiteItem>,
-    onAction: (org.openmultitrack.app.device.PrerequisiteKind) -> Unit,
-) {
-    ConnectivityCard(title = "App permissions") {
-        prerequisites.forEachIndexed { index, item ->
-            if (index > 0) {
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            }
-            Text(
-                text = item.title,
-                style = MaterialTheme.typography.titleSmall,
-            )
-            Text(
-                text = item.message,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
-            )
-            OutlinedButton(onClick = { onAction(item.kind) }) {
-                Text(item.actionLabel)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ConnectivityCard(
-    title: String,
-    content: @Composable () -> Unit,
+private fun ConnectivitySectionCard(
+    section: ConnectivitySection,
+    onAction: (ConnectivityAction) -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
+        Column(Modifier.padding(vertical = 8.dp)) {
             Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(bottom = 4.dp),
+                text = section.title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
-            content()
+            section.items.forEachIndexed { index, item ->
+                if (index > 0) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    )
+                }
+                ConnectivityCheckRow(item = item, onAction = onAction)
+            }
         }
     }
 }
 
 @Composable
-private fun StatusRow(
-    label: String,
-    value: String,
-    valueColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface,
+private fun ConnectivityCheckRow(
+    item: ConnectivityCheckItem,
+    onAction: (ConnectivityAction) -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Top,
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f),
+        StatusGlyph(status = item.status)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = item.label,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            item.detail?.let { detail ->
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+        }
+        item.action?.let { action ->
+            TextButton(onClick = { onAction(action) }) {
+                Text(item.actionLabel ?: "Fix")
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusGlyph(status: ConnectivityStatus) {
+    val (bg, fg, icon) = when (status) {
+        ConnectivityStatus.OK -> Triple(
+            MaterialTheme.colorScheme.primaryContainer,
+            MaterialTheme.colorScheme.primary,
+            Icons.Default.Check,
         )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = valueColor,
-            modifier = Modifier.weight(1.2f),
+        ConnectivityStatus.WARNING -> Triple(
+            MaterialTheme.colorScheme.tertiaryContainer,
+            MaterialTheme.colorScheme.tertiary,
+            Icons.Default.Remove,
+        )
+        ConnectivityStatus.ERROR -> Triple(
+            MaterialTheme.colorScheme.errorContainer,
+            MaterialTheme.colorScheme.error,
+            Icons.Default.Close,
+        )
+        ConnectivityStatus.PENDING -> Triple(
+            MaterialTheme.colorScheme.secondaryContainer,
+            MaterialTheme.colorScheme.secondary,
+            Icons.Default.Sync,
+        )
+        ConnectivityStatus.OFF,
+        ConnectivityStatus.NOT_APPLICABLE,
+        -> Triple(
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant,
+            Icons.Default.Remove,
+        )
+        ConnectivityStatus.UNKNOWN -> Triple(
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant,
+            Icons.Default.Remove,
+        )
+    }
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .clip(CircleShape)
+            .background(bg),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = status.name,
+            tint = fg,
+            modifier = Modifier.size(16.dp),
         )
     }
 }
 
 @Composable
-private fun boolColor(ok: Boolean) =
-    if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-
-@Composable
-private fun HealthLevel.color() = when (this) {
-    HealthLevel.OK -> MaterialTheme.colorScheme.primary
-    HealthLevel.DEGRADED -> MaterialTheme.colorScheme.tertiary
-    HealthLevel.BLOCKED -> MaterialTheme.colorScheme.error
-    HealthLevel.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
-}
-
-private fun HealthLevel.label() = when (this) {
-    HealthLevel.OK -> "Ready"
-    HealthLevel.DEGRADED -> "Degraded"
-    HealthLevel.BLOCKED -> "Blocked"
-    HealthLevel.UNKNOWN -> "Unknown"
-}
-
-private fun ProbeState.label() = when (this) {
-    ProbeState.NONE -> "Not probed"
-    ProbeState.PROBING -> "Probing…"
-    ProbeState.OK -> "OK"
-    ProbeState.FAILED -> "Failed"
+private fun AdvancedSection(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    items: List<ConnectivityCheckItem>,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onToggle) {
+                    Text("Advanced details")
+                }
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            AnimatedVisibility(visible = expanded) {
+                Column(Modifier.padding(bottom = 8.dp)) {
+                    items.forEach { item ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = item.label,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(0.45f),
+                            )
+                            Text(
+                                text = item.detail.orEmpty(),
+                                style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.weight(0.55f),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

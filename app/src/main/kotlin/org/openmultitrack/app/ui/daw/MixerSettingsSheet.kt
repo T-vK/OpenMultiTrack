@@ -599,7 +599,7 @@ private fun ChannelStripLabel(
     modifier: Modifier = Modifier,
 ) {
     val name = channelDisplayName(strip)
-    val iconEmoji = MixingStationIcons.emoji(strip.iconId)
+    val iconGlyph = MixingStationIcons.display(strip.iconId)
     val barColor = Color(strip.colorArgb)
 
     Row(
@@ -614,8 +614,16 @@ private fun ChannelStripLabel(
                 .clip(RoundedCornerShape(2.dp))
                 .background(barColor),
         )
-        if (iconEmoji != null) {
-            Text(iconEmoji, fontSize = 14.sp)
+        if (iconGlyph != null) {
+            Text(
+                text = iconGlyph.text,
+                fontSize = if (iconGlyph.style == MixingStationIcons.GlyphStyle.ABBREV) 10.sp else 14.sp,
+                fontWeight = if (iconGlyph.style == MixingStationIcons.GlyphStyle.ABBREV) {
+                    FontWeight.SemiBold
+                } else {
+                    FontWeight.Normal
+                },
+            )
         }
         Column {
             Text(

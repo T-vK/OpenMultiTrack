@@ -88,6 +88,11 @@ import org.openmultitrack.app.health.MixerHealthCollector
 import org.openmultitrack.app.hasNewerRecordingThanSelected
 import org.openmultitrack.app.device.PrerequisiteKind
 import org.openmultitrack.app.scribble.Flow8BleScribbleImporter
+import androidx.compose.ui.platform.LocalContext
+import org.openmultitrack.app.data.StorageAccessHelper
+import org.openmultitrack.app.device.NetworkConnectivity
+import org.openmultitrack.app.health.ConnectivityAction
+import org.openmultitrack.app.health.MixerConnectivityStatusBuilder
 import org.openmultitrack.app.scribble.ScribbleImportSupport
 import org.openmultitrack.app.data.StripIconMode
 import org.openmultitrack.app.data.StripNumberMode
@@ -150,6 +155,8 @@ fun DawMainScreen(
     onOpenMixerConnectivity: () -> Unit = {},
     onCloseMixerConnectivity: () -> Unit = {},
     onRefreshMixerConnectivity: () -> Unit = {},
+    scribbleCacheUpdatedAt: (String) -> Long? = { null },
+    hasScribbleCache: (String) -> Boolean = { false },
     onOpenLog: () -> Unit,
     onCloseLog: () -> Unit,
     onMonitorGainChange: (Float) -> Unit,
@@ -211,6 +218,7 @@ fun DawMainScreen(
     onUpdateChannelOutput: (String, Int, Int) -> Unit = { _, _, _ -> },
     onSetChannelHidden: (String, Int, Boolean, Boolean) -> Unit = { _, _, _, _ -> },
     onPrerequisiteAction: (PrerequisiteKind) -> Unit = {},
+    onConnectivityAction: (ConnectivityAction) -> Unit = {},
     onLoadRecordingIntoSoundcheck: (String, String) -> Unit = { _, _ -> },
     onLoadRecordingIntoSimplePlay: (String, String) -> Unit = { _, _ -> },
     onDismissSoundcheckLoadPrompt: () -> Unit = {},
@@ -370,18 +378,47 @@ fun DawMainScreen(
     }
 
     if (state.showMixerConnectivity && activeProfile != null && activeMixerHealth != null) {
+        val context = LocalContext.current
+        val supportsOsc = ScribbleImportSupport.supportsOsc(activeProfile)
+        val supportsFlow8 = ScribbleImportSupport.supportsFlow8(activeProfile)
+        val checklist = remember(
+            activeProfile.id,
+            activeMixerHealth,
+            session,
+            state.effectiveStorageRootPath,
+            state.batteryOptimizationIgnored,
+            state.remoteRole,
+            state.remoteConnectionState,
+            state.mixerSnapshots.size,
+            state.mixerSnapshotsLoading,
+            hasScribbleCache(activeProfile.id),
+            scribbleCacheUpdatedAt(activeProfile.id),
+        ) {
+            MixerConnectivityStatusBuilder.build(
+                mixer = activeProfile,
+                health = activeMixerHealth,
+                session = session,
+                network = NetworkConnectivity.snapshot(context),
+                supportsOsc = supportsOsc,
+                supportsFlow8Ble = supportsFlow8,
+                channelLabelsCached = hasScribbleCache(activeProfile.id),
+                channelLabelsCachedAtMs = scribbleCacheUpdatedAt(activeProfile.id),
+                storageWritable = StorageAccessHelper.canWriteTo(state.effectiveStorageRootPath),
+                storagePath = state.effectiveStorageRootPath,
+                batteryOptimizationIgnored = state.batteryOptimizationIgnored,
+                remoteRole = state.remoteRole,
+                remoteConnectionState = state.remoteConnectionState,
+                remoteHostLabel = state.remoteHostName ?: state.remoteConnectedHost,
+                remoteClientCount = state.remoteConnectedClientCount,
+                snapshotCount = state.mixerSnapshots.size,
+                snapshotsLoading = state.mixerSnapshotsLoading,
+                context = context,
+            )
+        }
         MixerConnectivityScreen(
-            mixer = activeProfile,
-            health = activeMixerHealth,
-            appMode = session?.appMode,
-            prerequisites = state.prerequisites,
+            checklist = checklist,
             onDismiss = onCloseMixerConnectivity,
-            onRefresh = onRefreshMixerConnectivity,
-            onOpenMixerSettings = {
-                onCloseMixerConnectivity()
-                onOpenMixerSettings(activeProfile.id)
-            },
-            onPrerequisiteAction = onPrerequisiteAction,
+            onAction = onConnectivityAction,
         )
         return
     }
