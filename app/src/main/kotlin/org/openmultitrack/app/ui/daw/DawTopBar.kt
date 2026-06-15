@@ -55,6 +55,7 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipBox
@@ -424,13 +425,14 @@ private fun RecordTransportCluster(
     onStopRecord: () -> Unit,
 ) {
     val isRecording = session?.isRecording == true
+    val isPreparing = session?.activityStatus != null
     val hostReady = session?.probe != null || (isRemoteClient && session?.captureChannelCount?.let { it > 0 } == true)
     val elapsed = session?.recordElapsedSec ?: 0f
     val onClick = if (isRecording) onStopRecord else onStartRecord
     TransportActionRow {
         Surface(
             onClick = onClick,
-            enabled = hostReady,
+            enabled = hostReady && !isPreparing,
             color = Color.Transparent,
             modifier = Modifier.height(ToolbarControlHeight),
         ) {
@@ -445,6 +447,12 @@ private fun RecordTransportCluster(
                     modifier = Modifier.size(22.dp),
                     tint = RecordRed,
                 )
+                if (isPreparing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                }
                 Text(
                     text = if (isRecording) formatAdaptiveTransportTime(elapsed) else "0:00",
                     style = MaterialTheme.typography.labelLarge,
@@ -484,9 +492,10 @@ private fun PlaybackTransportCluster(
 ) {
     val isPlaying = session?.isPlaying == true
     val sessionLoaded = session?.selectedSoundcheckDir != null
+    val isPreparingPlayback = session?.activityStatus != null
     val hostReady = session?.probe != null ||
         (isRemoteClient && session?.captureChannelCount?.let { it > 0 } == true)
-    val playEnabled = sessionLoaded && (!isRemoteClient || hostReady)
+    val playEnabled = sessionLoaded && (!isRemoteClient || hostReady) && !isPreparingPlayback
     LaunchedEffect(session?.selectedSoundcheckDir, hostReady, session?.probing, isRemoteClient) {
         when {
             !sessionLoaded ->
@@ -537,7 +546,11 @@ private fun PlaybackTransportCluster(
             },
             enabled = playEnabled,
             icon = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-            contentDescription = if (isPlaying) "Pause" else "Play",
+            contentDescription = when {
+                isPreparingPlayback -> "Preparing playback"
+                isPlaying -> "Pause"
+                else -> "Play"
+            },
         )
         TransportBarIconButton(
             onClick = onStopPlayback,

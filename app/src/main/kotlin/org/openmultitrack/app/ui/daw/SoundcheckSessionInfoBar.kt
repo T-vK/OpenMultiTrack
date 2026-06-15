@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -32,9 +34,12 @@ fun SoundcheckSessionInfoBar(
     val position = session.playbackPositionSec
     val duration = session.playbackDurationSec
     val hasSession = session.selectedSoundcheckDir != null
-    val statusLine = health?.let { snapshot ->
-        snapshot.primaryIssue?.detail
-            ?: snapshot.usb.probeSummary?.let { "USB ready — $it" }
+    val activity = session.activityStatus
+    val statusLine = when {
+        activity != null -> activity.displayLabel
+        else -> health?.primaryIssue?.detail
+            ?: session.statusMessage
+            ?: health?.usb?.probeSummary?.let { "🔌 USB ready — $it" }
     }
 
     Surface(
@@ -81,20 +86,35 @@ fun SoundcheckSessionInfoBar(
                 )
             }
             if (!statusLine.isNullOrBlank()) {
-                val statusColor = when (health?.primaryIssue?.severity ?: health?.overall) {
-                    HealthLevel.BLOCKED -> MaterialTheme.colorScheme.error
-                    HealthLevel.DEGRADED -> MaterialTheme.colorScheme.tertiary
-                    HealthLevel.OK -> MaterialTheme.colorScheme.onSurfaceVariant
+                val statusColor = when {
+                    activity != null -> MaterialTheme.colorScheme.onSecondaryContainer
+                    health?.primaryIssue?.severity == HealthLevel.BLOCKED -> MaterialTheme.colorScheme.error
+                    health?.primaryIssue?.severity == HealthLevel.DEGRADED -> MaterialTheme.colorScheme.tertiary
+                    health?.overall == HealthLevel.OK -> MaterialTheme.colorScheme.onSurfaceVariant
                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                 }
-                Text(
-                    text = statusLine,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = statusColor,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (activity?.showSpinner == true) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    }
+                    Text(
+                        text = statusLine,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = statusColor,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
     }

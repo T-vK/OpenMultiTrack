@@ -655,7 +655,14 @@ fun DawMainScreen(
                             )
                         }
                         else -> session?.let { s ->
-                            ChannelStripList(
+                            Column(Modifier.fillMaxSize()) {
+                                RecordSessionInfoBar(
+                                    session = s,
+                                    health = activeMixerHealth,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                )
+                                Box(Modifier.weight(1f).fillMaxWidth()) {
+                                ChannelStripList(
                                 mixerId = s.mixerId,
                                 strips = s.channelStrips,
                                 routing = activeRouting,
@@ -699,6 +706,8 @@ fun DawMainScreen(
                                     onSetRecordView(s.mixerId, start, window)
                                 },
                             )
+                                }
+                            }
                         }
                     }
                 }

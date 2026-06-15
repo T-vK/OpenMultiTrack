@@ -345,7 +345,7 @@ internal enum class SettingsCategory(
     AUDIO("Audio", "Monitor level"),
     STORAGE("Storage", "Paths, mirrors, spill buffer"),
     RELIABILITY("Background", "Battery and uninterrupted recording"),
-    OSC("Mixer OSC (XR18)", "Input routing automation"),
+    OSC("Mixer LAN", "Routing automation level"),
 }
 
 @Composable

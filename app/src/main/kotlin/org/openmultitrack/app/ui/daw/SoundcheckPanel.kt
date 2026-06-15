@@ -104,7 +104,7 @@ fun SoundcheckPanel(
             )
             if (session.soundcheckWaveformChannelsTotal > 0) {
                 Text(
-                    "Drawing waveforms ${session.soundcheckWaveformChannelsLoaded}/${session.soundcheckWaveformChannelsTotal}",
+                    "🎨 Drawing waveforms ${session.soundcheckWaveformChannelsLoaded}/${session.soundcheckWaveformChannelsTotal}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
@@ -118,7 +118,7 @@ fun SoundcheckPanel(
         when {
             session.soundcheckSessions.isEmpty() -> SoundcheckEmptyState()
             session.selectedSoundcheckDir == null -> SoundcheckEmptyState("Open a recording from the top bar to preview.")
-            session.channelStrips.isEmpty() -> SoundcheckEmptyState("Loading session channels…")
+            session.channelStrips.isEmpty() -> SoundcheckEmptyState("⏳ Loading session channels…")
             else -> {
                 val overview = session.soundcheckWaveforms ?: SessionWaveformOverview(
                     peaksByChannel = emptyMap(),
