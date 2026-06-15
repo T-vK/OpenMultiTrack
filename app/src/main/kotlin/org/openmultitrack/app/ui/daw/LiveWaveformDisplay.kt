@@ -10,10 +10,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.Dp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -229,6 +225,52 @@ internal fun findGrowthColumnStabilityViolation(
  * Draws one vertical bar per pixel column at a fixed horizontal anchor.
  * Stroke spans the full column width so adjacent samples form a solid trace.
  */
+internal fun slicePeaksForLiveViewport(
+    peaks: FloatArray,
+    viewWindowSec: Float,
+    peaksPerSec: Int,
+    followPlayhead: Boolean,
+): FloatArray {
+    if (!followPlayhead || peaks.isEmpty()) return peaks
+    val maxCount = (viewWindowSec * peaksPerSec + peaksPerSec).toInt().coerceAtLeast(peaksPerSec)
+    if (peaks.size <= maxCount) return peaks
+    return peaks.copyOfRange(peaks.size - maxCount, peaks.size)
+}
+
+/** Precomputes display columns off the UI thread (scaling + viewport binning). */
+internal fun prepareLiveWaveformStripColumns(
+    peaks: FloatArray,
+    bufferWindowSec: Float,
+    elapsedSec: Float,
+    peaksPerSec: Int,
+    normalized: Boolean,
+    peakCeiling: Float,
+    viewStartSec: Float,
+    viewWindowSec: Float,
+    columnCount: Int,
+): Pair<FloatArray, Float> {
+    if (columnCount <= 0 || peaks.isEmpty() || elapsedSec <= 0f || viewWindowSec <= 0f) {
+        return FloatArray(0) to peakCeiling
+    }
+    val rawMax = peaks.maxOrNull() ?: 0f
+    val ceiling = when {
+        peakCeiling > 1e-6f -> peakCeiling
+        rawMax > 1e-6f -> rawMax
+        else -> peakCeiling
+    }
+    val scaled = scalePeaksForLiveDisplay(peaks, normalized, ceiling)
+    val columns = liveWaveformColumnsForDisplay(
+        peaks = scaled,
+        bufferWindowSec = bufferWindowSec,
+        elapsedSec = elapsedSec,
+        peaksPerSec = peaksPerSec,
+        pixelCount = columnCount,
+        viewStartSec = viewStartSec,
+        viewWindowSec = viewWindowSec,
+    )
+    return columns to ceiling
+}
+
 internal fun DrawScope.drawLiveWaveformColumns(
     columns: FloatArray,
     color: Color,
@@ -259,23 +301,20 @@ internal fun DrawScope.drawLiveWaveformColumns(
 
 @Composable
 internal fun LiveWaveformStrip(
-    peaks: FloatArray,
-    bufferWindowSec: Float,
-    elapsedSec: Float,
-    peaksPerSec: Int,
+    peaks: FloatArray = floatArrayOf(),
+    bufferWindowSec: Float = 15f,
+    elapsedSec: Float = 0f,
+    peaksPerSec: Int = 30,
     color: Color,
-    normalized: Boolean,
+    normalized: Boolean = false,
     viewStartSec: Float = 0f,
     viewWindowSec: Float = bufferWindowSec,
+    displayColumns: FloatArray? = null,
     modifier: Modifier = Modifier,
     testTag: String = LIVE_WAVEFORM_TEST_TAG,
 ) {
-    val hasDrawableData = peaks.isNotEmpty() && viewWindowSec > 0f && elapsedSec > 0f
-    // Freeze the scale divisor on the first meaningful peak so a later loud transient
-    // cannot rescale already-drawn timeline columns to invisibility.
-    var livePeakCeiling by remember { mutableFloatStateOf(0f) }
-    val rawMax = peaks.maxOrNull() ?: 0f
-    if (livePeakCeiling <= 1e-6f && rawMax > 1e-6f) livePeakCeiling = rawMax
+    val hasDrawableData = displayColumns?.any { it > 0f } == true ||
+        (peaks.isNotEmpty() && viewWindowSec > 0f && elapsedSec > 0f)
     val outline = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
     val shape = RoundedCornerShape(3.dp)
     Box(
@@ -288,20 +327,20 @@ internal fun LiveWaveformStrip(
         Canvas(Modifier.fillMaxSize()) {
             val h = size.height
             if (h <= 0f) return@Canvas
-            val capacitySlots = (bufferWindowSec * peaksPerSec).toInt().coerceAtLeast(1)
-            // Never use more columns than timeline slots — otherwise integer slot binning
-            // leaves most columns empty on wide strips (sparse vertical ticks / background gaps).
-            val pixelCount = size.width.toInt().coerceIn(1, capacitySlots)
-            val scaledPeaks = scalePeaksForLiveDisplay(peaks, normalized, livePeakCeiling)
-            val columns = liveWaveformColumnsForDisplay(
-                peaks = scaledPeaks,
-                bufferWindowSec = bufferWindowSec,
-                elapsedSec = elapsedSec,
-                peaksPerSec = peaksPerSec,
-                pixelCount = pixelCount,
-                viewStartSec = viewStartSec,
-                viewWindowSec = viewWindowSec,
-            )
+            val columns = displayColumns ?: run {
+                val capacitySlots = (bufferWindowSec * peaksPerSec).toInt().coerceAtLeast(1)
+                val pixelCount = size.width.toInt().coerceIn(1, capacitySlots)
+                val scaledPeaks = scalePeaksForLiveDisplay(peaks, normalized, peaks.maxOrNull() ?: 0f)
+                liveWaveformColumnsForDisplay(
+                    peaks = scaledPeaks,
+                    bufferWindowSec = bufferWindowSec,
+                    elapsedSec = elapsedSec,
+                    peaksPerSec = peaksPerSec,
+                    pixelCount = pixelCount,
+                    viewStartSec = viewStartSec,
+                    viewWindowSec = viewWindowSec,
+                )
+            }
             if (columns.all { it <= 0f }) return@Canvas
             drawLiveWaveformColumns(columns = columns, color = color)
         }

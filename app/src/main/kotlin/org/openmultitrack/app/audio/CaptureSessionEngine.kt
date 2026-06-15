@@ -799,11 +799,18 @@ class CaptureSessionEngine(
         out
     }
 
-    fun waveformSnapshots(normalize: Boolean): Map<Int, LiveWaveformSnapshot> {
+    fun waveformSnapshots(
+        normalize: Boolean,
+        maxRecentPeaks: Int? = null,
+    ): Map<Int, LiveWaveformSnapshot> {
         val out = LinkedHashMap<Int, LiveWaveformSnapshot>()
         for (ch in 0 until channelCount) {
             waveformRings[ch]?.let { ring ->
-                out[ch] = ring.snapshot(normalize)
+                out[ch] = if (maxRecentPeaks != null) {
+                    ring.snapshotRecent(maxRecentPeaks, normalize)
+                } else {
+                    ring.snapshot(normalize)
+                }
             }
         }
         return out
@@ -1061,11 +1068,9 @@ class CaptureSessionEngine(
                                     } else {
                                         writeRecordingFrames(scratch, frames, channelCount)
                                     }
-                                    if (++recordingMeterChunkCounter % 8 == 0) {
-                                        val peakSource = recordBuf ?: scratch
-                                        accumulateWaveformPeaksLight(peakSource, frames, channelCount)
-                                        maybeEmitWaveformPeaks()
-                                    }
+                                    val peakSource = recordBuf ?: scratch
+                                    accumulateWaveformPeaksLight(peakSource, frames, channelCount)
+                                    maybeEmitWaveformPeaks()
                                 } else {
                                     recordBuf?.let { releaseWriteBuffer(it) }
                                     accumulateWaveformPeaks(scratch, frames, channelCount)

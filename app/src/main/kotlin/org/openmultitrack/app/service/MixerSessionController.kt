@@ -71,6 +71,9 @@ import org.openmultitrack.usb.Flow8UsbPlaybackProfile
 import org.openmultitrack.usb.FullUsbProbeResult
 import org.openmultitrack.usb.MixerUsbChannelCounts
 import org.openmultitrack.usb.UsbAudioEnumerator
+import org.openmultitrack.app.ui.daw.prepareLiveWaveformStripColumns
+import org.openmultitrack.app.ui.daw.slicePeaksForLiveViewport
+import org.openmultitrack.domain.remote.RemoteProtocol
 import org.openmultitrack.mixer.behringer.ScribbleStripLabel
 import org.openmultitrack.mixer.behringer.UsbChannelScribble
 import org.openmultitrack.usb.UsbAudioStreamHandle
@@ -113,6 +116,8 @@ data class MixerSessionUiState(
     val storageFreeBytes: Long = 0L,
     val storageRecordEstimateSec: Float = 0f,
     val waveformPeaks: Map<Int, LiveWaveformSnapshot> = emptyMap(),
+    /** Pre-binned columns for live waveform strips (computed off the UI thread). */
+    val waveformDisplayColumns: Map<Int, FloatArray> = emptyMap(),
     val captureMeterLevels: Map<Int, Float> = emptyMap(),
     val soundcheckSessions: List<SoundcheckSessionItem> = emptyList(),
     val selectedSoundcheckDir: String? = null,
@@ -148,6 +153,7 @@ class MixerSessionController(
     /** Set true to emit periodic ch1/ch2 VU debug lines (noisy during normal use). */
     private companion object {
         const val VU_METER_PERIODIC_DEBUG_LOGS = false
+        const val LIVE_WAVEFORM_UI_INTERVAL_MS = 33L
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -162,6 +168,7 @@ class MixerSessionController(
     private var loopbackPlaybackId: Int? = null
     private var usbDetachJob: Job? = null
     private var waveformJob: Job? = null
+    private val waveformPeakCeilings = mutableMapOf<Int, Float>()
     private var soundcheckWaveformJob: Job? = null
     private var soundcheckSelectJob: Job? = null
     private var usbTestToneBurstJob: Job? = null
@@ -347,6 +354,7 @@ class MixerSessionController(
                                 playbackPositionSec = 0f,
                                 soundcheckMeterLevels = emptyMap(),
                                 waveformPeaks = emptyMap(),
+                                waveformDisplayColumns = emptyMap(),
                                 recordElapsedSec = 0f,
                             )
                         }
@@ -380,6 +388,7 @@ class MixerSessionController(
                 it.copy(
                     isVuMetering = false,
                     waveformPeaks = emptyMap(),
+                                waveformDisplayColumns = emptyMap(),
                     recordElapsedSec = 0f,
                 )
             }
@@ -557,6 +566,7 @@ class MixerSessionController(
                             appMode = AppMode.VIRTUAL_SOUNDCHECK,
                             isVuMetering = false,
                             waveformPeaks = emptyMap(),
+                                waveformDisplayColumns = emptyMap(),
                             recordElapsedSec = 0f,
                         )
                     }
@@ -1545,6 +1555,7 @@ class MixerSessionController(
                     it.copy(
                         isMonitoring = true,
                         waveformPeaks = emptyMap(),
+                                waveformDisplayColumns = emptyMap(),
                         recordElapsedSec = 0f,
                         statusMessage = "Monitoring",
                         warningMessage = null,
@@ -1817,6 +1828,7 @@ class MixerSessionController(
                 val bufferWindow = recordWaveformDisplayWindowSec()
                 val startedAt = captureEngine.recordingStartedAtEpochMs() ?: System.currentTimeMillis()
                 lastMediaProgressSec = -1
+                waveformPeakCeilings.clear()
                 clearActivity("record-start")
                 _state.update {
                     it.copy(
@@ -1933,6 +1945,7 @@ class MixerSessionController(
                     statusMessage = "Recording paused",
                     recordStartedAtEpochMs = 0L,
                     waveformPeaks = emptyMap(),
+                                waveformDisplayColumns = emptyMap(),
                     recordElapsedSec = 0f,
                 )
             }
@@ -1983,6 +1996,7 @@ class MixerSessionController(
                     statusMessage = session?.let { s -> "Saved → ${s.filePath}" } ?: "Stopped",
                     recordStartedAtEpochMs = 0L,
                     waveformPeaks = emptyMap(),
+                                waveformDisplayColumns = emptyMap(),
                     recordElapsedSec = 0f,
                 )
             }
@@ -2741,18 +2755,58 @@ class MixerSessionController(
                     }
                     val recording = _state.value.isRecording
                     val monitoring = _state.value.isMonitoring
+                    val elapsed = if (recording) captureEngine.recordElapsedSec() else 0f
+                    val sessionSnap = _state.value
+                    val viewWindow = effectiveRecordViewWindow(sessionSnap)
+                    val viewStart = if (sessionSnap.recordViewFollowPlayhead) {
+                        org.openmultitrack.app.ui.daw.RecordViewLayout.anchoredStartSec(elapsed, viewWindow)
+                    } else {
+                        sessionSnap.recordViewStartSec
+                    }
+                    val historySec = recordWaveformHistorySec()
+                    val peaksPerSec = RemoteProtocol.LIVE_WAVEFORM_PEAKS_PER_SEC
+                    val columnCount = (viewWindow * peaksPerSec).toInt().coerceIn(1, 1200)
+                    val normalized = settings.recordWaveformNormalized
                     val waveforms = if (recording) {
                         captureEngine.waveformSnapshots(normalize = false)
                     } else {
                         emptyMap()
                     }
-                    val elapsed = if (recording) captureEngine.recordElapsedSec() else 0f
+                    val displayColumns = if (recording && waveforms.isNotEmpty()) {
+                        val out = LinkedHashMap<Int, FloatArray>(waveforms.size)
+                        for ((ch, snap) in waveforms) {
+                            val peaksForDisplay = slicePeaksForLiveViewport(
+                                peaks = snap.peaks,
+                                viewWindowSec = viewWindow,
+                                peaksPerSec = peaksPerSec,
+                                followPlayhead = sessionSnap.recordViewFollowPlayhead,
+                            )
+                            val ceiling = waveformPeakCeilings[ch] ?: 0f
+                            val (columns, newCeiling) = prepareLiveWaveformStripColumns(
+                                peaks = peaksForDisplay,
+                                bufferWindowSec = historySec,
+                                elapsedSec = elapsed,
+                                peaksPerSec = peaksPerSec,
+                                normalized = normalized,
+                                peakCeiling = ceiling,
+                                viewStartSec = viewStart,
+                                viewWindowSec = viewWindow,
+                                columnCount = columnCount,
+                            )
+                            waveformPeakCeilings[ch] = newCeiling
+                            out[ch] = columns
+                        }
+                        out
+                    } else {
+                        emptyMap()
+                    }
                     withContext(Dispatchers.Main.immediate) {
                         _state.update { s ->
                             when {
                                 recording -> {
                                     val updated = withRecordViewFollowPlayhead(s, elapsed).copy(
                                         waveformPeaks = waveforms,
+                                        waveformDisplayColumns = displayColumns,
                                         recordElapsedSec = elapsed,
                                         captureMeterLevels = levels,
                                     )
@@ -2766,6 +2820,7 @@ class MixerSessionController(
                                 monitoring -> s.copy(
                                     captureMeterLevels = levels,
                                     waveformPeaks = emptyMap(),
+                                    waveformDisplayColumns = emptyMap(),
                                     recordElapsedSec = 0f,
                                 )
                                 else -> s.copy(captureMeterLevels = levels)
@@ -2773,7 +2828,7 @@ class MixerSessionController(
                         }
                     }
                 }
-                delay(40)
+                delay(LIVE_WAVEFORM_UI_INTERVAL_MS)
             }
         }
     }
@@ -2817,7 +2872,13 @@ class MixerSessionController(
             waveformJob?.cancel()
             waveformJob = null
             captureEngine.clearWaveforms()
-            _state.update { it.copy(waveformPeaks = emptyMap(), captureMeterLevels = emptyMap()) }
+            _state.update {
+                it.copy(
+                    waveformPeaks = emptyMap(),
+                    waveformDisplayColumns = emptyMap(),
+                    captureMeterLevels = emptyMap(),
+                )
+            }
         }
     }
 

@@ -125,4 +125,47 @@ class LiveWaveformDisplayTest {
         assertThat(filledCount(cols, elapsedSec = 30f))
             .isEqualTo(pixels)
     }
+
+    @Test
+    fun prepareLiveWaveformStripColumns_matchesDirectPipeline() {
+        val peaks = FloatArray(60) { 0.5f }
+        val (columns, ceiling) = prepareLiveWaveformStripColumns(
+            peaks = peaks,
+            bufferWindowSec = windowSec,
+            elapsedSec = 2f,
+            peaksPerSec = peaksPerSec,
+            normalized = true,
+            peakCeiling = 0f,
+            viewStartSec = 0f,
+            viewWindowSec = windowSec,
+            columnCount = pixels,
+        )
+        val expected = liveWaveformColumnsForDisplay(
+            peaks = scalePeaksForLiveDisplay(peaks, normalized = true, peakCeiling = 0.5f),
+            bufferWindowSec = windowSec,
+            elapsedSec = 2f,
+            peaksPerSec = peaksPerSec,
+            pixelCount = pixels,
+            viewStartSec = 0f,
+            viewWindowSec = windowSec,
+        )
+        assertThat(ceiling).isWithin(1e-6f).of(0.5f)
+        assertThat(columns).hasLength(expected.size)
+        columns.forEachIndexed { index, value ->
+            assertThat(value).isWithin(0.001f).of(expected[index])
+        }
+    }
+
+    @Test
+    fun slicePeaksForLiveViewport_keepsTailWhenFollowing() {
+        val peaks = FloatArray(500) { 0.4f }
+        val sliced = slicePeaksForLiveViewport(
+            peaks = peaks,
+            viewWindowSec = windowSec,
+            peaksPerSec = peaksPerSec,
+            followPlayhead = true,
+        )
+        assertThat(sliced).hasLength(480)
+        assertThat(sliced[0]).isWithin(1e-6f).of(0.4f)
+    }
 }
