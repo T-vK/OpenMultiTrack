@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -26,6 +28,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
@@ -99,6 +105,7 @@ fun SettingsStorageSection(
     SettingsSubsectionHeader(
         title = "Recording output",
         description = "Where new takes are written.",
+        icon = Icons.Default.Folder,
     )
     Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
         Text(
@@ -162,6 +169,7 @@ fun SettingsStorageSection(
     SettingsSubsectionHeader(
         title = "Fault tolerance",
         description = "Keep recording when a card disconnects or runs low on space.",
+        icon = Icons.Default.Shield,
     )
     SettingsSwitchRow(
         title = "Local spill buffer",
@@ -191,6 +199,7 @@ fun SettingsStorageSection(
     SettingsSubsectionHeader(
         title = "Session library",
         description = "Where completed recordings are listed for playback.",
+        icon = Icons.Default.LibraryMusic,
     )
     SettingsSwitchRow(
         title = "Auto-include OpenMultiTrack folders",
@@ -218,25 +227,40 @@ fun SettingsStorageSection(
 fun SettingsSubsectionHeader(
     title: String,
     description: String,
+    icon: ImageVector? = null,
     modifier: Modifier = Modifier,
 ) {
-    Column(
+    Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.Top,
     ) {
-        Text(
-            title,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            description,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 2.dp),
-        )
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .size(20.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(12.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
     }
 }
 

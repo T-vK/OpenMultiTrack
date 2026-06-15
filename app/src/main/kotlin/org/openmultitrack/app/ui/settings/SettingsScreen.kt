@@ -17,7 +17,18 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.Label
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SdStorage
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.DropdownMenu
@@ -46,6 +57,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import org.openmultitrack.app.data.PostRecordBehavior
 import org.openmultitrack.app.data.StripIconMode
@@ -348,6 +360,17 @@ internal enum class SettingsCategory(
     OSC("Mixer LAN", "Routing automation level"),
 }
 
+private fun SettingsCategory.icon(): ImageVector = when (this) {
+    SettingsCategory.RECORDING -> Icons.Default.FiberManualRecord
+    SettingsCategory.DISPLAY -> Icons.Default.GraphicEq
+    SettingsCategory.PLAYBACK -> Icons.Default.PlayArrow
+    SettingsCategory.CHANNEL_STRIPS -> Icons.Default.Label
+    SettingsCategory.AUDIO -> Icons.Default.Headphones
+    SettingsCategory.STORAGE -> Icons.Default.SdStorage
+    SettingsCategory.RELIABILITY -> Icons.Default.BatteryChargingFull
+    SettingsCategory.OSC -> Icons.Default.Wifi
+}
+
 @Composable
 private fun SettingsCategoryList(onSelect: (SettingsCategory) -> Unit) {
     LazyColumn(
@@ -370,6 +393,13 @@ private fun SettingsCategoryList(onSelect: (SettingsCategory) -> Unit) {
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    Icon(
+                        imageVector = category.icon(),
+                        contentDescription = null,
+                        modifier = Modifier.size(28.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f)) {
                         Text(category.title, style = MaterialTheme.typography.titleMedium)
                         Text(
@@ -540,6 +570,7 @@ private fun SettingsReliabilitySection(
     SettingsSubsectionHeader(
         title = "Battery optimization",
         description = "Prevent Android from pausing recording when the app is in the background.",
+        icon = Icons.Default.BatteryChargingFull,
     )
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
         Text(
