@@ -3,7 +3,6 @@ package org.openmultitrack.app.ui.daw
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -48,9 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -235,9 +232,9 @@ internal fun StripIdentityCell(
                 .clip(RoundedCornerShape(2.dp))
                 .background(Color(strip.colorArgb)),
         )
-        if (showIcon) {
+        if (showIcon && iconGlyph != null) {
             Spacer(Modifier.width(colorBarGap))
-            ScribbleStripIcon(iconId = iconId!!, glyph = iconGlyph, containerSize = bigIconSize)
+            ScribbleStripIcon(glyph = iconGlyph, containerSize = bigIconSize)
             Spacer(Modifier.width(iconGap))
         }
         Column(
@@ -296,21 +293,9 @@ internal fun StripIdentityCell(
 
 @Composable
 private fun ScribbleStripIcon(
-    iconId: Int,
-    glyph: MixingStationIcons.Glyph?,
+    glyph: MixingStationIcons.Glyph,
     containerSize: Dp,
 ) {
-    val drawable = MixingStationIconResources.drawableRes(iconId)
-    if (drawable != null) {
-        Image(
-            painter = painterResource(drawable),
-            contentDescription = null,
-            modifier = Modifier.size(containerSize),
-            contentScale = ContentScale.Fit,
-        )
-        return
-    }
-    if (glyph == null) return
     BoxWithConstraints(
         modifier = Modifier.size(containerSize),
         contentAlignment = Alignment.Center,

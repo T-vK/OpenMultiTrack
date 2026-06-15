@@ -28,6 +28,16 @@ class MixingStationIconsTest {
     }
 
     @Test
+    fun guitarsAndBassesUseDistinctAbbreviations() {
+        assertThat(MixingStationIcons.display(11)?.text).isEqualTo("DK")
+        assertThat(MixingStationIcons.display(MixingStationIcons.ELECTRIC_BASS)?.text).isEqualTo("EB")
+        assertThat(MixingStationIcons.display(20)?.text).isEqualTo("EG")
+        assertThat(MixingStationIcons.display(MixingStationIcons.ACOUSTIC_GUITAR)?.text).isEqualTo("AG")
+        assertThat(MixingStationIcons.display(MixingStationIcons.ELECTRIC_BASS)?.style)
+            .isEqualTo(MixingStationIcons.GlyphStyle.ABBREV)
+    }
+
+    @Test
     fun handheldMicStillUsesEmoji() {
         val glyph = MixingStationIcons.display(MixingStationIcons.HANDHELD_MIC)
         assertThat(glyph?.style).isEqualTo(MixingStationIcons.GlyphStyle.EMOJI)

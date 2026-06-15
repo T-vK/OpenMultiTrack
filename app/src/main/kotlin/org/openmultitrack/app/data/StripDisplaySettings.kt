@@ -10,9 +10,9 @@ enum class StripNumberMode(val label: String) {
     NUMBERS_ONLY("Numbers only"),
 }
 
-/** How Mixing Station icon ids render on channel strips. */
+/** How mixer scribble icon ids render on channel strips. */
 enum class StripIconMode(val label: String) {
-    /** Show icon emoji when the scribble name encodes one. */
+    /** Show icon glyph when the strip has a scribble icon id. */
     SHOW("Show icon"),
     /** Show only the icon (no label text in the strip). */
     ICON_ONLY("Icon only"),

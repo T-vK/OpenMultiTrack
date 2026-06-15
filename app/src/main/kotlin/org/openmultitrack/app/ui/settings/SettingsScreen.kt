@@ -986,7 +986,7 @@ private fun buildSettingsRows(
         id = "strip_icons",
         category = SettingsCategory.CHANNEL_STRIPS,
         title = "Scribble icons",
-        description = "How mixer icon emojis appear on imported strip labels.",
+        description = "How mixer icons appear on imported strip labels.",
         options = StripIconMode.entries,
         selected = state.stripIconMode,
         label = { it.label },

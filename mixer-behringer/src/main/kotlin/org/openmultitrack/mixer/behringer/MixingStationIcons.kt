@@ -1,10 +1,11 @@
 package org.openmultitrack.mixer.behringer
 
 /**
- * Glyphs for Behringer / Mixing Station scribble icon ids (1–74).
- * Numbering matches the X32 / X-Air icon list (see behringer-icons on GitHub).
+ * Glyphs for mixer scribble icon ids (1–74).
+ * Numbering matches the X32 / X-Air / Mixing Station / FLOW 8 icon id scheme.
  *
- * Where Unicode emoji are misleading (drums, jacks), short desk-style abbreviations are used.
+ * Rendered as Unicode emoji or short desk-style abbreviations — not copied mixer artwork.
+ * Abbrevs are used where emoji are misleading or identical (drums, jacks, guitars).
  */
 object MixingStationIcons {
     const val MAX_ID = 74
@@ -107,7 +108,7 @@ object MixingStationIcons {
         "😊", // 74 smiley
     )
 
-    /** Desk-style abbreviations for ids where emoji are wrong or ambiguous. */
+    /** Desk-style abbreviations for ids where emoji are wrong, ambiguous, or identical. */
     private val ABBREV = mapOf(
         2 to "BD",
         3 to "BD",
@@ -117,8 +118,16 @@ object MixingStationIcons {
         7 to "T2",
         8 to "FT",
         9 to "HH",
+        10 to "CR",
         11 to "DK",
         12 to "CB",
+        17 to "EB",
+        18 to "AB",
+        19 to "UB",
+        20 to "EG",
+        21 to "G2",
+        22 to "G3",
+        23 to "AG",
         54 to "XLR",
         55 to "TRS",
         56 to "T-L",

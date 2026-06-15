@@ -1,6 +1,5 @@
 package org.openmultitrack.app.ui.daw
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -48,8 +47,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -602,9 +599,7 @@ private fun ChannelStripLabel(
     modifier: Modifier = Modifier,
 ) {
     val name = channelDisplayName(strip)
-    val iconId = strip.iconId?.takeIf { it in 1..MixingStationIcons.MAX_ID }
     val iconGlyph = MixingStationIcons.display(strip.iconId)
-    val iconDrawable = MixingStationIconResources.drawableRes(iconId)
     val barColor = Color(strip.colorArgb)
 
     Row(
@@ -619,14 +614,7 @@ private fun ChannelStripLabel(
                 .clip(RoundedCornerShape(2.dp))
                 .background(barColor),
         )
-        if (iconDrawable != null) {
-            Image(
-                painter = painterResource(iconDrawable),
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
-                contentScale = ContentScale.Fit,
-            )
-        } else if (iconGlyph != null) {
+        if (iconGlyph != null) {
             Text(
                 text = iconGlyph.text,
                 fontSize = if (iconGlyph.style == MixingStationIcons.GlyphStyle.ABBREV) 10.sp else 14.sp,
