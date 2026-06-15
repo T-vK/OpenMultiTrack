@@ -29,26 +29,22 @@ internal object Xr18RoutingOsc {
     }
 
     fun snapshotNameQueryPaths(): List<String> =
-        (1..64).map { OscPath.snapSlotName(it) }
+        (1..64).flatMap { OscPath.snapSlotNameQueryPaths(it) }
 
     suspend fun readAllSnapshotNames(
         client: OscUdpClient,
         onProgress: (List<MixerSnapshotOption>) -> Unit = {},
     ): List<MixerSnapshotOption> {
         client.send(OscPath.xremote())
-        Thread.sleep(50)
-        val results = ArrayList<MixerSnapshotOption>(64)
-        for (slot in 1..64) {
-            val replies = client.query(
-                OscPath.snapSlotNameQueryPaths(slot),
-                timeoutMs = 900,
-                rounds = 3,
-                label = "snap#$slot",
-            )
-            val option = MixerSnapshotOption(slot, MixerSnapshotNames.resolveFromReplies(slot, replies))
-            results.add(option)
-            onProgress(results.toList())
-        }
+        Thread.sleep(SETTLE_MS)
+        val replies = client.query(
+            snapshotNameQueryPaths(),
+            timeoutMs = 6_000,
+            rounds = 4,
+            label = "snap names",
+        )
+        val results = parseSnapshotNames(replies)
+        onProgress(results)
         return results
     }
 

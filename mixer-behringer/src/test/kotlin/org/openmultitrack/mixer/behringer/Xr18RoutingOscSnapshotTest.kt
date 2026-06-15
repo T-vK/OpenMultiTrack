@@ -24,6 +24,18 @@ class Xr18RoutingOscSnapshotTest {
     }
 
     @Test
+    fun snapshotNameQueryPaths_includesPrimaryAndAlternatePerSlot() {
+        val paths = Xr18RoutingOsc.snapshotNameQueryPaths()
+        assertThat(paths).hasSize(128)
+        assertThat(paths).containsAtLeast(
+            "/-snap/01/name/01",
+            "/-snap/01/name",
+            "/-snap/64/name/01",
+            "/-snap/64/name",
+        )
+    }
+
+    @Test
     fun parseSnapshotNames_returnsAllSlotsIncludingEmpty() {
         val replies = mapOf(
             OscPath.snapSlotName(1) to listOf("  "),
