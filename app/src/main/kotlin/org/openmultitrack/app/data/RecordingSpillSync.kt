@@ -9,15 +9,30 @@ import java.io.File
  * after removable media reconnects or free space returns.
  */
 object RecordingSpillSync {
+    private const val MIN_SYNC_HEADROOM_BYTES = 8L * 1024 * 1024
+
     fun syncAll(resolver: RecordingStorageResolver, settings: AppSettingsStore) {
         if (!settings.localSpillBufferEnabled) return
         val spillRoot = resolver.localSpillRoot()
         if (!spillRoot.isDirectory) return
+        val primaryRoot = resolver.defaultRecordingRoot()
+        if (primaryRoot.usableSpace < MIN_SYNC_HEADROOM_BYTES) {
+            OmtLog.w(
+                "SpillSync",
+                "Skipping spill sync — only ${primaryRoot.usableSpace / 1_048_576} MB free on " +
+                    primaryRoot.absolutePath,
+            )
+            return
+        }
         spillRoot.listFiles()?.forEach { mixerDir ->
             if (!mixerDir.isDirectory) return@forEach
             mixerDir.listFiles()?.forEach { spillSession ->
                 if (!spillSession.isDirectory) return@forEach
-                syncSession(spillSession, resolver, settings)
+                runCatching {
+                    syncSession(spillSession, resolver, settings)
+                }.onFailure { e ->
+                    OmtLog.w("SpillSync", "Session sync failed ${spillSession.name}: ${e.message}")
+                }
             }
         }
     }
@@ -41,13 +56,36 @@ object RecordingSpillSync {
         spillSessionDir.listFiles { f -> f.extension.equals("wav", ignoreCase = true) }
             ?.forEach { spillWav ->
                 targets.forEach { targetDir ->
-                    if (!targetDir.isDirectory) targetDir.mkdirs()
+                    if (!ensureDirectory(targetDir)) return@forEach
                     val targetWav = File(targetDir, spillWav.name)
                     copyIfSpillAhead(spillWav, targetWav)
                 }
             }
         if (meta.incomplete) {
-            SessionMetadata.read(spillSessionDir)?.writeTo(spillSessionDir)
+            targets.forEach { targetDir ->
+                runCatching { meta.writeTo(targetDir) }
+                    .onFailure { e ->
+                        OmtLog.w(
+                            "SpillSync",
+                            "Failed writing metadata to ${targetDir.absolutePath}: ${e.message}",
+                        )
+                    }
+            }
+        }
+    }
+
+    private fun ensureDirectory(dir: File): Boolean {
+        if (dir.isDirectory) return true
+        return runCatching {
+            if (dir.mkdirs() || dir.isDirectory) {
+                true
+            } else {
+                OmtLog.w("SpillSync", "Could not create ${dir.absolutePath}")
+                false
+            }
+        }.getOrElse { e ->
+            OmtLog.w("SpillSync", "Could not create ${dir.absolutePath}: ${e.message}")
+            false
         }
     }
 

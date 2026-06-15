@@ -1844,7 +1844,12 @@ class MixerSessionController(
                 OmtLog.e("MixerSession", "startRecording failed", e)
                 TransportTraceHub.finish(mixerId, "failed: ${e.message}")
                 clearActivity("record-start")
-                _state.update { it.copy(statusMessage = e.message) }
+                _state.update {
+                    it.copy(
+                        statusMessage = userFacingRecordingStartError(e),
+                        warningMessage = userFacingRecordingStartError(e),
+                    )
+                }
             }
         }
     }
@@ -3179,4 +3184,16 @@ class MixerSessionController(
 
     private fun maxPlaybackChannelsFromProbe(probe: FullUsbProbeResult): Int =
         MixerUsbChannelCounts.playbackChannels(probe)
+
+    private fun userFacingRecordingStartError(error: Exception): String {
+        val message = error.message.orEmpty()
+        return when {
+            message.contains("Not enough free storage", ignoreCase = true) ||
+                message.contains("ENOSPC", ignoreCase = true) ||
+                message.contains("no space", ignoreCase = true) -> message
+            message.startsWith("Could not create session") ->
+                "Not enough free storage to start recording. Free space or choose another storage location."
+            else -> message.ifBlank { "Could not start recording." }
+        }
+    }
 }

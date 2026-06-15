@@ -21,12 +21,25 @@ data class RecordingWritePlan(
             return File(dir, ".prearm_capture.raw")
         }
 
+        private const val DEFAULT_RECORDING_HEADROOM_BYTES = 100L * 1024 * 1024
+
         fun create(
             resolver: RecordingStorageResolver,
             settings: AppSettingsStore,
             mixerFolderName: String,
         ): RecordingWritePlan {
             val primaryRoot = resolver.defaultRecordingRoot()
+            val requiredFree = maxOf(
+                settings.minFreeStorageBytes,
+                DEFAULT_RECORDING_HEADROOM_BYTES,
+            )
+            val usable = primaryRoot.usableSpace
+            if (usable < requiredFree) {
+                throw java.io.IOException(
+                    "Not enough free storage (${usable / 1_048_576} MB free, need at least " +
+                        "${requiredFree / 1_048_576} MB). Free space or choose another storage location.",
+                )
+            }
             resolver.ensureRecordingTree(primaryRoot, mixerFolderName)
             val primarySessionDir = SessionDirectory.createSessionDir(primaryRoot, mixerFolderName)
             val mirrors = resolver.redundantRecordingRoots()
