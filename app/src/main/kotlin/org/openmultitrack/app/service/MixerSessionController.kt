@@ -1769,33 +1769,21 @@ class MixerSessionController(
                         } else if (supportsOscRouting()) {
                             TransportTraceHub.mark(mixerId, "routing.beforeRecord skipped (not on transport button)")
                         }
-                        when {
-                            captureEngine.isCaptureActive -> {
-                                setActivity(
-                                    "Preparing recording session…",
-                                    SessionActivityKind.DISK,
-                                    tag = "record-start",
-                                )
-                                TransportTraceHub.mark(mixerId, "capture already active")
-                                syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
-                            }
-                            captureEngine.isNativeUsbCaptureRunning() -> {
-                                setActivity(
-                                    "Preparing recording session…",
-                                    SessionActivityKind.DISK,
-                                    tag = "record-start",
-                                )
-                                TransportTraceHub.mark(mixerId, "restart fanout on warm native capture")
-                                captureEngine.ensureFanoutRunning(scope).getOrThrow()
-                                syncChannelStripsToCaptureCount(captureEngine.activeChannelCount)
-                            }
-                            else -> {
-                                setActivity("Opening USB capture…", SessionActivityKind.USB, tag = "record-start")
-                                TransportTraceHub.mark(mixerId, "ensureCapture")
-                                ensureCapture(descriptor, probe).getOrThrow()
-                                TransportTraceHub.mark(mixerId, "ensureCapture ok ch=${captureEngine.activeChannelCount}")
-                            }
+                        val captureAlreadyWarm = captureEngine.isUsbStreamHealthy() &&
+                            captureEngine.isNativeCaptureOwner()
+                        if (captureAlreadyWarm) {
+                            setActivity(
+                                "Preparing recording session…",
+                                SessionActivityKind.DISK,
+                                tag = "record-start",
+                            )
+                            TransportTraceHub.mark(mixerId, "capture warm owner=${captureEngine.isNativeCaptureOwner()}")
+                        } else {
+                            setActivity("Opening USB capture…", SessionActivityKind.USB, tag = "record-start")
+                            TransportTraceHub.mark(mixerId, "capture cold start")
                         }
+                        ensureCapture(descriptor, probe).getOrThrow()
+                        TransportTraceHub.mark(mixerId, "ensureCapture ok ch=${captureEngine.activeChannelCount}")
                         setActivity("Creating session folder…", SessionActivityKind.DISK, tag = "record-start")
                         val writePlan = org.openmultitrack.app.data.RecordingWritePlan.create(
                             storageResolver,
