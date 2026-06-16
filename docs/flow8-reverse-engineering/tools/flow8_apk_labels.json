@@ -96,6 +96,7 @@
     {"slug": "snare-bottom", "label": "Snare Bottom", "group": "Drums"},
     {"slug": "snare-drum", "label": "Snare Drum", "group": "Drums"},
     {"slug": "snare-top", "label": "Snare Top", "group": "Drums"},
+    {"slug": "speaker", "label": "Speaker", "group": "Speakers"},
     {"slug": "speaker-array", "label": "Speaker Array", "group": "Speakers"},
     {"slug": "speaker-ceiling-mount", "label": "Speaker (ceiling mount)", "group": "Speakers"},
     {"slug": "speaker-floor-stand", "label": "Speaker (floor stand)", "group": "Speakers"},
