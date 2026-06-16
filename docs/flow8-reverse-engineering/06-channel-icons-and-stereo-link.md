@@ -335,6 +335,7 @@ this document (A–D). Regenerate after extracting assets:
 ```bash
 cd docs/flow8-reverse-engineering/tools
 python3 extract_icon_assets.py
+python3 assign_flow8_icons.py   # interactive FLOW drawable → MS label mapping
 python3 export_icon_tables.py all
 ```
 
@@ -360,6 +361,7 @@ Community icon artwork: [behringer-icons](https://github.com/mamarguerat/behring
 | [`tools/extract_flow8_channels.py`](./tools/extract_flow8_channels.py) | Offline decode: names, icons, Flow UI labels, USB 1–10 scribble |
 | [`tools/flow8_icon_decode.py`](./tools/flow8_icon_decode.py) | Reference decoder: input type + preset → MS icon |
 | [`tools/mixing_station_icons.py`](./tools/mixing_station_icons.py) | MS icon id → label / constant / emoji |
+| [`tools/assign_flow8_icons.py`](./tools/assign_flow8_icons.py) | Interactive FLOW drawable → MS label assignment (`flow8_icon_mapping.json`) |
 | [`tools/export_icon_tables.py`](./tools/export_icon_tables.py) | Generate [`../mixer-icons.md`](../mixer-icons.md) and stdout appendix tables |
 | [`tools/extract_icon_assets.py`](./tools/extract_icon_assets.py) | Extract SVG/PNG assets into `docs/mixer-icons/assets/` |
 

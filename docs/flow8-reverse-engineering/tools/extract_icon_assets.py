@@ -83,10 +83,25 @@ def pick_flow_png(decoded: Path, drawable: str) -> Path | None:
     return None
 
 
+def flow_apk_icon_to_rgba(img: Image.Image) -> Image.Image:
+    """Flow Mix APK icons are black RGBA silhouettes; normalize to white line art."""
+    img = img.convert("RGBA")
+    pixels = list(img.getdata())
+    normalized: list[tuple[int, int, int, int]] = []
+    for red, green, blue, alpha in pixels:
+        if alpha > 0 and red + green + blue < 384:
+            normalized.append((255, 255, 255, alpha))
+        else:
+            normalized.append((red, green, blue, alpha))
+    out = Image.new("RGBA", img.size)
+    out.putdata(normalized)
+    return out
+
+
 def resize_png(src: Path, dest: Path, size: int = ICON_SIZE) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     with Image.open(src) as img:
-        img = img.convert("RGBA")
+        img = flow_apk_icon_to_rgba(img)
         img.thumbnail((size, size), Image.Resampling.LANCZOS)
         canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         offset = ((size - img.width) // 2, (size - img.height) // 2)

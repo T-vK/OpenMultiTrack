@@ -23,4 +23,6 @@ keystore/*
 !keystore/debug.keystore
 !keystore/EXPECTED_SIGNER.txt
 scripts/tmp/
+docs/mixer-icons/.runpod-api-key
+docs/mixer-icons/generated/
 __pycache__/

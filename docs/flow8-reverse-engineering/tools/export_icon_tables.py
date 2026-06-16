@@ -8,16 +8,14 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from flow8_icon_decode import (
+from flow8_icon_catalog import (
     FLOW_UI_LABELS,
-    INPUT_TYPE_CONDENSOR_MIC,
-    INPUT_TYPE_DYNAMIC_MIC,
-    INPUT_TYPE_GUITAR_OR_BASS,
-    INPUT_TYPE_GUITAR_PAGE,
-    INPUT_TYPE_LINE_INSTRUMENT,
-    INPUT_TYPE_PLAYBACK,
-    PRESET_TO_MS_ICON,
-    resolve_preset_icon,
+    INPUT_TYPE_NAMES,
+    PRESET_COUNTS,
+    VALIDATED_MS_IDS,
+    catalog_rows,
+    drawable_key,
+    resolve_ms_id,
 )
 from mixing_station_display_labels import display_label
 from mixing_station_icons import ICON_LABELS
@@ -28,30 +26,13 @@ DOCS_DIR = FLOW8_DIR.parent
 OUTPUT = DOCS_DIR / "mixer-icons.md"
 DOC06 = FLOW8_DIR / "06-channel-icons-and-stereo-link.md"
 
-INPUT_TYPE_NAMES = {
-    INPUT_TYPE_DYNAMIC_MIC: "Dynamic mic",
-    INPUT_TYPE_CONDENSOR_MIC: "Condenser mic",
-    INPUT_TYPE_GUITAR_OR_BASS: "Guitar / bass",
-    INPUT_TYPE_LINE_INSTRUMENT: "Line instrument",
-    INPUT_TYPE_GUITAR_PAGE: "Guitar page (extended)",
-    INPUT_TYPE_PLAYBACK: "Playback / source",
-}
+INPUT_TYPE_NAMES = INPUT_TYPE_NAMES  # re-export from catalog
 
-PRESET_COUNTS = {
-    INPUT_TYPE_DYNAMIC_MIC: 15,
-    INPUT_TYPE_CONDENSOR_MIC: 11,
-    INPUT_TYPE_GUITAR_OR_BASS: 18,
-    INPUT_TYPE_LINE_INSTRUMENT: 18,
-    INPUT_TYPE_GUITAR_PAGE: 8,
-    INPUT_TYPE_PLAYBACK: 12,
-}
-
-DOC06_ASSETS = "../mixer-icons/assets"
-STANDALONE_ASSETS = "mixer-icons/assets"
+PRESET_COUNTS_LOCAL = PRESET_COUNTS
 
 
 def flow_drawable(input_type: int, preset: int) -> str:
-    return f"input_icon_{input_type * 100 + preset:03d}"
+    return drawable_key(input_type, preset)
 
 
 def md_img(assets_prefix: str, subpath: str, alt: str) -> str:
@@ -67,35 +48,26 @@ def flow_icon_img(drawable: str, alt: str, assets_prefix: str) -> str:
     return md_img(assets_prefix, f"flow8/{drawable}.png", alt)
 
 
-def flow_preset_label(input_type: int, preset: int, ms_id: int | None) -> str:
-    key = (input_type, preset)
-    if key in FLOW_UI_LABELS:
-        return FLOW_UI_LABELS[key]
-    if ms_id is not None:
-        return display_label(ms_id) or ICON_LABELS[ms_id]
-    return "—"
+DOC06_ASSETS = "../mixer-icons/assets"
+STANDALONE_ASSETS = "mixer-icons/assets"
 
 
 def flow_preset_rows() -> list[dict]:
     rows: list[dict] = []
-    for input_type, count in PRESET_COUNTS.items():
-        for preset in range(count):
-            ms_id = resolve_preset_icon(input_type, preset)
-            drawable = flow_drawable(input_type, preset)
-            label = flow_preset_label(input_type, preset, ms_id)
-            validated = (input_type, preset) in FLOW_UI_LABELS
-            rows.append(
-                {
-                    "input_type": input_type,
-                    "type_name": INPUT_TYPE_NAMES[input_type],
-                    "preset": preset,
-                    "drawable": drawable,
-                    "label": label,
-                    "ms_id": ms_id,
-                    "ms_slug": ICON_LABELS[ms_id] if ms_id else "",
-                    "validated_label": validated,
-                }
-            )
+    for row in catalog_rows():
+        ms_id = row["ms_id"]
+        rows.append(
+            {
+                "input_type": row["input_type"],
+                "type_name": row["type_name"],
+                "preset": row["preset"],
+                "drawable": row["drawable"],
+                "label": row["label"],
+                "ms_id": ms_id,
+                "ms_slug": ICON_LABELS[ms_id] if ms_id else "",
+                "validated_label": row["validated_flow_ui"],
+            }
+        )
     return rows
 
 
@@ -125,7 +97,9 @@ def appendix_b_flow(assets_prefix: str) -> list[str]:
         "",
         "Drawable assets from `Flowmix_v1.9.apk` (`res/drawable-*/input_icon_NNN`).",
         "Labels marked *(validated)* were read from the Flow Mix UI on hardware (firmware v11749);",
-        "others are inferred from the resolved Mixing Station id.",
+        "others come from `flow8_icon_mapping.json` (run `assign_flow8_icons.py` to build).",
+        "MS ID / slug columns follow that mapping; unassigned slots still use the guessed",
+        "decoder tables until you finish assignment.",
         "",
         "| Label | Input type | Preset | Drawable | MS ID | MS slug | Icon |",
         "| ----- | ---------- | ------ | -------- | ----- | ------- | ---- |",
@@ -156,9 +130,9 @@ def appendix_c_validated() -> list[str]:
         "| Input type | Preset | Flow drawable | Flow UI label | MS ID | MS label |",
         "| ---------- | ------ | ------------- | ------------- | ----- | -------- |",
     ]
-    for key in sorted(PRESET_TO_MS_ICON.keys()):
+    for key in sorted(VALIDATED_MS_IDS.keys()):
         input_type, preset = key
-        ms_id = PRESET_TO_MS_ICON[key]
+        ms_id = VALIDATED_MS_IDS[key]
         flow_label = FLOW_UI_LABELS.get(key, "")
         drawable = flow_drawable(input_type, preset)
         ms_slug = ICON_LABELS[ms_id]
@@ -173,7 +147,7 @@ def appendix_c_validated() -> list[str]:
             "Drawable key formula: `type × 100 + preset`, zero-padded to three digits",
             "(`input_icon_{key:03d}`).",
             "",
-            "*Maintained in `tools/flow8_icon_decode.py` (`PRESET_TO_MS_ICON`, `FLOW_UI_LABELS`).*",
+            "*Maintained in `tools/flow8_icon_catalog.py` (`VALIDATED_MS_IDS`, `FLOW_UI_LABELS`).*",
             "",
         ]
     )
@@ -255,6 +229,7 @@ def write_standalone_doc(path: Path) -> None:
         "```bash",
         "cd docs/flow8-reverse-engineering/tools",
         "python3 extract_icon_assets.py",
+        "python3 assign_flow8_icons.py   # interactive FLOW → MS mapping",
         "python3 export_icon_tables.py all",
         "```",
         "",
