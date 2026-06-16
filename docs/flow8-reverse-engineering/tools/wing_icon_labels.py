@@ -54,6 +54,9 @@ def ordered_wing_icon_names(assets_dir: Path) -> list[str]:
 
 
 def ordered_wing_entries(assets_dir: Path) -> list[tuple[str, str, Path]]:
-    from ms_mixer_icon_sets import ordered_wing_picker_entries
+    from ms_mixer_icon_sets import wing_picker_keys
 
-    return ordered_wing_picker_entries(assets_dir)
+    rows: list[tuple[str, str, Path]] = []
+    for wing_key in wing_picker_keys():
+        rows.append((wing_key, wing_label(wing_key), assets_dir / f"{wing_key}.png"))
+    return rows
