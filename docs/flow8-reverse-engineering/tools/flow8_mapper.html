@@ -122,6 +122,25 @@
       color: var(--ok);
       font-size: 0.85rem;
     }
+    .hint-pill {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #2a3540;
+      color: var(--accent);
+      font-size: 0.85rem;
+    }
+    .hint-pill button {
+      margin-left: 8px;
+      padding: 2px 8px;
+      font-size: 0.75rem;
+      border-radius: 6px;
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+    }
     .right {
       border-left: 1px solid var(--border);
       padding: 16px;
@@ -284,7 +303,7 @@
           (d.assigned ? " assigned" : "") +
           (d.drawable === state.current ? " current" : "") +
           (!d.has_asset ? " missing" : "");
-        el.title = d.drawable + (d.label ? " → " + d.label : "");
+        el.title = d.drawable + (d.label ? " → " + d.label : d.hint ? " ? " + d.hint : "");
         el.onclick = () => jump(d.drawable);
         if (d.has_asset) {
           const img = document.createElement("img");
@@ -317,7 +336,19 @@
           `<div class="drawable">${cur.drawable}</div>` +
           `<div class="sub">type ${cur.input_type} (${cur.type_name}) · preset ${cur.preset}</div>` +
           (assigned && assigned.label
-            ? `<div class="assigned-pill">Currently: ${assigned.label}</div>` : "");
+            ? `<div class="assigned-pill">Currently: ${assigned.label}</div>` : "") +
+          (state.current_hint
+            ? `<div class="hint-pill">Suggested: ${state.current_hint}` +
+              `<button type="button" id="btn-hint">Use</button></div>` : "");
+        const hintBtn = document.getElementById("btn-hint");
+        if (hintBtn) {
+          hintBtn.onclick = () => {
+            selectedLabel = state.current_hint;
+            document.getElementById("search").value = state.current_hint;
+            focusedLabelIndex = 0;
+            render();
+          };
+        }
         document.getElementById("btn-skip").disabled = false;
         document.getElementById("btn-clear").disabled = !(assigned && assigned.assigned);
         document.getElementById("btn-assign").disabled = !selectedLabel;

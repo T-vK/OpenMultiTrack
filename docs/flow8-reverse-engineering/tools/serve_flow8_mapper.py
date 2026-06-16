@@ -34,6 +34,7 @@ from flow8_mapping import (  # noqa: E402
     drawable_meta,
     jump_to,
     label_catalog,
+    load_picker_hints,
     load_state,
     save_state,
     skip_to_end,
@@ -70,6 +71,7 @@ class MapperHandler(BaseHTTPRequestHandler):
         for drawable, entry in state.assignments.items():
             used_labels.setdefault(entry.label, []).append(drawable)
 
+        hints = load_picker_hints()
         drawables = []
         for drawable in order:
             meta = drawable_meta(drawable)
@@ -81,10 +83,12 @@ class MapperHandler(BaseHTTPRequestHandler):
                     "label": entry.label if entry else None,
                     "ms_id": entry.ms_id if entry else None,
                     "flow_slug": entry.flow_slug if entry else None,
+                    "hint": hints.get(drawable),
                 }
             )
 
         current = current_drawable(state)
+        current_hint = hints.get(current) if current else None
         return {
             "version": state.version,
             "total": len(order),
@@ -92,6 +96,7 @@ class MapperHandler(BaseHTTPRequestHandler):
             "queue_length": len(state.queue),
             "current": current,
             "current_meta": drawable_meta(current) if current else None,
+            "current_hint": current_hint,
             "queue": state.queue,
             "drawables": drawables,
             "labels": label_catalog(),

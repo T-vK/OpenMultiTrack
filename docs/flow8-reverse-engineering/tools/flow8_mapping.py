@@ -6,12 +6,13 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from flow8_extra_labels import FLOW_EXTRA_LABELS, slug_for_label
+from flow8_extra_labels import FLOW_EXTRA_LABELS, label_group, slug_for_label
 from flow8_icon_catalog import INPUT_TYPE_NAMES, PRESET_COUNTS, drawable_key
 from mixing_station_display_labels import display_label
 
 TOOLS_DIR = Path(__file__).resolve().parent
 MAPPING_JSON = TOOLS_DIR / "flow8_icon_mapping.json"
+HINTS_JSON = TOOLS_DIR / "flow8_picker_hints.json"
 
 DOCS_DIR = TOOLS_DIR.parent.parent
 FLOW_ASSETS = DOCS_DIR / "mixer-icons" / "assets" / "flow8"
@@ -113,6 +114,14 @@ def assignment_for_label(label: str) -> Assignment:
     return Assignment(label=trimmed, ms_id=None)
 
 
+def load_picker_hints() -> dict[str, str]:
+    if not HINTS_JSON.is_file():
+        return {}
+    data = json.loads(HINTS_JSON.read_text(encoding="utf-8"))
+    raw = data.get("hints", {})
+    return {str(k): str(v) for k, v in raw.items()}
+
+
 def label_catalog() -> list[dict]:
     """Assignable labels for the mapper UI."""
     items: list[dict] = []
@@ -135,7 +144,7 @@ def label_catalog() -> list[dict]:
                 "label": name,
                 "ms_id": None,
                 "flow_slug": slug,
-                "group": "FLOW only",
+                "group": label_group(slug),
             }
         )
     return items
