@@ -16,8 +16,6 @@ from mixing_station_icons import (
     HANDHELD_MIC,
     ICON_MAX,
     ICON_MIN,
-    TAPE,
-    VIOLIN,
 )
 
 # JNI InputType* constants (libcom_musicgroup_xairbt.so).
@@ -35,24 +33,22 @@ NAME_LEN_MIN = 2
 NAME_LEN_MAX = 18
 RECORD_MAGIC = 0x6A
 
-# Per-type preset tables — mirrors Flow8IconPresets.kt in mixer-behringer.
+# Per-type preset tables — mirrors Flow8IconPresets.kt / flow8_icon_mapping.json.
 PRESET_ICON_TABLES: list[list[int]] = [
-    [1, 47, 48, 49, 50, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59],
-    [47, 48, 49, 48, 49, 53, 54, 55, 56, 57, 58],
-    [17, 18, 23, 20, 21, 22, 23, 24, 25, 26, 17, 18, 19, 20, 21, 22, 23, 26],
-    [27, 28, 29, 30, 39, 35, 36, 37, 38, 40, 15, 16, 13, 14, 31, 32, 33, 34],
-    [20, 21, 23, 24, 25, 26, 17, 18],
-    [60, 61, 62, 63, 64, 65, 66, 67, 54, 55, 62, 60],
+    [1, 0, 61, 0, 0, 0, 0, 0, 0, 0, 0, 72, 73, 70, 74],
+    [47, 48, 49, 52, 0, 51, 50, 53, 43, 42, 41],
+    [0, 0, 0, 10, 4, 5, 9, 11, 0, 0, 6, 7, 8, 13, 14, 12, 15, 16],
+    [22, 0, 0, 0, 23, 20, 21, 0, 39, 0, 0, 38, 37, 36, 35, 29, 0, 0],
+    [0, 0, 31, 32, 33, 0, 34, 30],
+    [25, 26, 24, 0, 66, 0, 0, 0, 67, 63, 64, 65],
 ]
 
 # Hardware-validated overrides (firmware v11749, 2026-06-08 capture).
 PRESET_TO_MS_ICON: dict[tuple[int, int], int] = {
     (INPUT_TYPE_DYNAMIC_MIC, 4): HANDHELD_MIC,
     (INPUT_TYPE_DYNAMIC_MIC, 7): HANDHELD_MIC,
-    (INPUT_TYPE_LINE_INSTRUMENT, 4): VIOLIN,
-    (INPUT_TYPE_GUITAR_OR_BASS, 2): ACOUSTIC_GUITAR,
-    (INPUT_TYPE_GUITAR_PAGE, 2): ACOUSTIC_GUITAR,
-    (INPUT_TYPE_PLAYBACK, 7): TAPE,
+    (INPUT_TYPE_LINE_INSTRUMENT, 4): ACOUSTIC_GUITAR,
+    (INPUT_TYPE_GUITAR_PAGE, 2): 31,
 }
 
 PLAIN_PRESET_TO_MS_ICON: dict[int, int] = {
@@ -64,10 +60,10 @@ PLAIN_PRESET_TO_MS_ICON: dict[int, int] = {
 FLOW_UI_LABELS: dict[tuple[int, int], str] = {
     (INPUT_TYPE_DYNAMIC_MIC, 4): "Wired Mic",
     (INPUT_TYPE_DYNAMIC_MIC, 7): "Wired Mic",
-    (INPUT_TYPE_LINE_INSTRUMENT, 4): "Violine",
-    (INPUT_TYPE_GUITAR_OR_BASS, 2): "Acoustic Guitar",
-    (INPUT_TYPE_GUITAR_PAGE, 2): "Acoustic Guitar",
-    (INPUT_TYPE_PLAYBACK, 7): "Record player",
+    (INPUT_TYPE_GUITAR_OR_BASS, 2): "Crash",
+    (INPUT_TYPE_LINE_INSTRUMENT, 4): "Acoustic Guitar",
+    (INPUT_TYPE_GUITAR_PAGE, 2): "Synthesizer 1",
+    (INPUT_TYPE_PLAYBACK, 7): "Speaker (Wall-Mounted)",
 }
 
 

@@ -1,142 +1,6 @@
 {
-  "version": 1,
-  "source": "JNI preset names from libcom_musicgroup_xairbt.so (not plain APK text). Run extract_flow8_apk_labels.py on a device with Flow Mix installed to refresh authoritative strings.",
-  "labels": [
-    {"slug": "accordeon", "label": "Accordeon", "group": "Keys"},
-    {"slug": "acoustic-bass", "label": "Acoustic Bass", "group": "Bass"},
-    {"slug": "acoustic-guitar", "label": "Acoustic Guitar", "group": "Guitar"},
-    {"slug": "amp-cabinet", "label": "Amp Cabinet", "group": "Amps"},
-    {"slug": "amp-rack", "label": "Amp Rack", "group": "Amps"},
-    {"slug": "bass-amp", "label": "Bass Amp", "group": "Amps"},
-    {"slug": "bass-clef", "label": "Bass clef", "group": "Music notation"},
-    {"slug": "bass-drum", "label": "Bass Drum", "group": "Drums"},
-    {"slug": "bass-guitar", "label": "Bass Guitar", "group": "Bass"},
-    {"slug": "beamed-notes", "label": "Beamed notes", "group": "Music notation"},
-    {"slug": "bongos", "label": "Bongos", "group": "Drums"},
-    {"slug": "cassette", "label": "Cassette", "group": "Playback"},
-    {"slug": "cd", "label": "CD", "group": "Playback"},
-    {"slug": "cello", "label": "Cello", "group": "Strings"},
-    {"slug": "clarinet", "label": "Clarinet", "group": "Brass / woodwind"},
-    {"slug": "coda", "label": "Coda", "group": "Music notation"},
-    {"slug": "computer", "label": "Computer", "group": "Playback"},
-    {"slug": "condenser-mic", "label": "Condenser Mic", "group": "JNI preset name"},
-    {"slug": "congas", "label": "Congas", "group": "Drums"},
-    {"slug": "contrabass", "label": "Contrabass", "group": "Bass"},
-    {"slug": "cowbell", "label": "Cowbell", "group": "Drums"},
-    {"slug": "crash", "label": "Crash", "group": "Drums"},
-    {"slug": "dca", "label": "DCA", "group": "Routing / bus"},
-    {"slug": "din-midi", "label": "DIN 5-pin MIDI", "group": "Connectors"},
-    {"slug": "double-bass-with-bow", "label": "Double bass with bow", "group": "Strings"},
-    {"slug": "double-bass-without-bow", "label": "Double bass without bow", "group": "Strings"},
-    {"slug": "drum-kit-left", "label": "Drum kit left", "group": "Drums"},
-    {"slug": "drum-kit-right", "label": "Drum kit right", "group": "Drums"},
-    {"slug": "drum-kit", "label": "Drum Kit", "group": "Drums"},
-    {"slug": "dyn-mic", "label": "DYN-MIC", "group": "JNI preset name"},
-    {"slug": "effects", "label": "Effects", "group": "Routing / bus"},
-    {"slug": "eighth-note", "label": "Eighth note", "group": "Music notation"},
-    {"slug": "electric-bass", "label": "Electric Bass", "group": "Bass"},
-    {"slug": "electric-guitar", "label": "Electric Guitar", "group": "Guitar"},
-    {"slug": "electric-violine-without-bow", "label": "Electric violine without bow", "group": "Strings"},
-    {"slug": "ff", "label": "ff", "group": "Music notation"},
-    {"slug": "flat", "label": "Flat", "group": "Music notation"},
-    {"slug": "floor-tom", "label": "Floor Tom", "group": "Drums"},
-    {"slug": "fx", "label": "FX", "group": "Playback"},
-    {"slug": "grand-piano", "label": "Grand piano", "group": "Keys"},
-    {"slug": "groups", "label": "Groups", "group": "Routing / bus"},
-    {"slug": "guitar-amp", "label": "Guitar Amp", "group": "Amps"},
-    {"slug": "half-note", "label": "Half note", "group": "Music notation"},
-    {"slug": "hand-sign", "label": "Hand Sign", "group": "Vocals"},
-    {"slug": "harpsichord", "label": "Harpsichord", "group": "Keys"},
-    {"slug": "harmonica", "label": "Harmonica", "group": "Brass / woodwind"},
-    {"slug": "headphones", "label": "Headphones", "group": "Monitoring"},
-    {"slug": "headset-mic", "label": "Headset Mic", "group": "Mics"},
-    {"slug": "hi-hat", "label": "Hi-Hat", "group": "Drums"},
-    {"slug": "high-tom", "label": "High Tom", "group": "Drums"},
-    {"slug": "hollow-body-electric-guitar", "label": "Hollow body electric guitar", "group": "Guitar"},
-    {"slug": "ibanez-guitar", "label": "Ibanez Guitar", "group": "Guitar"},
-    {"slug": "in-ear-monitor", "label": "In ear monitor", "group": "Monitoring"},
-    {"slug": "keyboard", "label": "Keyboard", "group": "Keys"},
-    {"slug": "keytar", "label": "Keytar", "group": "Keys"},
-    {"slug": "kick-back", "label": "Kick Back", "group": "Drums"},
-    {"slug": "kick-front", "label": "Kick Front", "group": "Drums"},
-    {"slug": "kick-left", "label": "Kick left", "group": "Drums"},
-    {"slug": "kick-right", "label": "Kick right", "group": "Drums"},
-    {"slug": "large-diaphragm-mic", "label": "Large Diaphragm Mic", "group": "Mics"},
-    {"slug": "les-paul-guitar", "label": "Les Paul Guitar", "group": "Guitar"},
-    {"slug": "listen", "label": "Listen", "group": "Monitoring"},
-    {"slug": "mandoline", "label": "Mandoline", "group": "Strings"},
-    {"slug": "matrix", "label": "Matrix", "group": "Routing / bus"},
-    {"slug": "media-player", "label": "Media player", "group": "Playback"},
-    {"slug": "mf", "label": "mf", "group": "Music notation"},
-    {"slug": "mid-tom", "label": "Mid Tom", "group": "Drums"},
-    {"slug": "mixbus", "label": "MixBus", "group": "Routing / bus"},
-    {"slug": "monitor-wedge", "label": "Monitor Wedge", "group": "Speakers"},
-    {"slug": "mp", "label": "mp", "group": "Music notation"},
-    {"slug": "mp3-player", "label": "Media player", "group": "Playback"},
-    {"slug": "natural", "label": "Natural", "group": "Music notation"},
-    {"slug": "no-icon", "label": "No icon", "group": "Routing / bus"},
-    {"slug": "organ", "label": "Organ", "group": "Keys"},
-    {"slug": "pause", "label": "Pause", "group": "Music notation"},
-    {"slug": "piano", "label": "Piano", "group": "Keys"},
-    {"slug": "quarter-note", "label": "Quarter note", "group": "Music notation"},
-    {"slug": "rack", "label": "Rack", "group": "Playback"},
-    {"slug": "rca-jack-female", "label": "RCA Jack Female", "group": "Connectors"},
-    {"slug": "rca-plug", "label": "RCA Plug", "group": "Connectors"},
-    {"slug": "rca-plug-left", "label": "RCA Plug Left", "group": "Connectors"},
-    {"slug": "rca-plug-right", "label": "RCA Plug Right", "group": "Connectors"},
-    {"slug": "reel-to-reel", "label": "Reel to Reel", "group": "Playback"},
-    {"slug": "repeat", "label": "Repeat", "group": "Music notation"},
-    {"slug": "ride", "label": "Ride", "group": "Drums"},
-    {"slug": "routing", "label": "Routing", "group": "Routing / bus"},
-    {"slug": "saxophone", "label": "Saxophone", "group": "Brass / woodwind"},
-    {"slug": "segno", "label": "Segno", "group": "Music notation"},
-    {"slug": "sharp", "label": "Sharp", "group": "Music notation"},
-    {"slug": "smartphone", "label": "Smartphone", "group": "Devices"},
-    {"slug": "smiley", "label": "Smiley", "group": "Routing / bus"},
-    {"slug": "snare-bottom", "label": "Snare Bottom", "group": "Drums"},
-    {"slug": "snare-drum", "label": "Snare Drum", "group": "Drums"},
-    {"slug": "snare-top", "label": "Snare Top", "group": "Drums"},
-    {"slug": "speaker", "label": "Speaker", "group": "Speakers"},
-    {"slug": "speaker-array", "label": "Speaker Array", "group": "Speakers"},
-    {"slug": "speaker-ceiling-mount", "label": "Speaker (ceiling mount)", "group": "Speakers"},
-    {"slug": "speaker-floor-stand", "label": "Speaker (floor stand)", "group": "Speakers"},
-    {"slug": "speaker-left", "label": "Left Speaker", "group": "Speakers"},
-    {"slug": "speaker-on-pole", "label": "Speaker on a Pole", "group": "Speakers"},
-    {"slug": "speaker-right", "label": "Right Speaker", "group": "Speakers"},
-    {"slug": "speaker-wall-mount", "label": "Speaker (wall mount)", "group": "Speakers"},
-    {"slug": "speakers", "label": "Speakers", "group": "Speakers"},
-    {"slug": "stratocaster", "label": "Stratocaster", "group": "Guitar"},
-    {"slug": "synthesizer-1", "label": "Synthesizer 1", "group": "Keys"},
-    {"slug": "synthesizer-2", "label": "Synthesizer 2", "group": "Keys"},
-    {"slug": "synthesizer-3", "label": "Synthesizer 3", "group": "Keys"},
-    {"slug": "synthesizer-4", "label": "Synthesizer 4", "group": "Keys"},
-    {"slug": "tablet", "label": "Tablet", "group": "Devices"},
-    {"slug": "tablet-landscape", "label": "Tablet (landscape)", "group": "Devices"},
-    {"slug": "talk-a", "label": "Talk A", "group": "Vocals"},
-    {"slug": "talk-b", "label": "Talk B", "group": "Vocals"},
-    {"slug": "tambourine", "label": "Tambourine", "group": "Drums"},
-    {"slug": "treble-clef", "label": "Treble clef", "group": "Music notation"},
-    {"slug": "trombone", "label": "Trombone", "group": "Brass / woodwind"},
-    {"slug": "trumpet", "label": "Trumpet", "group": "Brass / woodwind"},
-    {"slug": "ts-jack-female", "label": "TS Jack Female", "group": "Connectors"},
-    {"slug": "ts-plug", "label": "TS Plug", "group": "Connectors"},
-    {"slug": "ts-plug-left", "label": "TS Plug Left", "group": "Connectors"},
-    {"slug": "ts-plug-right", "label": "TS Plug Right", "group": "Connectors"},
-    {"slug": "turntable", "label": "Turntable", "group": "Playback"},
-    {"slug": "upright-piano", "label": "Upright piano", "group": "Keys"},
-    {"slug": "v-shape-guitar", "label": "V shape guitar", "group": "Guitar"},
-    {"slug": "vibraphone", "label": "Vibraphone", "group": "Drums"},
-    {"slug": "vinyl-record", "label": "Vinyl record", "group": "Playback"},
-    {"slug": "violin", "label": "Violin", "group": "Strings"},
-    {"slug": "vocal-mic", "label": "Vocal mic", "group": "JNI preset name"},
-    {"slug": "washburn-guitar", "label": "Washburn Guitar", "group": "Guitar"},
-    {"slug": "whole-note", "label": "Whole note", "group": "Music notation"},
-    {"slug": "wireless-mic", "label": "Wireless Mic", "group": "Mics"},
-    {"slug": "xlr-female", "label": "XLR Female", "group": "Connectors"},
-    {"slug": "xlr-jack", "label": "XLR Jack", "group": "Connectors"}
-  ],
   "hints": {
-    "input_icon_000": "No icon",
+    "input_icon_000": "No Icon",
     "input_icon_001": "DCA",
     "input_icon_002": "Effects",
     "input_icon_003": "Groups",
@@ -145,15 +9,15 @@
     "input_icon_006": "DIN 5-pin MIDI",
     "input_icon_007": "RCA Plug",
     "input_icon_008": "TS Jack Female",
-    "input_icon_009": "Bass clef",
-    "input_icon_010": "Treble clef",
+    "input_icon_009": "Bass Clef",
+    "input_icon_010": "Treble Clef",
     "input_icon_011": "Matrix",
     "input_icon_012": "Routing",
     "input_icon_013": "Fader",
     "input_icon_014": "Smiley",
-    "input_icon_506": "Speaker (ceiling mount)",
-    "input_icon_507": "Speaker (wall mount)",
-    "input_icon_508": "Speaker (floor stand)",
+    "input_icon_506": "Speaker (Ceiling-Mounted)",
+    "input_icon_507": "Speaker (Wall-Mounted)",
+    "input_icon_508": "Speaker (Floor Stand)",
     "input_icon_600": "Hand Sign",
     "input_icon_601": "TRS Plug Left",
     "input_icon_602": "TRS Plug Right",
@@ -163,14 +27,678 @@
     "input_icon_606": "Headset Mic",
     "input_icon_607": "Amp Rack",
     "input_icon_608": "Computer",
-    "input_icon_609": "Media player",
+    "input_icon_609": "Media Player",
     "input_icon_610": "Smartphone",
-    "input_icon_611": "Tablet (landscape)",
+    "input_icon_611": "Tablet (Landscape)",
     "input_icon_612": "Reel to Reel",
     "input_icon_613": "Talk A",
     "input_icon_614": "Talk B",
     "input_icon_615": "Turntable",
     "input_icon_616": "CD",
     "input_icon_617": "Cassette"
-  }
+  },
+  "labels": [
+    {
+      "group": "Keys",
+      "label": "Accordeon",
+      "slug": "accordeon"
+    },
+    {
+      "group": "Bass",
+      "label": "Acoustic Bass",
+      "slug": "acoustic-bass"
+    },
+    {
+      "group": "Guitar",
+      "label": "Acoustic Guitar",
+      "slug": "acoustic-guitar"
+    },
+    {
+      "group": "Amps",
+      "label": "Amp Cabinet",
+      "slug": "amp-cabinet"
+    },
+    {
+      "group": "Amps",
+      "label": "Amp Rack",
+      "slug": "amp-rack"
+    },
+    {
+      "group": "Amps",
+      "label": "Bass Amp",
+      "slug": "bass-amp"
+    },
+    {
+      "group": "Music notation",
+      "label": "Bass Clef",
+      "slug": "bass-clef"
+    },
+    {
+      "group": "Drums",
+      "label": "Bass Drum",
+      "slug": "bass-drum"
+    },
+    {
+      "group": "Bass",
+      "label": "Bass Guitar",
+      "slug": "bass-guitar"
+    },
+    {
+      "group": "Music notation",
+      "label": "Beamed Notes",
+      "slug": "beamed-notes"
+    },
+    {
+      "group": "Drums",
+      "label": "Bongos",
+      "slug": "bongos"
+    },
+    {
+      "group": "Playback",
+      "label": "Cassette",
+      "slug": "cassette"
+    },
+    {
+      "group": "Playback",
+      "label": "CD",
+      "slug": "cd"
+    },
+    {
+      "group": "Strings",
+      "label": "Cello",
+      "slug": "cello"
+    },
+    {
+      "group": "Brass / woodwind",
+      "label": "Clarinet",
+      "slug": "clarinet"
+    },
+    {
+      "group": "Music notation",
+      "label": "Coda",
+      "slug": "coda"
+    },
+    {
+      "group": "Playback",
+      "label": "Computer",
+      "slug": "computer"
+    },
+    {
+      "group": "JNI preset name",
+      "label": "Condenser Mic",
+      "slug": "condenser-mic"
+    },
+    {
+      "group": "Drums",
+      "label": "Congas",
+      "slug": "congas"
+    },
+    {
+      "group": "Bass",
+      "label": "Contrabass",
+      "slug": "contrabass"
+    },
+    {
+      "group": "Drums",
+      "label": "Cowbell",
+      "slug": "cowbell"
+    },
+    {
+      "group": "Drums",
+      "label": "Crash",
+      "slug": "crash"
+    },
+    {
+      "group": "Routing / bus",
+      "label": "DCA",
+      "slug": "dca"
+    },
+    {
+      "group": "Connectors",
+      "label": "DIN 5-pin MIDI",
+      "slug": "din-midi"
+    },
+    {
+      "group": "Strings",
+      "label": "Double Bass With Bow",
+      "slug": "double-bass-with-bow"
+    },
+    {
+      "group": "Strings",
+      "label": "Double Bass Without Bow",
+      "slug": "double-bass-without-bow"
+    },
+    {
+      "group": "Drums",
+      "label": "Drum Kit Left",
+      "slug": "drum-kit-left"
+    },
+    {
+      "group": "Drums",
+      "label": "Drum Kit Right",
+      "slug": "drum-kit-right"
+    },
+    {
+      "group": "Drums",
+      "label": "Drum Kit",
+      "slug": "drum-kit"
+    },
+    {
+      "group": "JNI preset name",
+      "label": "DYN-MIC",
+      "slug": "dyn-mic"
+    },
+    {
+      "group": "Routing / bus",
+      "label": "Effects",
+      "slug": "effects"
+    },
+    {
+      "group": "Music notation",
+      "label": "Eighth Note",
+      "slug": "eighth-note"
+    },
+    {
+      "group": "Bass",
+      "label": "Electric Bass",
+      "slug": "electric-bass"
+    },
+    {
+      "group": "Guitar",
+      "label": "Electric Guitar",
+      "slug": "electric-guitar"
+    },
+    {
+      "group": "Strings",
+      "label": "Electric Violine Without Bow",
+      "slug": "electric-violine-without-bow"
+    },
+    {
+      "group": "Music notation",
+      "label": "ff",
+      "slug": "ff"
+    },
+    {
+      "group": "Music notation",
+      "label": "Flat",
+      "slug": "flat"
+    },
+    {
+      "group": "Drums",
+      "label": "Floor Tom",
+      "slug": "floor-tom"
+    },
+    {
+      "group": "Playback",
+      "label": "FX",
+      "slug": "fx"
+    },
+    {
+      "group": "Keys",
+      "label": "Grand Piano",
+      "slug": "grand-piano"
+    },
+    {
+      "group": "Routing / bus",
+      "label": "Groups",
+      "slug": "groups"
+    },
+    {
+      "group": "Amps",
+      "label": "Guitar Amp",
+      "slug": "guitar-amp"
+    },
+    {
+      "group": "Music notation",
+      "label": "Half Note",
+      "slug": "half-note"
+    },
+    {
+      "group": "Vocals",
+      "label": "Hand Sign",
+      "slug": "hand-sign"
+    },
+    {
+      "group": "Keys",
+      "label": "Harpsichord",
+      "slug": "harpsichord"
+    },
+    {
+      "group": "Brass / woodwind",
+      "label": "Harmonica",
+      "slug": "harmonica"
+    },
+    {
+      "group": "Monitoring",
+      "label": "Headphones",
+      "slug": "headphones"
+    },
+    {
+      "group": "Mics",
+      "label": "Headset Mic",
+      "slug": "headset-mic"
+    },
+    {
+      "group": "Drums",
+      "label": "Hi-Hat",
+      "slug": "hi-hat"
+    },
+    {
+      "group": "Drums",
+      "label": "High Tom",
+      "slug": "high-tom"
+    },
+    {
+      "group": "Guitar",
+      "label": "Hollow Body Electric Guitar",
+      "slug": "hollow-body-electric-guitar"
+    },
+    {
+      "group": "Guitar",
+      "label": "Ibanez Guitar",
+      "slug": "ibanez-guitar"
+    },
+    {
+      "group": "Monitoring",
+      "label": "In Ear Monitor",
+      "slug": "in-ear-monitor"
+    },
+    {
+      "group": "Keys",
+      "label": "Keyboard",
+      "slug": "keyboard"
+    },
+    {
+      "group": "Keys",
+      "label": "Keytar",
+      "slug": "keytar"
+    },
+    {
+      "group": "Drums",
+      "label": "Kick Back",
+      "slug": "kick-back"
+    },
+    {
+      "group": "Drums",
+      "label": "Kick Front",
+      "slug": "kick-front"
+    },
+    {
+      "group": "Drums",
+      "label": "Kick Left",
+      "slug": "kick-left"
+    },
+    {
+      "group": "Drums",
+      "label": "Kick Right",
+      "slug": "kick-right"
+    },
+    {
+      "group": "Mics",
+      "label": "Large Diaphragm Mic",
+      "slug": "large-diaphragm-mic"
+    },
+    {
+      "group": "Guitar",
+      "label": "Les Paul Guitar",
+      "slug": "les-paul-guitar"
+    },
+    {
+      "group": "Monitoring",
+      "label": "Listen",
+      "slug": "listen"
+    },
+    {
+      "group": "Strings",
+      "label": "Mandoline",
+      "slug": "mandoline"
+    },
+    {
+      "group": "Routing / bus",
+      "label": "Matrix",
+      "slug": "matrix"
+    },
+    {
+      "group": "Playback",
+      "label": "Media Player",
+      "slug": "media-player"
+    },
+    {
+      "group": "Music notation",
+      "label": "mf",
+      "slug": "mf"
+    },
+    {
+      "group": "Drums",
+      "label": "Mid Tom",
+      "slug": "mid-tom"
+    },
+    {
+      "group": "Routing / bus",
+      "label": "MixBus",
+      "slug": "mixbus"
+    },
+    {
+      "group": "Speakers",
+      "label": "Monitor Wedge",
+      "slug": "monitor-wedge"
+    },
+    {
+      "group": "Music notation",
+      "label": "mp",
+      "slug": "mp"
+    },
+    {
+      "group": "Playback",
+      "label": "Media Player",
+      "slug": "mp3-player"
+    },
+    {
+      "group": "Music notation",
+      "label": "Natural",
+      "slug": "natural"
+    },
+    {
+      "group": "Routing / bus",
+      "label": "No Icon",
+      "slug": "no-icon"
+    },
+    {
+      "group": "Keys",
+      "label": "Organ",
+      "slug": "organ"
+    },
+    {
+      "group": "Music notation",
+      "label": "Pause",
+      "slug": "pause"
+    },
+    {
+      "group": "Keys",
+      "label": "Piano",
+      "slug": "piano"
+    },
+    {
+      "group": "Music notation",
+      "label": "Quarter Note",
+      "slug": "quarter-note"
+    },
+    {
+      "group": "Playback",
+      "label": "Rack",
+      "slug": "rack"
+    },
+    {
+      "group": "Connectors",
+      "label": "RCA Jack Female",
+      "slug": "rca-jack-female"
+    },
+    {
+      "group": "Connectors",
+      "label": "RCA Plug",
+      "slug": "rca-plug"
+    },
+    {
+      "group": "Connectors",
+      "label": "RCA Plug Left",
+      "slug": "rca-plug-left"
+    },
+    {
+      "group": "Connectors",
+      "label": "RCA Plug Right",
+      "slug": "rca-plug-right"
+    },
+    {
+      "group": "Playback",
+      "label": "Reel to Reel",
+      "slug": "reel-to-reel"
+    },
+    {
+      "group": "Music notation",
+      "label": "Repeat",
+      "slug": "repeat"
+    },
+    {
+      "group": "Drums",
+      "label": "Ride",
+      "slug": "ride"
+    },
+    {
+      "group": "Routing / bus",
+      "label": "Routing",
+      "slug": "routing"
+    },
+    {
+      "group": "Brass / woodwind",
+      "label": "Saxophone",
+      "slug": "saxophone"
+    },
+    {
+      "group": "Music notation",
+      "label": "Segno",
+      "slug": "segno"
+    },
+    {
+      "group": "Music notation",
+      "label": "Sharp",
+      "slug": "sharp"
+    },
+    {
+      "group": "Devices",
+      "label": "Smartphone",
+      "slug": "smartphone"
+    },
+    {
+      "group": "Routing / bus",
+      "label": "Smiley",
+      "slug": "smiley"
+    },
+    {
+      "group": "Drums",
+      "label": "Snare Bottom",
+      "slug": "snare-bottom"
+    },
+    {
+      "group": "Drums",
+      "label": "Snare Drum",
+      "slug": "snare-drum"
+    },
+    {
+      "group": "Drums",
+      "label": "Snare Top",
+      "slug": "snare-top"
+    },
+    {
+      "group": "Speakers",
+      "label": "Speaker",
+      "slug": "speaker"
+    },
+    {
+      "group": "Speakers",
+      "label": "Speaker Array",
+      "slug": "speaker-array"
+    },
+    {
+      "group": "Speakers",
+      "label": "Speaker (Ceiling-Mounted)",
+      "slug": "speaker-ceiling-mount"
+    },
+    {
+      "group": "Speakers",
+      "label": "Speaker (Floor Stand)",
+      "slug": "speaker-floor-stand"
+    },
+    {
+      "group": "Speakers",
+      "label": "Left Speaker",
+      "slug": "speaker-left"
+    },
+    {
+      "group": "Speakers",
+      "label": "Speaker on a Pole",
+      "slug": "speaker-on-pole"
+    },
+    {
+      "group": "Speakers",
+      "label": "Right Speaker",
+      "slug": "speaker-right"
+    },
+    {
+      "group": "Speakers",
+      "label": "Speaker (Wall-Mounted)",
+      "slug": "speaker-wall-mount"
+    },
+    {
+      "group": "Speakers",
+      "label": "Speakers",
+      "slug": "speakers"
+    },
+    {
+      "group": "Guitar",
+      "label": "Stratocaster",
+      "slug": "stratocaster"
+    },
+    {
+      "group": "Keys",
+      "label": "Synthesizer 1",
+      "slug": "synthesizer-1"
+    },
+    {
+      "group": "Keys",
+      "label": "Synthesizer 2",
+      "slug": "synthesizer-2"
+    },
+    {
+      "group": "Keys",
+      "label": "Synthesizer 3",
+      "slug": "synthesizer-3"
+    },
+    {
+      "group": "Keys",
+      "label": "Synthesizer 4",
+      "slug": "synthesizer-4"
+    },
+    {
+      "group": "Devices",
+      "label": "Tablet",
+      "slug": "tablet"
+    },
+    {
+      "group": "Devices",
+      "label": "Tablet (Landscape)",
+      "slug": "tablet-landscape"
+    },
+    {
+      "group": "Vocals",
+      "label": "Talk A",
+      "slug": "talk-a"
+    },
+    {
+      "group": "Vocals",
+      "label": "Talk B",
+      "slug": "talk-b"
+    },
+    {
+      "group": "Drums",
+      "label": "Tambourine",
+      "slug": "tambourine"
+    },
+    {
+      "group": "Music notation",
+      "label": "Treble Clef",
+      "slug": "treble-clef"
+    },
+    {
+      "group": "Brass / woodwind",
+      "label": "Trombone",
+      "slug": "trombone"
+    },
+    {
+      "group": "Brass / woodwind",
+      "label": "Trumpet",
+      "slug": "trumpet"
+    },
+    {
+      "group": "Connectors",
+      "label": "TS Jack Female",
+      "slug": "ts-jack-female"
+    },
+    {
+      "group": "Connectors",
+      "label": "TS Plug",
+      "slug": "ts-plug"
+    },
+    {
+      "group": "Connectors",
+      "label": "TS Plug Left",
+      "slug": "ts-plug-left"
+    },
+    {
+      "group": "Connectors",
+      "label": "TS Plug Right",
+      "slug": "ts-plug-right"
+    },
+    {
+      "group": "Playback",
+      "label": "Turntable",
+      "slug": "turntable"
+    },
+    {
+      "group": "Keys",
+      "label": "Upright Piano",
+      "slug": "upright-piano"
+    },
+    {
+      "group": "Guitar",
+      "label": "V Shape Guitar",
+      "slug": "v-shape-guitar"
+    },
+    {
+      "group": "Drums",
+      "label": "Vibraphone",
+      "slug": "vibraphone"
+    },
+    {
+      "group": "Playback",
+      "label": "Vinyl Record",
+      "slug": "vinyl-record"
+    },
+    {
+      "group": "Strings",
+      "label": "Violin",
+      "slug": "violin"
+    },
+    {
+      "group": "JNI preset name",
+      "label": "Vocal Mic",
+      "slug": "vocal-mic"
+    },
+    {
+      "group": "Guitar",
+      "label": "Washburn Guitar",
+      "slug": "washburn-guitar"
+    },
+    {
+      "group": "Music notation",
+      "label": "Whole Note",
+      "slug": "whole-note"
+    },
+    {
+      "group": "Mics",
+      "label": "Wireless Mic",
+      "slug": "wireless-mic"
+    },
+    {
+      "group": "Connectors",
+      "label": "XLR Female",
+      "slug": "xlr-female"
+    },
+    {
+      "group": "Connectors",
+      "label": "XLR Jack",
+      "slug": "xlr-jack"
+    }
+  ],
+  "source": "JNI preset names from libcom_musicgroup_xairbt.so (not plain APK text). Run extract_flow8_apk_labels.py on a device with Flow Mix installed to refresh authoritative strings.",
+  "version": 1
 }

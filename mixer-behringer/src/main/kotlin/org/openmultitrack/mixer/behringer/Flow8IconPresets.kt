@@ -18,38 +18,36 @@ object Flow8IconPresets {
     private val PRESET_ICONS: List<IntArray> = listOf(
         // Type 0 — dynamic / wired mics (15 presets, input_icon_000–014)
         intArrayOf(
-            1, 47, 48, 49, 50, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59,
+            1, 0, 61, 0, 0, 0, 0, 0, 0, 0, 0, 72, 73, 70, 74,
         ),
         // Type 1 — condenser mics (11 presets, input_icon_100–110)
         intArrayOf(
-            47, 48, 49, 48, 49, 53, 54, 55, 56, 57, 58,
+            47, 48, 49, 52, 0, 51, 50, 53, 43, 42, 41,
         ),
         // Type 2 — guitar / bass (18 presets, input_icon_200–217)
         intArrayOf(
-            17, 18, 23, 20, 21, 22, 23, 24, 25, 26, 17, 18, 19, 20, 21, 22, 23, 26,
+            0, 0, 0, 10, 4, 5, 9, 11, 0, 0, 6, 7, 8, 13, 14, 12, 15, 16,
         ),
         // Type 3 — line instruments (18 presets, input_icon_300–317)
         intArrayOf(
-            27, 28, 29, 30, 39, 35, 36, 37, 38, 40, 15, 16, 13, 14, 31, 32, 33, 34,
+            22, 0, 0, 0, 23, 20, 21, 0, 39, 0, 0, 38, 37, 36, 35, 29, 0, 0,
         ),
-        // Type 4 — extended guitar page (8 presets, input_icon_400–407)
+        // Type 4 — extended keys / synth page (8 presets, input_icon_400–407)
         intArrayOf(
-            20, 21, 23, 24, 25, 26, 17, 18,
+            0, 0, 31, 32, 33, 0, 34, 30,
         ),
         // Type 5 — playback / sources (12 presets, input_icon_500–511)
         intArrayOf(
-            60, 61, 62, 63, 64, 65, 66, 67, 54, 55, 62, 60,
+            25, 26, 24, 0, 66, 0, 0, 0, 67, 63, 64, 65,
         ),
     )
 
-    /** Hardware-validated overrides (firmware v11749 capture, 2026-06-08). */
+    /** Hardware-validated overrides (firmware v11749; corrected via flow8_icon_mapping.json). */
     private val VALIDATED_OVERRIDES: Map<Pair<Int, Int>, Int> = mapOf(
         (INPUT_TYPE_DYNAMIC_MIC to 4) to MixingStationIcons.HANDHELD_MIC,
         (INPUT_TYPE_DYNAMIC_MIC to 7) to MixingStationIcons.HANDHELD_MIC,
-        (INPUT_TYPE_GUITAR_OR_BASS to 2) to MixingStationIcons.ACOUSTIC_GUITAR,
-        (INPUT_TYPE_LINE_INSTRUMENT to 4) to MixingStationIcons.VIOLIN,
-        (INPUT_TYPE_GUITAR_PAGE to 2) to MixingStationIcons.ACOUSTIC_GUITAR,
-        (INPUT_TYPE_PLAYBACK to 7) to MixingStationIcons.TAPE,
+        (INPUT_TYPE_LINE_INSTRUMENT to 4) to MixingStationIcons.ACOUSTIC_GUITAR,
+        (INPUT_TYPE_GUITAR_PAGE to 2) to 31,
     )
 
     private val PLAIN_PRESET_TO_MS_ICON = mapOf(

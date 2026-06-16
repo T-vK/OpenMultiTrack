@@ -1,7 +1,7 @@
 {
   "assignments": {
     "input_icon_000": {
-      "label": "No icon",
+      "label": "No Icon",
       "ms_id": 1
     },
     "input_icon_001": {
@@ -38,11 +38,11 @@
     },
     "input_icon_009": {
       "flow_slug": "bass-clef",
-      "label": "Bass clef"
+      "label": "Bass Clef"
     },
     "input_icon_010": {
       "flow_slug": "treble-clef",
-      "label": "Treble clef"
+      "label": "Treble Clef"
     },
     "input_icon_011": {
       "label": "Matrix",
@@ -106,11 +106,11 @@
     },
     "input_icon_200": {
       "flow_slug": "kick-left",
-      "label": "Kick left"
+      "label": "Kick Left"
     },
     "input_icon_201": {
       "flow_slug": "kick-right",
-      "label": "Kick right"
+      "label": "Kick Right"
     },
     "input_icon_202": {
       "flow_slug": "crash",
@@ -138,11 +138,11 @@
     },
     "input_icon_208": {
       "flow_slug": "drum-kit-left",
-      "label": "Drum kit left"
+      "label": "Drum Kit Left"
     },
     "input_icon_209": {
       "flow_slug": "drum-kit-right",
-      "label": "Drum kit right"
+      "label": "Drum Kit Right"
     },
     "input_icon_210": {
       "label": "High Tom",
@@ -182,11 +182,11 @@
     },
     "input_icon_301": {
       "flow_slug": "hollow-body-electric-guitar",
-      "label": "Hollow body electric guitar"
+      "label": "Hollow Body Electric Guitar"
     },
     "input_icon_302": {
       "flow_slug": "double-bass-without-bow",
-      "label": "Double bass without bow"
+      "label": "Double Bass Without Bow"
     },
     "input_icon_303": {
       "flow_slug": "mandoline",
@@ -206,7 +206,7 @@
     },
     "input_icon_307": {
       "flow_slug": "v-shape-guitar",
-      "label": "V shape guitar"
+      "label": "V Shape Guitar"
     },
     "input_icon_308": {
       "label": "Violin",
@@ -214,11 +214,11 @@
     },
     "input_icon_309": {
       "flow_slug": "electric-violine-without-bow",
-      "label": "Electric violine without bow"
+      "label": "Electric Violine Without Bow"
     },
     "input_icon_310": {
       "flow_slug": "double-bass-with-bow",
-      "label": "Double bass with bow"
+      "label": "Double Bass With Bow"
     },
     "input_icon_311": {
       "label": "Clarinet",
@@ -250,11 +250,11 @@
     },
     "input_icon_400": {
       "flow_slug": "grand-piano",
-      "label": "Grand piano"
+      "label": "Grand Piano"
     },
     "input_icon_401": {
       "flow_slug": "upright-piano",
-      "label": "Upright piano"
+      "label": "Upright Piano"
     },
     "input_icon_402": {
       "label": "Synthesizer 1",
@@ -306,11 +306,11 @@
     },
     "input_icon_506": {
       "flow_slug": "speaker-ceiling-mount",
-      "label": "Speaker (ceiling mount)"
+      "label": "Speaker (Ceiling-Mounted)"
     },
     "input_icon_507": {
       "flow_slug": "speaker-wall-mount",
-      "label": "Speaker (wall mount)"
+      "label": "Speaker (Wall-Mounted)"
     },
     "input_icon_508": {
       "label": "Speaker on a Pole",
@@ -350,7 +350,7 @@
     },
     "input_icon_605": {
       "flow_slug": "in-ear-monitor",
-      "label": "In ear monitor"
+      "label": "In Ear Monitor"
     },
     "input_icon_606": {
       "flow_slug": "headphones",
@@ -366,7 +366,7 @@
     },
     "input_icon_609": {
       "flow_slug": "mp3-player",
-      "label": "Media player"
+      "label": "Media Player"
     },
     "input_icon_610": {
       "flow_slug": "smartphone",
@@ -374,7 +374,7 @@
     },
     "input_icon_611": {
       "flow_slug": "tablet-landscape",
-      "label": "Tablet (landscape)"
+      "label": "Tablet (Landscape)"
     },
     "input_icon_612": {
       "label": "Reel to Reel",
@@ -390,7 +390,7 @@
     },
     "input_icon_615": {
       "flow_slug": "vinyl-record",
-      "label": "Vinyl record"
+      "label": "Vinyl Record"
     },
     "input_icon_616": {
       "flow_slug": "cd-disc",

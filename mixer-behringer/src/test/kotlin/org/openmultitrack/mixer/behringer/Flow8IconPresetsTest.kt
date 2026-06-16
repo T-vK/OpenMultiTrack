@@ -10,28 +10,28 @@ class Flow8IconPresetsTest {
     }
 
     @Test
-    fun guitarBassPreset2IsAcousticGuitar() {
-        assertThat(Flow8IconPresets.resolve(2, 2)).isEqualTo(MixingStationIcons.ACOUSTIC_GUITAR)
+    fun guitarBassPreset2IsFlowOnlyCrash() {
+        assertThat(Flow8IconPresets.resolve(2, 2)).isNull()
     }
 
     @Test
-    fun guitarBassPreset0IsElectricBass() {
-        assertThat(Flow8IconPresets.resolve(2, 0)).isEqualTo(MixingStationIcons.ELECTRIC_BASS)
+    fun guitarBassPreset0IsFlowOnlyKickLeft() {
+        assertThat(Flow8IconPresets.resolve(2, 0)).isNull()
     }
 
     @Test
-    fun guitarPagePreset2IsAcousticGuitar() {
-        assertThat(Flow8IconPresets.resolve(4, 2)).isEqualTo(MixingStationIcons.ACOUSTIC_GUITAR)
+    fun guitarPagePreset2IsSynthesizer1() {
+        assertThat(Flow8IconPresets.resolve(4, 2)).isEqualTo(31)
     }
 
     @Test
-    fun lineInstrumentPreset4IsViolin() {
-        assertThat(Flow8IconPresets.resolve(3, 4)).isEqualTo(MixingStationIcons.VIOLIN)
+    fun lineInstrumentPreset4IsAcousticGuitar() {
+        assertThat(Flow8IconPresets.resolve(3, 4)).isEqualTo(MixingStationIcons.ACOUSTIC_GUITAR)
     }
 
     @Test
-    fun playbackPreset7IsTape() {
-        assertThat(Flow8IconPresets.resolve(5, 7)).isEqualTo(MixingStationIcons.TAPE)
+    fun playbackPreset7IsFlowOnlyWallSpeaker() {
+        assertThat(Flow8IconPresets.resolve(5, 7)).isNull()
     }
 
     @Test

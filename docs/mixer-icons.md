@@ -113,17 +113,17 @@ last 18 picker slots.
 
 | Label | Input type | Preset | Drawable | MS ID | MS slug | Icon |
 | ----- | ---------- | ------ | -------- | ----- | ------- | ---- |
-| No icon | 0 (Dynamic mic) | 0 | `input_icon_000` | 1 | `blank` | ![No icon](mixer-icons/assets/flow8/input_icon_000.png) |
+| No Icon | 0 (Dynamic mic) | 0 | `input_icon_000` | 1 | `blank` | ![No Icon](mixer-icons/assets/flow8/input_icon_000.png) |
 | DCA | 0 (Dynamic mic) | 1 | `input_icon_001` | — | — | ![DCA](mixer-icons/assets/flow8/input_icon_001.png) |
 | FX | 0 (Dynamic mic) | 2 | `input_icon_002` | 61 | `fx` | ![FX](mixer-icons/assets/flow8/input_icon_002.png) |
 | Groups | 0 (Dynamic mic) | 3 | `input_icon_003` | — | — | ![Groups](mixer-icons/assets/flow8/input_icon_003.png) |
-| Wired Mic *(validated)* | 0 (Dynamic mic) | 4 | `input_icon_004` | — | — | ![Wired Mic](mixer-icons/assets/flow8/input_icon_004.png) |
+| TS Plug *(validated)* | 0 (Dynamic mic) | 4 | `input_icon_004` | — | — | ![TS Plug](mixer-icons/assets/flow8/input_icon_004.png) |
 | XLR Female | 0 (Dynamic mic) | 5 | `input_icon_005` | — | — | ![XLR Female](mixer-icons/assets/flow8/input_icon_005.png) |
 | DIN 5-pin MIDI | 0 (Dynamic mic) | 6 | `input_icon_006` | — | — | ![DIN 5-pin MIDI](mixer-icons/assets/flow8/input_icon_006.png) |
-| Wired Mic *(validated)* | 0 (Dynamic mic) | 7 | `input_icon_007` | — | — | ![Wired Mic](mixer-icons/assets/flow8/input_icon_007.png) |
+| RCA Plug *(validated)* | 0 (Dynamic mic) | 7 | `input_icon_007` | — | — | ![RCA Plug](mixer-icons/assets/flow8/input_icon_007.png) |
 | TS Jack Female | 0 (Dynamic mic) | 8 | `input_icon_008` | — | — | ![TS Jack Female](mixer-icons/assets/flow8/input_icon_008.png) |
-| Bass clef | 0 (Dynamic mic) | 9 | `input_icon_009` | — | — | ![Bass clef](mixer-icons/assets/flow8/input_icon_009.png) |
-| Treble clef | 0 (Dynamic mic) | 10 | `input_icon_010` | — | — | ![Treble clef](mixer-icons/assets/flow8/input_icon_010.png) |
+| Bass Clef | 0 (Dynamic mic) | 9 | `input_icon_009` | — | — | ![Bass Clef](mixer-icons/assets/flow8/input_icon_009.png) |
+| Treble Clef | 0 (Dynamic mic) | 10 | `input_icon_010` | — | — | ![Treble Clef](mixer-icons/assets/flow8/input_icon_010.png) |
 | Matrix | 0 (Dynamic mic) | 11 | `input_icon_011` | 72 | `matrix` | ![Matrix](mixer-icons/assets/flow8/input_icon_011.png) |
 | Routing | 0 (Dynamic mic) | 12 | `input_icon_012` | 73 | `routing` | ![Routing](mixer-icons/assets/flow8/input_icon_012.png) |
 | Fader | 0 (Dynamic mic) | 13 | `input_icon_013` | 70 | `fader` | ![Fader](mixer-icons/assets/flow8/input_icon_013.png) |
@@ -139,16 +139,16 @@ last 18 picker slots.
 | Choir | 1 (Condenser mic) | 8 | `input_icon_108` | 43 | `choir` | ![Choir](mixer-icons/assets/flow8/input_icon_108.png) |
 | Female Vocal | 1 (Condenser mic) | 9 | `input_icon_109` | 42 | `female-vocal` | ![Female Vocal](mixer-icons/assets/flow8/input_icon_109.png) |
 | Male Vocal | 1 (Condenser mic) | 10 | `input_icon_110` | 41 | `male-vocal` | ![Male Vocal](mixer-icons/assets/flow8/input_icon_110.png) |
-| Kick left | 2 (Guitar / bass) | 0 | `input_icon_200` | — | — | ![Kick left](mixer-icons/assets/flow8/input_icon_200.png) |
-| Kick right | 2 (Guitar / bass) | 1 | `input_icon_201` | — | — | ![Kick right](mixer-icons/assets/flow8/input_icon_201.png) |
-| Acoustic Guitar *(validated)* | 2 (Guitar / bass) | 2 | `input_icon_202` | — | — | ![Acoustic Guitar](mixer-icons/assets/flow8/input_icon_202.png) |
+| Kick Left | 2 (Guitar / bass) | 0 | `input_icon_200` | — | — | ![Kick Left](mixer-icons/assets/flow8/input_icon_200.png) |
+| Kick Right | 2 (Guitar / bass) | 1 | `input_icon_201` | — | — | ![Kick Right](mixer-icons/assets/flow8/input_icon_201.png) |
+| Crash *(validated)* | 2 (Guitar / bass) | 2 | `input_icon_202` | — | — | ![Crash](mixer-icons/assets/flow8/input_icon_202.png) |
 | Ride | 2 (Guitar / bass) | 3 | `input_icon_203` | 10 | `crash` | ![Ride](mixer-icons/assets/flow8/input_icon_203.png) |
 | Snare Top | 2 (Guitar / bass) | 4 | `input_icon_204` | 4 | `snare-top` | ![Snare Top](mixer-icons/assets/flow8/input_icon_204.png) |
 | Snare Bottom | 2 (Guitar / bass) | 5 | `input_icon_205` | 5 | `snare-bottom` | ![Snare Bottom](mixer-icons/assets/flow8/input_icon_205.png) |
 | Hi-Hat | 2 (Guitar / bass) | 6 | `input_icon_206` | 9 | `hi-hat` | ![Hi-Hat](mixer-icons/assets/flow8/input_icon_206.png) |
 | Drum Kit | 2 (Guitar / bass) | 7 | `input_icon_207` | 11 | `drum-kit` | ![Drum Kit](mixer-icons/assets/flow8/input_icon_207.png) |
-| Drum kit left | 2 (Guitar / bass) | 8 | `input_icon_208` | — | — | ![Drum kit left](mixer-icons/assets/flow8/input_icon_208.png) |
-| Drum kit right | 2 (Guitar / bass) | 9 | `input_icon_209` | — | — | ![Drum kit right](mixer-icons/assets/flow8/input_icon_209.png) |
+| Drum Kit Left | 2 (Guitar / bass) | 8 | `input_icon_208` | — | — | ![Drum Kit Left](mixer-icons/assets/flow8/input_icon_208.png) |
+| Drum Kit Right | 2 (Guitar / bass) | 9 | `input_icon_209` | — | — | ![Drum Kit Right](mixer-icons/assets/flow8/input_icon_209.png) |
 | High Tom | 2 (Guitar / bass) | 10 | `input_icon_210` | 6 | `tom-high` | ![High Tom](mixer-icons/assets/flow8/input_icon_210.png) |
 | Mid Tom | 2 (Guitar / bass) | 11 | `input_icon_211` | 7 | `tom-medium` | ![Mid Tom](mixer-icons/assets/flow8/input_icon_211.png) |
 | Floor Tom | 2 (Guitar / bass) | 12 | `input_icon_212` | 8 | `floor-tom` | ![Floor Tom](mixer-icons/assets/flow8/input_icon_212.png) |
@@ -158,16 +158,16 @@ last 18 picker slots.
 | Tambourine | 2 (Guitar / bass) | 16 | `input_icon_216` | 15 | `tambourine` | ![Tambourine](mixer-icons/assets/flow8/input_icon_216.png) |
 | Vibraphone | 2 (Guitar / bass) | 17 | `input_icon_217` | 16 | `vibraphone` | ![Vibraphone](mixer-icons/assets/flow8/input_icon_217.png) |
 | Washburn Guitar | 3 (Line instrument) | 0 | `input_icon_300` | 22 | `washburn` | ![Washburn Guitar](mixer-icons/assets/flow8/input_icon_300.png) |
-| Hollow body electric guitar | 3 (Line instrument) | 1 | `input_icon_301` | — | — | ![Hollow body electric guitar](mixer-icons/assets/flow8/input_icon_301.png) |
-| Double bass without bow | 3 (Line instrument) | 2 | `input_icon_302` | — | — | ![Double bass without bow](mixer-icons/assets/flow8/input_icon_302.png) |
+| Hollow Body Electric Guitar | 3 (Line instrument) | 1 | `input_icon_301` | — | — | ![Hollow Body Electric Guitar](mixer-icons/assets/flow8/input_icon_301.png) |
+| Double Bass Without Bow | 3 (Line instrument) | 2 | `input_icon_302` | — | — | ![Double Bass Without Bow](mixer-icons/assets/flow8/input_icon_302.png) |
 | Mandoline | 3 (Line instrument) | 3 | `input_icon_303` | — | — | ![Mandoline](mixer-icons/assets/flow8/input_icon_303.png) |
-| Violine *(validated)* | 3 (Line instrument) | 4 | `input_icon_304` | 23 | `acoustic-guitar` | ![Violine](mixer-icons/assets/flow8/input_icon_304.png) |
+| Acoustic Guitar *(validated)* | 3 (Line instrument) | 4 | `input_icon_304` | 23 | `acoustic-guitar` | ![Acoustic Guitar](mixer-icons/assets/flow8/input_icon_304.png) |
 | Les Paul Guitar | 3 (Line instrument) | 5 | `input_icon_305` | 20 | `les-paul` | ![Les Paul Guitar](mixer-icons/assets/flow8/input_icon_305.png) |
 | Ibanez Guitar | 3 (Line instrument) | 6 | `input_icon_306` | 21 | `ibanez` | ![Ibanez Guitar](mixer-icons/assets/flow8/input_icon_306.png) |
-| V shape guitar | 3 (Line instrument) | 7 | `input_icon_307` | — | — | ![V shape guitar](mixer-icons/assets/flow8/input_icon_307.png) |
+| V Shape Guitar | 3 (Line instrument) | 7 | `input_icon_307` | — | — | ![V Shape Guitar](mixer-icons/assets/flow8/input_icon_307.png) |
 | Violin | 3 (Line instrument) | 8 | `input_icon_308` | 39 | `violin` | ![Violin](mixer-icons/assets/flow8/input_icon_308.png) |
-| Electric violine without bow | 3 (Line instrument) | 9 | `input_icon_309` | — | — | ![Electric violine without bow](mixer-icons/assets/flow8/input_icon_309.png) |
-| Double bass with bow | 3 (Line instrument) | 10 | `input_icon_310` | — | — | ![Double bass with bow](mixer-icons/assets/flow8/input_icon_310.png) |
+| Electric Violine Without Bow | 3 (Line instrument) | 9 | `input_icon_309` | — | — | ![Electric Violine Without Bow](mixer-icons/assets/flow8/input_icon_309.png) |
+| Double Bass With Bow | 3 (Line instrument) | 10 | `input_icon_310` | — | — | ![Double Bass With Bow](mixer-icons/assets/flow8/input_icon_310.png) |
 | Clarinet | 3 (Line instrument) | 11 | `input_icon_311` | 38 | `clarinet` | ![Clarinet](mixer-icons/assets/flow8/input_icon_311.png) |
 | Saxophone | 3 (Line instrument) | 12 | `input_icon_312` | 37 | `saxophone` | ![Saxophone](mixer-icons/assets/flow8/input_icon_312.png) |
 | Trombone | 3 (Line instrument) | 13 | `input_icon_313` | 36 | `trombone` | ![Trombone](mixer-icons/assets/flow8/input_icon_313.png) |
@@ -175,9 +175,9 @@ last 18 picker slots.
 | Harpsichord | 3 (Line instrument) | 15 | `input_icon_315` | 29 | `harpsichord` | ![Harpsichord](mixer-icons/assets/flow8/input_icon_315.png) |
 | Harmonica | 3 (Line instrument) | 16 | `input_icon_316` | — | — | ![Harmonica](mixer-icons/assets/flow8/input_icon_316.png) |
 | Accordeon | 3 (Line instrument) | 17 | `input_icon_317` | — | — | ![Accordeon](mixer-icons/assets/flow8/input_icon_317.png) |
-| Grand piano | 4 (Guitar page (extended)) | 0 | `input_icon_400` | — | — | ![Grand piano](mixer-icons/assets/flow8/input_icon_400.png) |
-| Upright piano | 4 (Guitar page (extended)) | 1 | `input_icon_401` | — | — | ![Upright piano](mixer-icons/assets/flow8/input_icon_401.png) |
-| Acoustic Guitar *(validated)* | 4 (Guitar page (extended)) | 2 | `input_icon_402` | 31 | `synthesizer-1` | ![Acoustic Guitar](mixer-icons/assets/flow8/input_icon_402.png) |
+| Grand Piano | 4 (Guitar page (extended)) | 0 | `input_icon_400` | — | — | ![Grand Piano](mixer-icons/assets/flow8/input_icon_400.png) |
+| Upright Piano | 4 (Guitar page (extended)) | 1 | `input_icon_401` | — | — | ![Upright Piano](mixer-icons/assets/flow8/input_icon_401.png) |
+| Synthesizer 1 *(validated)* | 4 (Guitar page (extended)) | 2 | `input_icon_402` | 31 | `synthesizer-1` | ![Synthesizer 1](mixer-icons/assets/flow8/input_icon_402.png) |
 | Synthesizer 2 | 4 (Guitar page (extended)) | 3 | `input_icon_403` | 32 | `synthesizer-2` | ![Synthesizer 2](mixer-icons/assets/flow8/input_icon_403.png) |
 | Synthesizer 3 | 4 (Guitar page (extended)) | 4 | `input_icon_404` | 33 | `synthesizer-3` | ![Synthesizer 3](mixer-icons/assets/flow8/input_icon_404.png) |
 | Synthesizer 4 | 4 (Guitar page (extended)) | 5 | `input_icon_405` | — | — | ![Synthesizer 4](mixer-icons/assets/flow8/input_icon_405.png) |
@@ -189,8 +189,8 @@ last 18 picker slots.
 | Speakers | 5 (Playback / source) | 3 | `input_icon_503` | — | — | ![Speakers](mixer-icons/assets/flow8/input_icon_503.png) |
 | Speaker Array | 5 (Playback / source) | 4 | `input_icon_504` | 66 | `speaker-array` | ![Speaker Array](mixer-icons/assets/flow8/input_icon_504.png) |
 | Speaker | 5 (Playback / source) | 5 | `input_icon_505` | — | — | ![Speaker](mixer-icons/assets/flow8/input_icon_505.png) |
-| Speaker (ceiling mount) | 5 (Playback / source) | 6 | `input_icon_506` | — | — | ![Speaker (ceiling mount)](mixer-icons/assets/flow8/input_icon_506.png) |
-| Record player *(validated)* | 5 (Playback / source) | 7 | `input_icon_507` | — | — | ![Record player](mixer-icons/assets/flow8/input_icon_507.png) |
+| Speaker (Ceiling-Mounted) | 5 (Playback / source) | 6 | `input_icon_506` | — | — | ![Speaker (Ceiling-Mounted)](mixer-icons/assets/flow8/input_icon_506.png) |
+| Speaker (Wall-Mounted) *(validated)* | 5 (Playback / source) | 7 | `input_icon_507` | — | — | ![Speaker (Wall-Mounted)](mixer-icons/assets/flow8/input_icon_507.png) |
 | Speaker on a Pole | 5 (Playback / source) | 8 | `input_icon_508` | 67 | `speaker-on-pole` | ![Speaker on a Pole](mixer-icons/assets/flow8/input_icon_508.png) |
 | Monitor Wedge | 5 (Playback / source) | 9 | `input_icon_509` | 63 | `wedge` | ![Monitor Wedge](mixer-icons/assets/flow8/input_icon_509.png) |
 | Left Speaker | 5 (Playback / source) | 10 | `input_icon_510` | 64 | `speaker-right` | ![Left Speaker](mixer-icons/assets/flow8/input_icon_510.png) |
@@ -200,17 +200,17 @@ last 18 picker slots.
 | TRS Plug Right | 6 (Music / routing) | 2 | `input_icon_602` | 57 | `trs-right` | ![TRS Plug Right](mixer-icons/assets/flow8/input_icon_602.png) |
 | TS Plug Left | 6 (Music / routing) | 3 | `input_icon_603` | — | — | ![TS Plug Left](mixer-icons/assets/flow8/input_icon_603.png) |
 | TS Plug Right | 6 (Music / routing) | 4 | `input_icon_604` | — | — | ![TS Plug Right](mixer-icons/assets/flow8/input_icon_604.png) |
-| In ear monitor | 6 (Music / routing) | 5 | `input_icon_605` | — | — | ![In ear monitor](mixer-icons/assets/flow8/input_icon_605.png) |
+| In Ear Monitor | 6 (Music / routing) | 5 | `input_icon_605` | — | — | ![In Ear Monitor](mixer-icons/assets/flow8/input_icon_605.png) |
 | Headphones | 6 (Music / routing) | 6 | `input_icon_606` | — | — | ![Headphones](mixer-icons/assets/flow8/input_icon_606.png) |
 | Amp Rack | 6 (Music / routing) | 7 | `input_icon_607` | 68 | `amp-rack` | ![Amp Rack](mixer-icons/assets/flow8/input_icon_607.png) |
 | Computer | 6 (Music / routing) | 8 | `input_icon_608` | 62 | `computer` | ![Computer](mixer-icons/assets/flow8/input_icon_608.png) |
-| Media player | 6 (Music / routing) | 9 | `input_icon_609` | — | — | ![Media player](mixer-icons/assets/flow8/input_icon_609.png) |
+| Media Player | 6 (Music / routing) | 9 | `input_icon_609` | — | — | ![Media Player](mixer-icons/assets/flow8/input_icon_609.png) |
 | Smartphone | 6 (Music / routing) | 10 | `input_icon_610` | — | — | ![Smartphone](mixer-icons/assets/flow8/input_icon_610.png) |
-| Tablet (landscape) | 6 (Music / routing) | 11 | `input_icon_611` | — | — | ![Tablet (landscape)](mixer-icons/assets/flow8/input_icon_611.png) |
+| Tablet (Landscape) | 6 (Music / routing) | 11 | `input_icon_611` | — | — | ![Tablet (Landscape)](mixer-icons/assets/flow8/input_icon_611.png) |
 | Reel to Reel | 6 (Music / routing) | 12 | `input_icon_612` | 60 | `tape` | ![Reel to Reel](mixer-icons/assets/flow8/input_icon_612.png) |
 | Talk A | 6 (Music / routing) | 13 | `input_icon_613` | 45 | `talk-a` | ![Talk A](mixer-icons/assets/flow8/input_icon_613.png) |
 | Talk B | 6 (Music / routing) | 14 | `input_icon_614` | 46 | `talk-b` | ![Talk B](mixer-icons/assets/flow8/input_icon_614.png) |
-| Vinyl record | 6 (Music / routing) | 15 | `input_icon_615` | — | — | ![Vinyl record](mixer-icons/assets/flow8/input_icon_615.png) |
+| Vinyl Record | 6 (Music / routing) | 15 | `input_icon_615` | — | — | ![Vinyl Record](mixer-icons/assets/flow8/input_icon_615.png) |
 | CD | 6 (Music / routing) | 16 | `input_icon_616` | — | — | ![CD](mixer-icons/assets/flow8/input_icon_616.png) |
 | Cassette | 6 (Music / routing) | 17 | `input_icon_617` | — | — | ![Cassette](mixer-icons/assets/flow8/input_icon_617.png) |
 
@@ -223,10 +223,10 @@ be resolved via `getInputChannelPresetIconIdAtIndex` in the native library.
 | ---------- | ------ | ------------- | ------------- | ----- | -------- |
 | 0 (Dynamic mic) | 4 | `input_icon_004` | Wired Mic | 50 | `handheld-mic` |
 | 0 (Dynamic mic) | 7 | `input_icon_007` | Wired Mic | 50 | `handheld-mic` |
-| 2 (Guitar / bass) | 2 | `input_icon_202` | Acoustic Guitar | 23 | `acoustic-guitar` |
-| 3 (Line instrument) | 4 | `input_icon_304` | Violine | 39 | `violin` |
-| 4 (Guitar page (extended)) | 2 | `input_icon_402` | Acoustic Guitar | 23 | `acoustic-guitar` |
-| 5 (Playback / source) | 7 | `input_icon_507` | Record player | 60 | `tape` |
+| 2 (Guitar / bass) | 2 | `input_icon_202` | Crash | — | — |
+| 3 (Line instrument) | 4 | `input_icon_304` | Acoustic Guitar | 23 | `acoustic-guitar` |
+| 4 (Guitar page (extended)) | 2 | `input_icon_402` | Synthesizer 1 | 31 | `synthesizer-1` |
+| 5 (Playback / source) | 7 | `input_icon_507` | Speaker (Wall-Mounted) | — | — |
 
 Drawable key formula: `type × 100 + preset`, zero-padded to three digits
 (`input_icon_{key:03d}`).
@@ -241,7 +241,7 @@ Flow Mix APK drawable named in the FLOW drawable column.
 
 | Label (MS) | MS slug | MS ID | Icon (MS) | FLOW drawable(s) | Icon (FLOW) |
 | ---------- | ------- | ----- | --------- | ---------------- | ----------- |
-| No icon | `blank` | 1 | ![No icon](mixer-icons/assets/mixing-station/1.png) | `input_icon_000` | ![No icon](mixer-icons/assets/flow8/input_icon_000.png) |
+| No icon | `blank` | 1 | ![No icon](mixer-icons/assets/mixing-station/1.png) | `input_icon_000` | ![No Icon](mixer-icons/assets/flow8/input_icon_000.png) |
 | Kick Back | `kick-back` | 2 | ![Kick Back](mixer-icons/assets/mixing-station/2.png) | — | — |
 | Kick Front | `kick-front` | 3 | ![Kick Front](mixer-icons/assets/mixing-station/3.png) | — | — |
 | Snare Top | `snare-top` | 4 | ![Snare Top](mixer-icons/assets/mixing-station/4.png) | `input_icon_204` | ![Snare Top](mixer-icons/assets/flow8/input_icon_204.png) |
@@ -263,7 +263,7 @@ Flow Mix APK drawable named in the FLOW drawable column.
 | Les Paul Guitar | `les-paul` | 20 | ![Les Paul Guitar](mixer-icons/assets/mixing-station/20.png) | `input_icon_305` | ![Les Paul Guitar](mixer-icons/assets/flow8/input_icon_305.png) |
 | Ibanez Guitar | `ibanez` | 21 | ![Ibanez Guitar](mixer-icons/assets/mixing-station/21.png) | `input_icon_306` | ![Ibanez Guitar](mixer-icons/assets/flow8/input_icon_306.png) |
 | Washburn Guitar | `washburn` | 22 | ![Washburn Guitar](mixer-icons/assets/mixing-station/22.png) | `input_icon_300` | ![Washburn Guitar](mixer-icons/assets/flow8/input_icon_300.png) |
-| Acoustic Guitar | `acoustic-guitar` | 23 | ![Acoustic Guitar](mixer-icons/assets/mixing-station/23.png) | `input_icon_304` | ![Violine](mixer-icons/assets/flow8/input_icon_304.png) |
+| Acoustic Guitar | `acoustic-guitar` | 23 | ![Acoustic Guitar](mixer-icons/assets/mixing-station/23.png) | `input_icon_304` | ![Acoustic Guitar](mixer-icons/assets/flow8/input_icon_304.png) |
 | Bass Amp | `bass-amp` | 24 | ![Bass Amp](mixer-icons/assets/mixing-station/24.png) | `input_icon_502` | ![Bass Amp](mixer-icons/assets/flow8/input_icon_502.png) |
 | Guitar Amp | `guitar-amp` | 25 | ![Guitar Amp](mixer-icons/assets/mixing-station/25.png) | `input_icon_500` | ![Guitar Amp](mixer-icons/assets/flow8/input_icon_500.png) |
 | Amp Cabinet | `amp-cabinet` | 26 | ![Amp Cabinet](mixer-icons/assets/mixing-station/26.png) | `input_icon_501` | ![Amp Cabinet](mixer-icons/assets/flow8/input_icon_501.png) |
@@ -271,7 +271,7 @@ Flow Mix APK drawable named in the FLOW drawable column.
 | Organ | `organ` | 28 | ![Organ](mixer-icons/assets/mixing-station/28.png) | — | — |
 | Harpsichord | `harpsichord` | 29 | ![Harpsichord](mixer-icons/assets/mixing-station/29.png) | `input_icon_315` | ![Harpsichord](mixer-icons/assets/flow8/input_icon_315.png) |
 | Keyboard | `keyboard` | 30 | ![Keyboard](mixer-icons/assets/mixing-station/30.png) | `input_icon_407` | ![Keyboard](mixer-icons/assets/flow8/input_icon_407.png) |
-| Synthesizer 1 | `synthesizer-1` | 31 | ![Synthesizer 1](mixer-icons/assets/mixing-station/31.png) | `input_icon_402` | ![Acoustic Guitar](mixer-icons/assets/flow8/input_icon_402.png) |
+| Synthesizer 1 | `synthesizer-1` | 31 | ![Synthesizer 1](mixer-icons/assets/mixing-station/31.png) | `input_icon_402` | ![Synthesizer 1](mixer-icons/assets/flow8/input_icon_402.png) |
 | Synthesizer 2 | `synthesizer-2` | 32 | ![Synthesizer 2](mixer-icons/assets/mixing-station/32.png) | `input_icon_403` | ![Synthesizer 2](mixer-icons/assets/flow8/input_icon_403.png) |
 | Synthesizer 3 | `synthesizer-3` | 33 | ![Synthesizer 3](mixer-icons/assets/mixing-station/33.png) | `input_icon_404` | ![Synthesizer 3](mixer-icons/assets/flow8/input_icon_404.png) |
 | Keytar | `keytar` | 34 | ![Keytar](mixer-icons/assets/mixing-station/34.png) | `input_icon_406` | ![Keytar](mixer-icons/assets/flow8/input_icon_406.png) |

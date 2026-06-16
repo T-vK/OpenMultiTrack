@@ -136,16 +136,17 @@ def appendix_c_validated() -> list[str]:
         "| Input type | Preset | Flow drawable | Flow UI label | MS ID | MS label |",
         "| ---------- | ------ | ------------- | ------------- | ----- | -------- |",
     ]
-    for key in sorted(VALIDATED_MS_IDS.keys()):
+    for key in sorted(FLOW_UI_LABELS.keys()):
         input_type, preset = key
-        ms_id = VALIDATED_MS_IDS[key]
-        flow_label = FLOW_UI_LABELS.get(key, "")
+        flow_label = FLOW_UI_LABELS[key]
         drawable = flow_drawable(input_type, preset)
-        ms_slug = ICON_LABELS[ms_id]
+        ms_id = VALIDATED_MS_IDS.get(key)
+        ms_slug = f"`{ICON_LABELS[ms_id]}`" if ms_id is not None else "—"
+        ms_id_cell = str(ms_id) if ms_id is not None else "—"
         type_name = INPUT_TYPE_NAMES.get(input_type, str(input_type))
         lines.append(
             f"| {input_type} ({type_name}) | {preset} | `{drawable}` | {flow_label} "
-            f"| {ms_id} | `{ms_slug}` |"
+            f"| {ms_id_cell} | {ms_slug} |"
         )
     lines.extend(
         [

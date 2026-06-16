@@ -36,23 +36,21 @@ INPUT_TYPE_NAMES: dict[int, str] = {
     6: "Music / routing",
 }
 
-# Hardware-validated Flow UI strings (firmware v11749).
+# Hardware-validated Flow UI strings (firmware v11749, corrected via icon mapper).
 FLOW_UI_LABELS: dict[tuple[int, int], str] = {
     (0, 4): "Wired Mic",
     (0, 7): "Wired Mic",
-    (2, 2): "Acoustic Guitar",
-    (3, 4): "Violine",
-    (4, 2): "Acoustic Guitar",
-    (5, 7): "Record player",
+    (2, 2): "Crash",
+    (3, 4): "Acoustic Guitar",
+    (4, 2): "Synthesizer 1",
+    (5, 7): "Speaker (Wall-Mounted)",
 }
 
 VALIDATED_MS_IDS: dict[tuple[int, int], int] = {
     (0, 4): 50,
     (0, 7): 50,
-    (2, 2): 23,
-    (3, 4): 39,
-    (4, 2): 23,
-    (5, 7): 60,
+    (3, 4): 23,
+    (4, 2): 31,
 }
 
 
@@ -115,13 +113,13 @@ def resolve_ms_id(input_type: int, preset: int) -> int | None:
 
 
 def drawable_label(drawable: str, input_type: int | None = None, preset: int | None = None) -> str:
+    manual = load_manual_labels()
+    if drawable in manual:
+        return manual[drawable]
     if input_type is not None and preset is not None:
         flow_ui = FLOW_UI_LABELS.get((input_type, preset))
         if flow_ui:
             return flow_ui
-    manual = load_manual_labels()
-    if drawable in manual:
-        return manual[drawable]
     from mixing_station_display_labels import display_label
 
     ms_id = None
