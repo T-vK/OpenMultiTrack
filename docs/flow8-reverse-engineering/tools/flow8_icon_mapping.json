@@ -4,29 +4,57 @@
       "label": "No icon",
       "ms_id": 1
     },
+    "input_icon_001": {
+      "flow_slug": "dca",
+      "label": "DCA"
+    },
     "input_icon_002": {
       "label": "FX",
       "ms_id": 61
     },
     "input_icon_003": {
-      "label": "Routing",
-      "ms_id": 73
+      "flow_slug": "groups",
+      "label": "Groups"
+    },
+    "input_icon_004": {
+      "flow_slug": "ts-plug",
+      "label": "TS Plug"
     },
     "input_icon_005": {
-      "label": "XLR Jack",
-      "ms_id": 54
+      "flow_slug": "xlr-female",
+      "label": "XLR Female"
+    },
+    "input_icon_006": {
+      "flow_slug": "din-midi",
+      "label": "DIN 5-pin MIDI"
     },
     "input_icon_007": {
-      "label": "RCA Plug Right",
-      "ms_id": 59
+      "flow_slug": "rca-plug",
+      "label": "RCA Plug"
+    },
+    "input_icon_008": {
+      "flow_slug": "ts-jack-female",
+      "label": "TS Jack Female"
+    },
+    "input_icon_009": {
+      "flow_slug": "bass-clef",
+      "label": "Bass clef"
+    },
+    "input_icon_010": {
+      "flow_slug": "treble-clef",
+      "label": "Treble clef"
     },
     "input_icon_011": {
       "label": "Matrix",
       "ms_id": 72
     },
     "input_icon_012": {
-      "label": "MixBus",
-      "ms_id": 71
+      "label": "Routing",
+      "ms_id": 73
+    },
+    "input_icon_013": {
+      "label": "Fader",
+      "ms_id": 70
     },
     "input_icon_014": {
       "label": "Smiley",
@@ -47,6 +75,10 @@
     "input_icon_103": {
       "label": "Podium Mic",
       "ms_id": 52
+    },
+    "input_icon_104": {
+      "flow_slug": "turntable",
+      "label": "Turntable"
     },
     "input_icon_105": {
       "label": "Wireless Mic",
@@ -73,24 +105,44 @@
       "ms_id": 41
     },
     "input_icon_200": {
-      "label": "Kick Back",
-      "ms_id": 2
+      "flow_slug": "kick-left",
+      "label": "Kick left"
     },
     "input_icon_201": {
-      "label": "Kick Front",
-      "ms_id": 3
+      "flow_slug": "kick-right",
+      "label": "Kick right"
     },
     "input_icon_202": {
-      "label": "Hi-Hat",
-      "ms_id": 9
+      "flow_slug": "crash",
+      "label": "Crash"
     },
     "input_icon_203": {
       "label": "Ride",
       "ms_id": 10
     },
+    "input_icon_204": {
+      "label": "Snare Top",
+      "ms_id": 4
+    },
+    "input_icon_205": {
+      "label": "Snare Bottom",
+      "ms_id": 5
+    },
+    "input_icon_206": {
+      "label": "Hi-Hat",
+      "ms_id": 9
+    },
     "input_icon_207": {
       "label": "Drum Kit",
       "ms_id": 11
+    },
+    "input_icon_208": {
+      "flow_slug": "drum-kit-left",
+      "label": "Drum kit left"
+    },
+    "input_icon_209": {
+      "flow_slug": "drum-kit-right",
+      "label": "Drum kit right"
     },
     "input_icon_210": {
       "label": "High Tom",
@@ -101,8 +153,8 @@
       "ms_id": 7
     },
     "input_icon_212": {
-      "label": "Snare Bottom",
-      "ms_id": 5
+      "label": "Floor Tom",
+      "ms_id": 8
     },
     "input_icon_213": {
       "label": "Bongos",
@@ -128,9 +180,17 @@
       "label": "Washburn Guitar",
       "ms_id": 22
     },
+    "input_icon_301": {
+      "flow_slug": "hollow-body-electric-guitar",
+      "label": "Hollow body electric guitar"
+    },
     "input_icon_302": {
-      "label": "Cello",
-      "ms_id": 40
+      "flow_slug": "double-bass-without-bow",
+      "label": "Double bass without bow"
+    },
+    "input_icon_303": {
+      "flow_slug": "mandoline",
+      "label": "Mandoline"
     },
     "input_icon_304": {
       "label": "Acoustic Guitar",
@@ -144,13 +204,21 @@
       "label": "Ibanez Guitar",
       "ms_id": 21
     },
-    "input_icon_308": {
-      "label": "Contrabass",
-      "ms_id": 19
+    "input_icon_307": {
+      "flow_slug": "v-shape-guitar",
+      "label": "V shape guitar"
     },
-    "input_icon_310": {
+    "input_icon_308": {
       "label": "Violin",
       "ms_id": 39
+    },
+    "input_icon_309": {
+      "flow_slug": "electric-violine-without-bow",
+      "label": "Electric violine without bow"
+    },
+    "input_icon_310": {
+      "flow_slug": "double-bass-with-bow",
+      "label": "Double bass with bow"
     },
     "input_icon_311": {
       "label": "Clarinet",
@@ -172,9 +240,21 @@
       "label": "Harpsichord",
       "ms_id": 29
     },
+    "input_icon_316": {
+      "flow_slug": "harmonica",
+      "label": "Harmonica"
+    },
+    "input_icon_317": {
+      "flow_slug": "accordeon",
+      "label": "Accordeon"
+    },
     "input_icon_400": {
-      "label": "Piano",
-      "ms_id": 27
+      "flow_slug": "grand-piano",
+      "label": "Grand piano"
+    },
+    "input_icon_401": {
+      "flow_slug": "upright-piano",
+      "label": "Upright piano"
     },
     "input_icon_402": {
       "label": "Synthesizer 1",
@@ -189,28 +269,48 @@
       "ms_id": 33
     },
     "input_icon_405": {
-      "label": "Keyboard",
-      "ms_id": 30
+      "flow_slug": "synthesizer-4",
+      "label": "Synthesizer 4"
     },
     "input_icon_406": {
       "label": "Keytar",
       "ms_id": 34
     },
+    "input_icon_407": {
+      "label": "Keyboard",
+      "ms_id": 30
+    },
     "input_icon_500": {
-      "label": "Bass Amp",
-      "ms_id": 24
+      "label": "Guitar Amp",
+      "ms_id": 25
     },
     "input_icon_501": {
       "label": "Amp Cabinet",
       "ms_id": 26
     },
     "input_icon_502": {
-      "label": "Guitar Amp",
-      "ms_id": 25
+      "label": "Bass Amp",
+      "ms_id": 24
+    },
+    "input_icon_503": {
+      "flow_slug": "speakers",
+      "label": "Speakers"
     },
     "input_icon_504": {
       "label": "Speaker Array",
       "ms_id": 66
+    },
+    "input_icon_505": {
+      "flow_slug": "speaker",
+      "label": "Speaker"
+    },
+    "input_icon_506": {
+      "flow_slug": "speaker-ceiling-mount",
+      "label": "Speaker (ceiling mount)"
+    },
+    "input_icon_507": {
+      "flow_slug": "speaker-wall-mount",
+      "label": "Speaker (wall mount)"
     },
     "input_icon_508": {
       "label": "Speaker on a Pole",
@@ -227,52 +327,81 @@
     "input_icon_511": {
       "label": "Right Speaker",
       "ms_id": 65
+    },
+    "input_icon_600": {
+      "label": "Hand Sign",
+      "ms_id": 44
+    },
+    "input_icon_601": {
+      "label": "TRS Plug Left",
+      "ms_id": 56
+    },
+    "input_icon_602": {
+      "label": "TRS Plug Right",
+      "ms_id": 57
+    },
+    "input_icon_603": {
+      "flow_slug": "ts-plug-left",
+      "label": "TS Plug Left"
+    },
+    "input_icon_604": {
+      "flow_slug": "ts-plug-right",
+      "label": "TS Plug Right"
+    },
+    "input_icon_605": {
+      "flow_slug": "in-ear-monitor",
+      "label": "In ear monitor"
+    },
+    "input_icon_606": {
+      "flow_slug": "headphones",
+      "label": "Headphones"
+    },
+    "input_icon_607": {
+      "label": "Amp Rack",
+      "ms_id": 68
+    },
+    "input_icon_608": {
+      "label": "Computer",
+      "ms_id": 62
+    },
+    "input_icon_609": {
+      "flow_slug": "mp3-player",
+      "label": "Media player"
+    },
+    "input_icon_610": {
+      "flow_slug": "smartphone",
+      "label": "Smartphone"
+    },
+    "input_icon_611": {
+      "flow_slug": "tablet-landscape",
+      "label": "Tablet (landscape)"
+    },
+    "input_icon_612": {
+      "label": "Reel to Reel",
+      "ms_id": 60
+    },
+    "input_icon_613": {
+      "label": "Talk A",
+      "ms_id": 45
+    },
+    "input_icon_614": {
+      "label": "Talk B",
+      "ms_id": 46
+    },
+    "input_icon_615": {
+      "flow_slug": "vinyl-record",
+      "label": "Vinyl record"
+    },
+    "input_icon_616": {
+      "flow_slug": "cd-disc",
+      "label": "CD"
+    },
+    "input_icon_617": {
+      "flow_slug": "cassette",
+      "label": "Cassette"
     }
   },
-  "queue": [
-    "input_icon_001",
-    "input_icon_004",
-    "input_icon_006",
-    "input_icon_008",
-    "input_icon_009",
-    "input_icon_010",
-    "input_icon_013",
-    "input_icon_104",
-    "input_icon_204",
-    "input_icon_205",
-    "input_icon_206",
-    "input_icon_208",
-    "input_icon_209",
-    "input_icon_301",
-    "input_icon_303",
-    "input_icon_307",
-    "input_icon_309",
-    "input_icon_316",
-    "input_icon_317",
-    "input_icon_401",
-    "input_icon_407",
-    "input_icon_503",
-    "input_icon_505",
-    "input_icon_506",
-    "input_icon_507",
-    "input_icon_600",
-    "input_icon_601",
-    "input_icon_602",
-    "input_icon_603",
-    "input_icon_604",
-    "input_icon_605",
-    "input_icon_606",
-    "input_icon_607",
-    "input_icon_608",
-    "input_icon_609",
-    "input_icon_610",
-    "input_icon_611",
-    "input_icon_612",
-    "input_icon_613",
-    "input_icon_614",
-    "input_icon_615",
-    "input_icon_616",
-    "input_icon_617"
-  ],
+  "focus": "input_icon_601",
+  "queue": [],
   "version": 2
 }
