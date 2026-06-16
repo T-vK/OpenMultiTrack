@@ -3,13 +3,13 @@
 
 Three blocks, in order:
 
-1. **74** Mixing Station channel scribble icons (canonical ids 1–74)
+1. **74** Mixing Station channel scribble icons (`mixing-station/{id}.png`, X32 BMP art)
 2. **100** FLOW 8 picker icons
 3. **28** MS mixer branding images (one per supported product line)
 
 Extract assets first::
 
-    python3 extract_ms_wing_icons.py
+    python3 extract_icon_assets.py
     python3 extract_ms_brand_icons.py
 """
 
@@ -27,7 +27,7 @@ from PIL import Image, ImageDraw, ImageFont
 TOOLS_DIR = Path(__file__).resolve().parent
 DOCS_DIR = TOOLS_DIR.parent.parent
 ASSETS = DOCS_DIR / "mixer-icons" / "assets"
-WING_ASSETS = ASSETS / "mixing-station-wing"
+MS_ASSETS = ASSETS / "mixing-station"
 BRAND_ASSETS = ASSETS / "mixing-station-brands"
 GENERATED = DOCS_DIR / "mixer-icons" / "generated"
 DEFAULT_OUT = GENERATED / "icon_sprite_sheet.png"
@@ -88,7 +88,7 @@ def ordered_entries(
 ) -> list[SpriteEntry]:
     entries: list[SpriteEntry] = []
     if include_ms:
-        for slot in ms_channel_icon_slots(WING_ASSETS):
+        for slot in ms_channel_icon_slots(MS_ASSETS):
             entries.append(slot_to_entry(slot))
     if include_flow:
         from flow8_icon_catalog import catalog_rows as flow_rows
@@ -230,8 +230,8 @@ def main() -> None:
     include_brands = include_ms and not args.no_brands
     entries = ordered_entries(include_ms, include_flow, include_brands)
 
-    if include_ms and not WING_ASSETS.is_dir():
-        print("WING icons missing. Run: python3 extract_ms_wing_icons.py", file=sys.stderr)
+    if include_ms and not MS_ASSETS.is_dir():
+        print("MS icons missing. Run: python3 extract_icon_assets.py", file=sys.stderr)
     if include_brands and not BRAND_ASSETS.is_dir():
         print("Brand icons missing. Run: python3 extract_ms_brand_icons.py", file=sys.stderr)
 

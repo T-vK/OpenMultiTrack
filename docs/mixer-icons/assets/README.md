@@ -2,8 +2,8 @@
 
 | Directory | Source | Files |
 | --------- | ------ | ----- |
-| `mixing-station/` | X32 BMP originals ([behringer-icons](https://github.com/mamarguerat/behringer-icons)) → PNG `{id}.png` | ids 1–74 (desk reference) |
-| `mixing-station-wing/` | Mixing Station APK atlas `wing_ch_TTNN` | 130 channel icons (used for MS sheet ids 2–74) |
+| `mixing-station/` | X32 BMP originals ([behringer-icons](https://github.com/mamarguerat/behringer-icons)) → PNG `{id}.png` | ids 1–74 — **MS channel icons on sprite sheet** |
+| `mixing-station-wing/` | Mixing Station APK atlas `wing_ch_TTNN` | 130 WING picker icons (not used on sprite sheet) |
 | `mixing-station-brands/` | Mixing Station APK atlas (`mt_x32`, `ah_sq`, `b_wing`, …) | 28 mixer branding images; `bfl` uses manual `Blackmagic Fairlight Live.png` |
 | `flow8/` | `Flowmix_v1.9.apk` drawables `input_icon_NNN` (xxhdpi → 64×64 PNG) | 100 picker slots |
 
@@ -23,7 +23,7 @@ Sprite sheet (gitignored under `generated/`):
 
 | File | Contents |
 | ---- | -------- |
-| `icon_sprite_sheet.png` | 1:1 grid — **202 cells**: MS channel icons (74), FLOW 8 picker (100), one MS mixer brand per supported line (28) |
+| `icon_sprite_sheet.png` | 1:1 grid — **202 cells**: MS channel icons from `mixing-station/` (74), FLOW 8 picker (100), one MS mixer brand per supported line (28) |
 
 `icon_sprite_sheet_manifest.json` lists cell coordinates for vision / img2img tooling.
 

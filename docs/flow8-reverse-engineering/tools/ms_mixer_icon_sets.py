@@ -2,7 +2,7 @@
 
 Sprite sheet layout (see ``make_contact_sheet.py``):
 
-1. **74** canonical channel scribble icons (MS ``wing_ch_*`` artwork, ids 1–74)
+1. **74** canonical channel scribble icons (`mixing-station/{id}.png`, X32 BMP art)
 2. **100** FLOW 8 picker icons
 3. **28** mixer branding images (one per MS-supported product line)
 """
@@ -195,13 +195,12 @@ class SheetSlot:
     brand_atlas: str | None = None
 
 
-def ms_channel_icon_slots(wing_assets: Path) -> list[SheetSlot]:
-    """Canonical MS channel scribble icons (ids 1–74), once."""
+def ms_channel_icon_slots(ms_assets: Path) -> list[SheetSlot]:
+    """Canonical MS / X32 channel scribble icons (ids 1–74), once."""
     rows: list[SheetSlot] = []
     for icon_id in range(1, X32_SLOT_COUNT + 1):
-        wing_key = x32_icon_id_to_wing_key(icon_id)
-        icon_path = wing_assets / f"{wing_key}.png" if wing_key else None
-        if icon_path is not None and not icon_path.is_file():
+        icon_path = ms_assets / f"{icon_id}.png"
+        if not icon_path.is_file():
             icon_path = None
         rows.append(
             SheetSlot(
@@ -209,7 +208,6 @@ def ms_channel_icon_slots(wing_assets: Path) -> list[SheetSlot]:
                 label=_x32_icon_label(icon_id),
                 path=icon_path,
                 icon_id=icon_id,
-                wing_key=wing_key,
             )
         )
     return rows
