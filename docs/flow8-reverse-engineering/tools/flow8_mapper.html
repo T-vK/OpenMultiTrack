@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FLOW 8 icon mapper</title>
+  <style>
+    :root {
+      --bg: #1e1e22;
+      --panel: #28282e;
+      --border: #3a3a42;
+      --text: #e8e8ec;
+      --muted: #9a9aa6;
+      --accent: #5b9fd4;
+      --ok: #6bc48a;
+      --warn: #e0a84a;
+      --skip: #888;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; }
+    .stats { color: var(--muted); font-size: 0.9rem; }
+    .stats strong { color: var(--text); }
+    main {
+      display: grid;
+      grid-template-columns: 280px 1fr 320px;
+      gap: 0;
+      min-height: calc(100vh - 53px);
+    }
+    @media (max-width: 1100px) {
+      main { grid-template-columns: 1fr; }
+      .sidebar { max-height: 240px; }
+    }
+    .sidebar {
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      padding: 12px;
+      background: var(--panel);
+    }
+    .sidebar h2 {
+      margin: 0 0 8px;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+    .thumb-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+    .thumb {
+      aspect-ratio: 1;
+      border: 2px solid var(--border);
+      border-radius: 6px;
+      background: #202024;
+      padding: 4px;
+      cursor: pointer;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .thumb img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+    .thumb.assigned { border-color: var(--ok); }
+    .thumb.current { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .thumb.missing { opacity: 0.35; }
+    .thumb .idx {
+      position: absolute;
+      bottom: 1px;
+      right: 3px;
+      font-size: 9px;
+      color: var(--muted);
+    }
+    .center {
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+    .hero {
+      width: min(420px, 90vw);
+      aspect-ratio: 1;
+      background: #202024;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .hero img {
+      max-width: 100%;
+      max-height: 100%;
+      image-rendering: pixelated;
+    }
+    .hero .placeholder { color: var(--muted); text-align: center; }
+    .meta { text-align: center; }
+    .meta .drawable { font-size: 1.4rem; font-weight: 600; font-family: ui-monospace, monospace; }
+    .meta .sub { color: var(--muted); margin-top: 4px; }
+    .assigned-pill {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #2d3d32;
+      color: var(--ok);
+      font-size: 0.85rem;
+    }
+    .right {
+      border-left: 1px solid var(--border);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background: var(--panel);
+    }
+    label { font-size: 0.8rem; color: var(--muted); display: block; margin-bottom: 4px; }
+    input[type="search"] {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 1rem;
+    }
+    input[type="search"]:focus { outline: 2px solid var(--accent); border-color: transparent; }
+    .label-list {
+      flex: 1;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      min-height: 200px;
+      max-height: calc(100vh - 340px);
+    }
+    .label-item {
+      padding: 8px 12px;
+      cursor: pointer;
+      border-bottom: 1px solid #2a2a30;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+    }
+    .label-item:hover, .label-item.focused { background: #32323a; }
+    .label-item.used { opacity: 0.45; }
+    .label-item .group { font-size: 0.7rem; color: var(--muted); }
+    .label-item .tag-used { font-size: 0.65rem; color: var(--warn); }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    button {
+      padding: 10px 14px;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    button.primary { background: var(--accent); color: #fff; flex: 1; }
+    button.secondary { background: #3a3a44; color: var(--text); }
+    button.warn { background: #4a3a2a; color: var(--warn); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .banner {
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      background: #3a3020;
+      color: var(--warn);
+      display: none;
+    }
+    .banner.show { display: block; }
+    .hint { font-size: 0.75rem; color: var(--muted); line-height: 1.4; }
+    kbd {
+      background: #3a3a44;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 0.7rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>FLOW 8 → label mapper</h1>
+    <div class="stats" id="stats"></div>
+  </header>
+  <main>
+    <aside class="sidebar">
+      <h2>All icons (app order)</h2>
+      <div class="thumb-grid" id="thumbs"></div>
+    </aside>
+    <section class="center">
+      <div class="hero" id="hero"></div>
+      <div class="meta" id="meta"></div>
+    </section>
+    <aside class="right">
+      <div class="banner" id="dup-banner"></div>
+      <label for="search">Search labels (MS + FLOW-only)</label>
+      <input type="search" id="search" placeholder="e.g. DCA, Treble clef, Handheld Mic…" autocomplete="off" />
+      <div class="label-list" id="labels"></div>
+      <div class="actions">
+        <button class="primary" id="btn-assign" disabled>Assign (Enter)</button>
+        <button class="secondary" id="btn-skip">Skip → end of queue</button>
+        <button class="warn" id="btn-clear" disabled>Clear assignment</button>
+      </div>
+      <p class="hint">
+        <kbd>↑</kbd><kbd>↓</kbd> move label · <kbd>Enter</kbd> assign ·
+        <kbd>S</kbd> skip · <kbd>C</kbd> clear · click any thumbnail to jump
+      </p>
+    </aside>
+  </main>
+  <script>
+    let state = null;
+    let focusedLabelIndex = 0;
+    let selectedLabel = null;
+
+    async function api(path, body) {
+      const res = await fetch(path, {
+        method: body ? "POST" : "GET",
+        headers: body ? { "Content-Type": "application/json" } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      return data;
+    }
+
+    async function refresh() {
+      state = await api("/api/state");
+      render();
+    }
+
+    function labelsUsedBy(label) {
+      if (!state) return [];
+      return state.drawables.filter(d => d.label === label).map(d => d.drawable);
+    }
+
+    function filteredLabels() {
+      const q = document.getElementById("search").value.trim().toLowerCase();
+      return state.labels.filter(item => {
+        if (!q) return true;
+        return item.label.toLowerCase().includes(q) ||
+          (item.group && item.group.toLowerCase().includes(q));
+      });
+    }
+
+    function render() {
+      const assigned = state.assigned_count;
+      const total = state.total;
+      const qLen = state.queue_length;
+      document.getElementById("stats").innerHTML =
+        `<strong>${assigned}</strong> / ${total} assigned · ` +
+        `<strong>${qLen}</strong> in queue · saves automatically`;
+
+      const dup = Object.keys(state.duplicate_labels || {});
+      const banner = document.getElementById("dup-banner");
+      if (dup.length) {
+        banner.classList.add("show");
+        banner.textContent = "Duplicate labels: " + dup.join(", ") + " — fix when ready.";
+      } else {
+        banner.classList.remove("show");
+      }
+
+      const thumbs = document.getElementById("thumbs");
+      thumbs.innerHTML = "";
+      state.drawables.forEach((d, i) => {
+        const el = document.createElement("div");
+        el.className = "thumb" +
+          (d.assigned ? " assigned" : "") +
+          (d.drawable === state.current ? " current" : "") +
+          (!d.has_asset ? " missing" : "");
+        el.title = d.drawable + (d.label ? " → " + d.label : "");
+        el.onclick = () => jump(d.drawable);
+        if (d.has_asset) {
+          const img = document.createElement("img");
+          img.src = "/assets/flow8/" + d.drawable + ".png";
+          img.alt = d.drawable;
+          el.appendChild(img);
+        }
+        const idx = document.createElement("span");
+        idx.className = "idx";
+        idx.textContent = i + 1;
+        el.appendChild(idx);
+        thumbs.appendChild(el);
+      });
+
+      const hero = document.getElementById("hero");
+      const meta = document.getElementById("meta");
+      const cur = state.current_meta;
+      if (!cur) {
+        hero.innerHTML = '<div class="placeholder">Queue empty — all assigned or review thumbnails to clear/fix.</div>';
+        meta.innerHTML = "";
+        document.getElementById("btn-assign").disabled = true;
+        document.getElementById("btn-skip").disabled = true;
+        document.getElementById("btn-clear").disabled = true;
+      } else {
+        const assigned = state.drawables.find(d => d.drawable === cur.drawable);
+        hero.innerHTML = cur.has_asset
+          ? `<img src="/assets/flow8/${cur.drawable}.png" alt="${cur.drawable}" />`
+          : '<div class="placeholder">Asset missing — run extract_icon_assets.py</div>';
+        meta.innerHTML =
+          `<div class="drawable">${cur.drawable}</div>` +
+          `<div class="sub">type ${cur.input_type} (${cur.type_name}) · preset ${cur.preset}</div>` +
+          (assigned && assigned.label
+            ? `<div class="assigned-pill">Currently: ${assigned.label}</div>` : "");
+        document.getElementById("btn-skip").disabled = false;
+        document.getElementById("btn-clear").disabled = !(assigned && assigned.assigned);
+        document.getElementById("btn-assign").disabled = !selectedLabel;
+      }
+
+      const list = document.getElementById("labels");
+      const items = filteredLabels();
+      if (focusedLabelIndex >= items.length) focusedLabelIndex = Math.max(0, items.length - 1);
+      list.innerHTML = "";
+      items.forEach((item, i) => {
+        const used = labelsUsedBy(item.label);
+        const row = document.createElement("div");
+        row.className = "label-item" +
+          (i === focusedLabelIndex ? " focused" : "") +
+          (used.length ? " used" : "");
+        row.dataset.label = item.label;
+        row.innerHTML =
+          `<span>${item.label}</span>` +
+          `<span class="group">${item.group}` +
+          (used.length ? ` <span class="tag-used">used</span>` : "") +
+          `</span>`;
+        row.onclick = () => {
+          focusedLabelIndex = i;
+          selectedLabel = item.label;
+          render();
+        };
+        row.ondblclick = () => { selectedLabel = item.label; doAssign(); };
+        list.appendChild(row);
+      });
+    }
+
+    async function doAssign() {
+      if (!state.current || !selectedLabel) return;
+      state = await api("/api/assign", { drawable: state.current, label: selectedLabel });
+      selectedLabel = null;
+      document.getElementById("search").value = "";
+      focusedLabelIndex = 0;
+      render();
+    }
+
+    async function doSkip() {
+      if (!state.current) return;
+      state = await api("/api/skip", { drawable: state.current });
+      render();
+    }
+
+    async function doClear() {
+      if (!state.current) return;
+      state = await api("/api/clear", { drawable: state.current });
+      selectedLabel = null;
+      render();
+    }
+
+    async function jump(drawable) {
+      state = await api("/api/jump", { drawable });
+      render();
+    }
+
+    document.getElementById("btn-assign").onclick = doAssign;
+    document.getElementById("btn-skip").onclick = doSkip;
+    document.getElementById("btn-clear").onclick = doClear;
+    document.getElementById("search").addEventListener("input", () => {
+      focusedLabelIndex = 0;
+      const items = filteredLabels();
+      selectedLabel = items.length === 1 ? items[0].label : null;
+      render();
+    });
+    document.getElementById("search").addEventListener("keydown", (e) => {
+      const items = filteredLabels();
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        focusedLabelIndex = Math.min(focusedLabelIndex + 1, items.length - 1);
+        selectedLabel = items[focusedLabelIndex]?.label || null;
+        render();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        focusedLabelIndex = Math.max(focusedLabelIndex - 1, 0);
+        selectedLabel = items[focusedLabelIndex]?.label || null;
+        render();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (!selectedLabel && items[focusedLabelIndex]) selectedLabel = items[focusedLabelIndex].label;
+        doAssign();
+      }
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.target.tagName === "INPUT") return;
+      if (e.key === "s" || e.key === "S") doSkip();
+      if (e.key === "c" || e.key === "C") doClear();
+    });
+
+    refresh().catch(err => {
+      document.body.innerHTML = "<pre style='color:#f88;padding:2rem'>" + err + "</pre>";
+    });
+  </script>
+</body>
+</html>

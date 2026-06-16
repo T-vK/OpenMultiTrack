@@ -10,7 +10,7 @@ Regenerate:
 ```bash
 cd docs/flow8-reverse-engineering/tools
 python3 extract_icon_assets.py
-python3 assign_flow8_icons.py   # GUI: needs python3-tk + python3-pil.imagetk
+python3 serve_flow8_mapper.py   # browser UI — assign, skip-to-end, fix mistakes
 python3 export_icon_tables.py all   # patches doc 06 + mixer-icons.md
 ```
 

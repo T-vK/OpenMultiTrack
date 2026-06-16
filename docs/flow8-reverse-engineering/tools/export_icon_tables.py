@@ -64,7 +64,7 @@ def flow_preset_rows() -> list[dict]:
                 "drawable": row["drawable"],
                 "label": row["label"],
                 "ms_id": ms_id,
-                "ms_slug": ICON_LABELS[ms_id] if ms_id else "",
+                "ms_slug": ICON_LABELS[ms_id] if ms_id else row.get("flow_slug") or "",
                 "validated_label": row["validated_flow_ui"],
             }
         )
@@ -97,9 +97,10 @@ def appendix_b_flow(assets_prefix: str) -> list[str]:
         "",
         "Drawable assets from `Flowmix_v1.9.apk` (`res/drawable-*/input_icon_NNN`).",
         "Labels marked *(validated)* were read from the Flow Mix UI on hardware (firmware v11749);",
-        "others come from `flow8_icon_mapping.json` (run `assign_flow8_icons.py` to build).",
-        "MS ID / slug columns follow that mapping; unassigned slots still use the guessed",
-        "decoder tables until you finish assignment.",
+        "others come from `flow8_icon_mapping.json` (run `serve_flow8_mapper.py` to edit).",
+        "MS ID is set when the label matches Mixing Station ids 1–74; FLOW-only labels",
+        "(DCA, clefs, …) have no MS id. Type 6 drawables `input_icon_600`…`617` are the",
+        "last 18 picker slots.",
         "",
         "| Label | Input type | Preset | Drawable | MS ID | MS slug | Icon |",
         "| ----- | ---------- | ------ | -------- | ----- | ------- | ---- |",
@@ -109,7 +110,12 @@ def appendix_b_flow(assets_prefix: str) -> list[str]:
         if row["validated_label"]:
             label += " *(validated)*"
         ms_id = row["ms_id"]
-        ms_slug = f"`{row['ms_slug']}`" if row["ms_slug"] else "—"
+        if ms_id is not None:
+            ms_slug = f"`{row['ms_slug']}`" if row.get("ms_slug") else f"`{ICON_LABELS[ms_id]}`"
+        elif row.get("flow_slug"):
+            ms_slug = f"`flow:{row['flow_slug']}`"
+        else:
+            ms_slug = "—"
         ms_id_cell = str(ms_id) if ms_id is not None else "—"
         icon = flow_icon_img(row["drawable"], row["label"], assets_prefix)
         lines.append(
@@ -229,7 +235,7 @@ def write_standalone_doc(path: Path) -> None:
         "```bash",
         "cd docs/flow8-reverse-engineering/tools",
         "python3 extract_icon_assets.py",
-        "python3 assign_flow8_icons.py   # interactive FLOW → MS mapping",
+        "python3 serve_flow8_mapper.py   # browser UI for FLOW → label mapping",
         "python3 export_icon_tables.py all",
         "```",
         "",
