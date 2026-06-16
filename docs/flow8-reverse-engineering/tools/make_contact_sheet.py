@@ -3,8 +3,9 @@
 
 Order (picker / id order, no grouping headers):
 
-1. Mixing Station X32 / M32 / X-Air canonical ids **1–74**
-2. Mixing Station **WING** channel icons (**130** ``wing_ch_TTNN`` slots)
+1. Mixing Station **X32 / M32 / X-Air / HD96** canonical ids **1–74**
+   (MS atlas ``wing_ch_*`` artwork — same picker for all X32-family desks)
+2. Mixing Station **WING** channel icons (**130** ``wing_ch_TTNN`` slots, WING picker)
 3. FLOW 8 picker drawables (**100** slots, type 0–6)
 
 Each cell: icon + human label underneath (no ids or drawable keys).
@@ -36,8 +37,7 @@ DEFAULT_OUT = GENERATED / "icon_sprite_sheet.png"
 DEFAULT_MANIFEST = GENERATED / "icon_sprite_sheet_manifest.json"
 
 sys.path.insert(0, str(TOOLS_DIR))
-from mixing_station_display_labels import display_label
-from mixing_station_icons import ICON_LABELS
+from ms_mixer_icon_sets import MIXER_FAMILIES_X32, ordered_x32_ms_entries
 from wing_icon_labels import ordered_wing_entries
 
 ICON_SIZE = 128
@@ -50,7 +50,7 @@ MISSING_COLOR = (80, 80, 88, 255)
 class SpriteEntry:
     source: str
     label: str
-    path: Path
+    path: Path | None
     icon_id: int | None = None
     drawable: str | None = None
     wing_key: str | None = None
@@ -69,13 +69,14 @@ def load_font(size: int) -> ImageFont.ImageFont:
 def ordered_entries(include_ms: bool, include_wing: bool, include_flow: bool) -> list[SpriteEntry]:
     entries: list[SpriteEntry] = []
     if include_ms:
-        for icon_id in range(1, 75):
+        for icon_id, wing_key, label, path in ordered_x32_ms_entries(WING_ASSETS):
             entries.append(
                 SpriteEntry(
-                    source="mixing-station",
+                    source="mixing-station-x32",
                     icon_id=icon_id,
-                    label=display_label(icon_id) or ICON_LABELS[icon_id],
-                    path=ASSETS / "mixing-station" / f"{icon_id}.png",
+                    wing_key=wing_key,
+                    label=label,
+                    path=path,
                 )
             )
     if include_wing:
@@ -160,7 +161,8 @@ def build_sprite_sheet(
         x = col * icon_size
         y = row * row_h
 
-        if entry.path.is_file():
+        present = False
+        if entry.path is not None and entry.path.is_file():
             with Image.open(entry.path) as icon:
                 icon = icon.convert("RGBA")
                 icon.thumbnail((icon_size, icon_size), Image.Resampling.LANCZOS)
@@ -174,7 +176,6 @@ def build_sprite_sheet(
                 outline=MISSING_COLOR,
                 width=1,
             )
-            present = False
 
         caption = truncate_label(entry.label, font, icon_size - 4)
         tw = font.getlength(caption)
@@ -197,7 +198,7 @@ def build_sprite_sheet(
                 "icon_id": entry.icon_id,
                 "drawable": entry.drawable,
                 "wing_key": entry.wing_key,
-                "path": str(entry.path),
+                "path": str(entry.path) if entry.path else None,
                 "present": present,
             }
         )
@@ -220,9 +221,9 @@ def main() -> None:
     include_flow = not (args.ms_only or args.wing_only)
     entries = ordered_entries(include_ms, include_wing, include_flow)
 
-    if include_wing and not any(e.source == "mixing-station-wing" for e in entries):
+    if (include_ms or include_wing) and not WING_ASSETS.is_dir():
         print(
-            "No WING icons found. Run: python3 extract_ms_wing_icons.py",
+            "WING/MS atlas icons missing. Run: python3 extract_ms_wing_icons.py",
             file=sys.stderr,
         )
 
@@ -230,6 +231,7 @@ def main() -> None:
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(args.output)
+    families = " · ".join(MIXER_FAMILIES_X32)
     args.manifest.write_text(
         json.dumps(
             {
@@ -243,8 +245,8 @@ def main() -> None:
                 "label_height": label_h,
                 "count": len(entries),
                 "order": (
-                    "mixing-station 1–74, mixing-station-wing wing_ch_* (130), "
-                    "flow8 picker (100)"
+                    f"mixing-station-x32 ids 1–74 ({families}), "
+                    "mixing-station-wing picker (130), flow8 picker (100)"
                 ),
                 "entries": manifest,
             },

@@ -2,8 +2,8 @@
 
 | Directory | Source | Files |
 | --------- | ------ | ----- |
-| `mixing-station/` | X32 BMP originals ([behringer-icons](https://github.com/mamarguerat/behringer-icons)) → PNG `{id}.png` | ids 1–74 |
-| `mixing-station-wing/` | Mixing Station APK atlas ``wing_ch_TTNN`` (WING picker) | 130 slots |
+| `mixing-station/` | X32 BMP originals ([behringer-icons](https://github.com/mamarguerat/behringer-icons)) → PNG `{id}.png` | ids 1–74 (desk reference) |
+| `mixing-station-wing/` | Mixing Station APK atlas ``wing_ch_TTNN`` (X32-family + WING picker) | 130 slots |
 | `flow8/` | `Flowmix_v1.9.apk` drawables `input_icon_NNN` (xxhdpi → 64×64 PNG) | 100 picker slots |
 
 Regenerate:
@@ -21,7 +21,7 @@ Sprite sheet (gitignored under `generated/`):
 
 | File | Contents |
 | ---- | -------- |
-| `icon_sprite_sheet.png` | 1:1 grid — MS 1–74, WING 130, FLOW 8 100 (304 icons), label under each icon |
+| `icon_sprite_sheet.png` | 1:1 grid — MS X32-family 1–74 (atlas art), WING picker 130, FLOW 8 100 (304 icons), label under each icon |
 
 `icon_sprite_sheet_manifest.json` lists cell coordinates for vision / img2img tooling.
 

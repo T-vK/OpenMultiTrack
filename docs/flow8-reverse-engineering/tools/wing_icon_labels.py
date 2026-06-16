@@ -54,10 +54,6 @@ def ordered_wing_icon_names(assets_dir: Path) -> list[str]:
 
 
 def ordered_wing_entries(assets_dir: Path) -> list[tuple[str, str, Path]]:
-    from flow8_mapping import load_state
+    from ms_mixer_icon_sets import ordered_wing_picker_entries
 
-    assignments = load_state().assignments
-    rows: list[tuple[str, str, Path]] = []
-    for name in ordered_wing_icon_names(assets_dir):
-        rows.append((name, wing_label(name, assignments), assets_dir / f"{name}.png"))
-    return rows
+    return ordered_wing_picker_entries(assets_dir)
