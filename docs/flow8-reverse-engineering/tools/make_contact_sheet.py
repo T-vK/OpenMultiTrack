@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Minimal 1:1 sprite sheet for Mixing Station + FLOW 8 scribble icons.
 
-Each **supported Mixing Station mixer line** gets a reserved block of picker slots
-(74 for most desks, 130 for WING). Cells use MS channel icon artwork when the APK
-bundles it (Behringer X32-family + WING); otherwise cells stay empty, with the
-MS mixer branding image in the first slot when available (``mt_x32``, ``ah_sq``, …).
+Three blocks, in order:
 
-Order: MS mixer lines (manufacturer list), then FLOW 8 picker (100 slots).
+1. **74** Mixing Station channel scribble icons (canonical ids 1–74)
+2. **100** FLOW 8 picker icons
+3. **28** MS mixer branding images (one per supported product line)
 
 Extract assets first::
 
@@ -35,7 +34,12 @@ DEFAULT_OUT = GENERATED / "icon_sprite_sheet.png"
 DEFAULT_MANIFEST = GENERATED / "icon_sprite_sheet_manifest.json"
 
 sys.path.insert(0, str(TOOLS_DIR))
-from ms_mixer_icon_sets import MIXER_SECTIONS, SheetSlot, all_mixer_slots, ms_slot_count
+from ms_mixer_icon_sets import (
+    MIXER_LINES,
+    SheetSlot,
+    ms_channel_icon_slots,
+    mixer_brand_slots,
+)
 
 ICON_SIZE = 128
 BG = (24, 24, 28, 255)
@@ -48,14 +52,11 @@ class SpriteEntry:
     source: str
     label: str
     path: Path | None
-    mixer_key: str | None = None
-    mixer_name: str | None = None
-    slot_index: int | None = None
     icon_id: int | None = None
     drawable: str | None = None
     wing_key: str | None = None
+    mixer_key: str | None = None
     brand_atlas: str | None = None
-    use_brand: bool = False
 
 
 def load_font(size: int) -> ImageFont.ImageFont:
@@ -70,28 +71,24 @@ def load_font(size: int) -> ImageFont.ImageFont:
 
 def slot_to_entry(slot: SheetSlot) -> SpriteEntry:
     return SpriteEntry(
-        source=f"mixer/{slot.mixer_key}",
-        mixer_key=slot.mixer_key,
-        mixer_name=slot.mixer_name,
-        slot_index=slot.slot_index,
+        source=slot.source,
         label=slot.label,
         path=slot.path,
         icon_id=slot.icon_id,
         wing_key=slot.wing_key,
+        mixer_key=slot.mixer_key,
         brand_atlas=slot.brand_atlas,
-        use_brand=slot.use_brand,
     )
 
 
 def ordered_entries(
     include_ms: bool,
     include_flow: bool,
-    *,
-    brand_fallback: bool = True,
+    include_brands: bool,
 ) -> list[SpriteEntry]:
     entries: list[SpriteEntry] = []
     if include_ms:
-        for slot in all_mixer_slots(WING_ASSETS, BRAND_ASSETS, brand_fallback=brand_fallback):
+        for slot in ms_channel_icon_slots(WING_ASSETS):
             entries.append(slot_to_entry(slot))
     if include_flow:
         from flow8_icon_catalog import catalog_rows as flow_rows
@@ -105,6 +102,9 @@ def ordered_entries(
                     path=ASSETS / "flow8" / f"{row['drawable']}.png",
                 )
             )
+    if include_brands:
+        for slot in mixer_brand_slots(BRAND_ASSETS):
+            entries.append(slot_to_entry(slot))
     return entries
 
 
@@ -202,14 +202,11 @@ def build_sprite_sheet(
                 "label": entry.label,
                 "caption": caption,
                 "source": entry.source,
-                "mixer_key": entry.mixer_key,
-                "mixer_name": entry.mixer_name,
-                "slot_index": entry.slot_index,
                 "icon_id": entry.icon_id,
                 "drawable": entry.drawable,
                 "wing_key": entry.wing_key,
+                "mixer_key": entry.mixer_key,
                 "brand_atlas": entry.brand_atlas,
-                "use_brand": entry.use_brand,
                 "path": str(entry.path) if entry.path else None,
                 "present": present,
             }
@@ -223,33 +220,28 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     parser.add_argument("--icon-size", type=int, default=ICON_SIZE)
-    parser.add_argument("--ms-only", action="store_true")
-    parser.add_argument("--flow-only", action="store_true")
-    parser.add_argument(
-        "--no-brand-fallback",
-        action="store_true",
-        help="Leave brand-mixer first slots empty instead of mixer branding images",
-    )
+    parser.add_argument("--ms-only", action="store_true", help="Channel icons + mixer brands only")
+    parser.add_argument("--flow-only", action="store_true", help="FLOW 8 picker only")
+    parser.add_argument("--no-brands", action="store_true", help="Omit mixer branding block")
     args = parser.parse_args()
 
     include_ms = not args.flow_only
     include_flow = not args.ms_only
-    entries = ordered_entries(
-        include_ms,
-        include_flow,
-        brand_fallback=not args.no_brand_fallback,
-    )
+    include_brands = include_ms and not args.no_brands
+    entries = ordered_entries(include_ms, include_flow, include_brands)
 
     if include_ms and not WING_ASSETS.is_dir():
         print("WING icons missing. Run: python3 extract_ms_wing_icons.py", file=sys.stderr)
-    if include_ms and not args.no_brand_fallback and not BRAND_ASSETS.is_dir():
+    if include_brands and not BRAND_ASSETS.is_dir():
         print("Brand icons missing. Run: python3 extract_ms_brand_icons.py", file=sys.stderr)
 
     sheet, manifest, cols, rows, label_h = build_sprite_sheet(entries, args.icon_size)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(args.output)
-    mixer_names = [s.name for s in MIXER_SECTIONS]
+    ms_count = sum(1 for e in entries if e.source == "mixing-station")
+    flow_count = sum(1 for e in entries if e.source == "flow8")
+    brand_count = sum(1 for e in entries if e.source == "mixer-brand")
     args.manifest.write_text(
         json.dumps(
             {
@@ -262,22 +254,19 @@ def main() -> None:
                 "icon_size": args.icon_size,
                 "label_height": label_h,
                 "count": len(entries),
-                "ms_mixer_lines": len(MIXER_SECTIONS),
-                "ms_slot_count": ms_slot_count(),
-                "mixer_sections": [
-                    {
-                        "key": s.key,
-                        "name": s.name,
-                        "brand_atlas": s.brand_atlas,
-                        "slot_count": s.slot_count,
-                        "fill": s.fill,
-                    }
-                    for s in MIXER_SECTIONS
+                "blocks": {
+                    "mixing_station_channel_icons": ms_count,
+                    "flow8_picker": flow_count,
+                    "mixer_brands": brand_count,
+                },
+                "mixer_lines": [
+                    {"key": line.key, "name": line.name, "brand_atlas": line.brand_atlas}
+                    for line in MIXER_LINES
                 ],
                 "order": (
-                    f"MS mixer lines ({len(mixer_names)}): "
-                    + ", ".join(mixer_names)
-                    + "; then FLOW 8 picker (100)"
+                    f"MS channel icons ({ms_count}), "
+                    f"FLOW 8 picker ({flow_count}), "
+                    f"mixer brands ({brand_count})"
                 ),
                 "entries": manifest,
             },
