@@ -4,7 +4,7 @@
 | --------- | ------ | ----- |
 | `mixing-station/` | X32 BMP originals ([behringer-icons](https://github.com/mamarguerat/behringer-icons)) → PNG `{id}.png` | ids 1–74 (desk reference) |
 | `mixing-station-wing/` | Mixing Station APK atlas `wing_ch_TTNN` | 130 channel icons (used for MS sheet ids 2–74) |
-| `mixing-station-brands/` | Mixing Station APK atlas (`mt_x32`, `ah_sq`, `b_wing`, …) | 28 mixer branding images |
+| `mixing-station-brands/` | Mixing Station APK atlas (`mt_x32`, `ah_sq`, `b_wing`, …) | 28 mixer branding images; `bfl` uses manual `Blackmagic Fairlight Live.png` |
 | `flow8/` | `Flowmix_v1.9.apk` drawables `input_icon_NNN` (xxhdpi → 64×64 PNG) | 100 picker slots |
 
 Regenerate:

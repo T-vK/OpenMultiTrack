@@ -18,9 +18,31 @@ TOOLS_DIR = Path(__file__).resolve().parent
 DOCS_DIR = TOOLS_DIR.parent.parent
 OUT_DIR = DOCS_DIR / "mixer-icons" / "assets" / "mixing-station-brands"
 
+# Manual replacements for low-quality MS atlas art.
+MANUAL_BRAND_OVERRIDES: dict[str, str] = {
+    "bfl": "Blackmagic Fairlight Live.png",
+}
+
 sys.path.insert(0, str(TOOLS_DIR))
 from ms_atlas_extract import extract_regions, find_apk
 from ms_mixer_icon_sets import all_brand_keys
+
+
+def apply_manual_overrides(output_dir: Path) -> int:
+    from PIL import Image
+
+    applied = 0
+    for atlas_key, source_name in MANUAL_BRAND_OVERRIDES.items():
+        source = output_dir / source_name
+        if not source.is_file():
+            continue
+        with Image.open(source) as im:
+            im = im.convert("RGBA")
+            thumb = im.copy()
+            thumb.thumbnail((140, 140), Image.Resampling.LANCZOS)
+            thumb.save(output_dir / f"{atlas_key}.png")
+        applied += 1
+    return applied
 
 
 def main() -> None:
@@ -30,9 +52,11 @@ def main() -> None:
     args = parser.parse_args()
 
     apk = find_apk(args.apk)
-    names = sorted(all_brand_keys())
+    skip = {key for key, source in MANUAL_BRAND_OVERRIDES.items() if (args.output / source).is_file()}
+    names = sorted(all_brand_keys() - skip)
     count = extract_regions(apk, names, args.output)
-    missing = [name for name in names if not (args.output / f"{name}.png").is_file()]
+    count += apply_manual_overrides(args.output)
+    missing = [name for name in sorted(all_brand_keys()) if not (args.output / f"{name}.png").is_file()]
     print(f"Extracted {count} brand images from {apk.name} -> {args.output}")
     if missing:
         print(f"Missing atlas regions ({len(missing)}):", ", ".join(missing), file=sys.stderr)
