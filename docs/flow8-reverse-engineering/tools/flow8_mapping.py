@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from flow8_extra_labels import FLOW_EXTRA_LABELS, label_group, slug_for_label
+from flow8_apk_labels import all_apk_labels, slug_for_apk_label, slugify
 from flow8_icon_catalog import INPUT_TYPE_NAMES, PRESET_COUNTS, drawable_key
 from mixing_station_display_labels import display_label
 
@@ -108,18 +108,27 @@ def assignment_for_label(label: str) -> Assignment:
     ms_id = ms_id_for_label(trimmed)
     if ms_id is not None:
         return Assignment(label=trimmed, ms_id=ms_id)
-    slug = slug_for_label(trimmed)
+    slug = slug_for_apk_label(trimmed)
     if slug is not None:
-        return Assignment(label=FLOW_EXTRA_LABELS[slug], ms_id=None, flow_slug=slug)
-    return Assignment(label=trimmed, ms_id=None)
+        from flow8_apk_labels import apk_labels_dict
+
+        return Assignment(label=apk_labels_dict()[slug], ms_id=None, flow_slug=slug)
+    return Assignment(label=trimmed, ms_id=None, flow_slug=slugify(trimmed))
 
 
 def load_picker_hints() -> dict[str, str]:
-    if not HINTS_JSON.is_file():
-        return {}
-    data = json.loads(HINTS_JSON.read_text(encoding="utf-8"))
-    raw = data.get("hints", {})
-    return {str(k): str(v) for k, v in raw.items()}
+    from flow8_apk_labels import LABELS_JSON
+
+    if LABELS_JSON.is_file():
+        data = json.loads(LABELS_JSON.read_text(encoding="utf-8"))
+        hints = data.get("hints", {})
+        if hints:
+            return {str(k): str(v) for k, v in hints.items()}
+    if HINTS_JSON.is_file():
+        data = json.loads(HINTS_JSON.read_text(encoding="utf-8"))
+        raw = data.get("hints", {})
+        return {str(k): str(v) for k, v in raw.items()}
+    return {}
 
 
 def label_catalog() -> list[dict]:
@@ -137,14 +146,14 @@ def label_catalog() -> list[dict]:
                 "group": "Mixing Station",
             }
         )
-    for slug, name in sorted(FLOW_EXTRA_LABELS.items(), key=lambda x: x[1].casefold()):
+    for slug, name, group in all_apk_labels():
         items.append(
             {
                 "id": f"flow:{slug}",
                 "label": name,
                 "ms_id": None,
                 "flow_slug": slug,
-                "group": label_group(slug),
+                "group": group,
             }
         )
     return items
