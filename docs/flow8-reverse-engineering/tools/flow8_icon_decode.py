@@ -16,6 +16,7 @@ from mixing_station_icons import (
     HANDHELD_MIC,
     ICON_MAX,
     ICON_MIN,
+    VIOLIN,
 )
 
 # JNI InputType* constants (libcom_musicgroup_xairbt.so).

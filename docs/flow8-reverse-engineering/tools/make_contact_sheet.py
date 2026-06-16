@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
 """Minimal 1:1 sprite sheet for Mixing Station + FLOW 8 scribble icons.
 
-Order: Mixing Station ids 1–74, then FLOW 8 picker slots (type 0–6, preset order).
-Each cell is icon + label underneath. Labels only — no ids or drawable keys.
+Order (picker / id order, no grouping headers):
+
+1. Mixing Station X32 / M32 / X-Air canonical ids **1–74**
+2. Mixing Station **WING** channel icons (**130** ``wing_ch_TTNN`` slots)
+3. FLOW 8 picker drawables (**100** slots, type 0–6)
+
+Each cell: icon + human label underneath (no ids or drawable keys).
 
 Default: ``docs/mixer-icons/generated/icon_sprite_sheet.png``
+
+Extract WING artwork first::
+
+    python3 extract_ms_wing_icons.py
 """
 
 from __future__ import annotations
@@ -21,14 +30,15 @@ from PIL import Image, ImageDraw, ImageFont
 TOOLS_DIR = Path(__file__).resolve().parent
 DOCS_DIR = TOOLS_DIR.parent.parent
 ASSETS = DOCS_DIR / "mixer-icons" / "assets"
+WING_ASSETS = ASSETS / "mixing-station-wing"
 GENERATED = DOCS_DIR / "mixer-icons" / "generated"
 DEFAULT_OUT = GENERATED / "icon_sprite_sheet.png"
 DEFAULT_MANIFEST = GENERATED / "icon_sprite_sheet_manifest.json"
 
 sys.path.insert(0, str(TOOLS_DIR))
-from flow8_icon_catalog import catalog_rows
 from mixing_station_display_labels import display_label
 from mixing_station_icons import ICON_LABELS
+from wing_icon_labels import ordered_wing_entries
 
 ICON_SIZE = 128
 BG = (24, 24, 28, 255)
@@ -43,6 +53,7 @@ class SpriteEntry:
     path: Path
     icon_id: int | None = None
     drawable: str | None = None
+    wing_key: str | None = None
 
 
 def load_font(size: int) -> ImageFont.ImageFont:
@@ -55,7 +66,7 @@ def load_font(size: int) -> ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
-def ordered_entries(include_ms: bool, include_flow: bool) -> list[SpriteEntry]:
+def ordered_entries(include_ms: bool, include_wing: bool, include_flow: bool) -> list[SpriteEntry]:
     entries: list[SpriteEntry] = []
     if include_ms:
         for icon_id in range(1, 75):
@@ -67,8 +78,20 @@ def ordered_entries(include_ms: bool, include_flow: bool) -> list[SpriteEntry]:
                     path=ASSETS / "mixing-station" / f"{icon_id}.png",
                 )
             )
+    if include_wing:
+        for wing_key, label, path in ordered_wing_entries(WING_ASSETS):
+            entries.append(
+                SpriteEntry(
+                    source="mixing-station-wing",
+                    wing_key=wing_key,
+                    label=label,
+                    path=path,
+                )
+            )
     if include_flow:
-        for row in catalog_rows():
+        from flow8_icon_catalog import catalog_rows as flow_rows
+
+        for row in flow_rows():
             entries.append(
                 SpriteEntry(
                     source="flow8",
@@ -81,11 +104,10 @@ def ordered_entries(include_ms: bool, include_flow: bool) -> list[SpriteEntry]:
 
 
 def choose_square_layout(count: int, icon_size: int) -> tuple[int, int, int]:
-    """Return (cols, rows, label_height) for a tight 1:1 sheet."""
     best: tuple[int, int, int] | None = None
     best_score = math.inf
 
-    for cols in range(max(6, int(math.sqrt(count)) - 4), int(math.sqrt(count)) + 12):
+    for cols in range(max(6, int(math.sqrt(count)) - 6), int(math.sqrt(count)) + 20):
         rows = math.ceil(count / cols)
         label_h = round(icon_size * cols / rows - icon_size)
         if label_h < 14 or label_h > 52:
@@ -95,15 +117,13 @@ def choose_square_layout(count: int, icon_size: int) -> tuple[int, int, int]:
         if width != height:
             continue
         empty = cols * rows - count
-        score = empty
-        if score < best_score:
-            best_score = score
+        if empty < best_score:
+            best_score = empty
             best = (cols, rows, label_h)
 
     if best is not None:
         return best
 
-    # Fallback: closest aspect ratio, then pad canvas to square.
     cols = max(6, round(math.sqrt(count)))
     rows = math.ceil(count / cols)
     label_h = max(16, round(icon_size * cols / rows - icon_size))
@@ -128,11 +148,7 @@ def build_sprite_sheet(
     width = cols * icon_size
     height = rows * row_h
     side = max(width, height)
-    if width != height:
-        # Pad to 1:1 without changing cell size.
-        canvas = Image.new("RGBA", (side, side), BG)
-    else:
-        canvas = Image.new("RGBA", (width, height), BG)
+    canvas = Image.new("RGBA", (side, side), BG)
 
     draw = ImageDraw.Draw(canvas)
     font_size = max(11, min(14, label_h - 8))
@@ -180,6 +196,7 @@ def build_sprite_sheet(
                 "source": entry.source,
                 "icon_id": entry.icon_id,
                 "drawable": entry.drawable,
+                "wing_key": entry.wing_key,
                 "path": str(entry.path),
                 "present": present,
             }
@@ -194,12 +211,21 @@ def main() -> None:
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     parser.add_argument("--icon-size", type=int, default=ICON_SIZE)
     parser.add_argument("--ms-only", action="store_true")
+    parser.add_argument("--wing-only", action="store_true")
     parser.add_argument("--flow-only", action="store_true")
     args = parser.parse_args()
 
-    include_ms = not args.flow_only
-    include_flow = not args.ms_only
-    entries = ordered_entries(include_ms, include_flow)
+    include_ms = not (args.wing_only or args.flow_only)
+    include_wing = not (args.ms_only or args.flow_only)
+    include_flow = not (args.ms_only or args.wing_only)
+    entries = ordered_entries(include_ms, include_wing, include_flow)
+
+    if include_wing and not any(e.source == "mixing-station-wing" for e in entries):
+        print(
+            "No WING icons found. Run: python3 extract_ms_wing_icons.py",
+            file=sys.stderr,
+        )
+
     sheet, manifest, cols, rows, label_h = build_sprite_sheet(entries, args.icon_size)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -216,7 +242,10 @@ def main() -> None:
                 "icon_size": args.icon_size,
                 "label_height": label_h,
                 "count": len(entries),
-                "order": "mixing-station 1–74, then flow8 picker slots",
+                "order": (
+                    "mixing-station 1–74, mixing-station-wing wing_ch_* (130), "
+                    "flow8 picker (100)"
+                ),
                 "entries": manifest,
             },
             indent=2,
