@@ -12,17 +12,15 @@ cd docs/flow8-reverse-engineering/tools
 python3 extract_icon_assets.py
 python3 serve_flow8_mapper.py   # browser UI — assign, skip-to-end, fix mistakes
 python3 export_icon_tables.py all   # patches doc 06 + mixer-icons.md
-python3 make_contact_sheet.py       # ../mixer-icons/generated/*.png
+python3 make_contact_sheet.py       # ../mixer-icons/generated/icon_sprite_sheet.png
 ```
 
-Contact sheets (gitignored under `generated/`):
+Sprite sheet (gitignored under `generated/`):
 
 | File | Contents |
 | ---- | -------- |
-| `icon_contact_sheet_ms.png` | Mixing Station ids 1–74 (X32 · M32 · X-Air/XR · WING · FLOW resolved ids) |
-| `icon_contact_sheet_flow8.png` | FLOW 8 picker — 100 drawables by input type |
-| `icon_contact_sheet_all.png` | Both sets in one tall sheet (174 cells) |
+| `icon_sprite_sheet.png` | 1:1 grid — MS ids 1–74, then FLOW 8 picker (174 icons), label under each icon |
 
-Each PNG has a `*_manifest.json` with pixel coordinates for vision / img2img tooling.
+`icon_sprite_sheet_manifest.json` lists cell coordinates for vision / img2img tooling.
 
 Not bundled in the OpenMultiTrack APK.
