@@ -35,13 +35,15 @@ official app stores in the mixer — values that are not exposed over plain USB 
 | [`03-bluetooth-le-protocol.md`](./03-bluetooth-le-protocol.md) | GATT service/characteristic, auth + session handshake, dump trigger, snapshot-name fetch |
 | [`04-channel-name-extraction.md`](./04-channel-name-extraction.md) | **Main goal** — six mixer names, USB 1–8 mapping, fixed Main L/R on USB 9–10 |
 | [`05-hardware-probe-findings.md`](./05-hardware-probe-findings.md) | What was observed on the locally attached unit (incl. the USB fault) |
-| [`06-channel-icons-and-stereo-link.md`](./06-channel-icons-and-stereo-link.md) | Channel **icons** (input type + preset → MS id 1–74), full icon tables, **stereo-link** |
+| [`06-channel-icons-and-stereo-link.md`](./06-channel-icons-and-stereo-link.md) | Channel **icons** (input type + preset → MS id 1–74), **stereo-link** |
+| [`../mixer-icons.md`](../mixer-icons.md) | **Icon reference tables** — all MS / FLOW 8 labels, ids, embedded artwork |
 | [`07-implicit-feedback-playback.md`](./07-implicit-feedback-playback.md) | UAC2 implicit feedback, IFB feeder, playback ring arming, Linux quirk reference |
 | [`tools/capture_sysex.sh`](./tools/capture_sysex.sh) | Capture a raw SysEx dump from USB MIDI with `amidi` |
 | [`tools/extract_channel_names.py`](./tools/extract_channel_names.py) | Decode channel names from a captured dump (no dependencies) |
 | [`tools/extract_flow8_channels.py`](./tools/extract_flow8_channels.py) | Decode six names, icons, Flow UI labels, USB 1–10 mapping |
 | [`tools/flow8_icon_decode.py`](./tools/flow8_icon_decode.py) | Reference icon decoder (input type + preset → MS id) |
-| [`tools/export_icon_tables.py`](./tools/export_icon_tables.py) | Print markdown icon tables for doc 06 |
+| [`tools/export_icon_tables.py`](./tools/export_icon_tables.py) | Generate [`../mixer-icons.md`](../mixer-icons.md) |
+| [`tools/extract_icon_assets.py`](./tools/extract_icon_assets.py) | Extract icon PNG/SVG assets for the reference doc |
 | [`tools/ble_dump_names.py`](./tools/ble_dump_names.py) | Live BLE capture: MixerState + icon config query |
 
 ## How the pieces fit together

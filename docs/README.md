@@ -73,6 +73,7 @@ Per-module deep dives (responsibilities, extension points, key packages):
 | [remote-control.md](remote-control.md) | LAN Host/Remote sync (WebSocket, discovery) |
 | [mixer-drivers.md](mixer-drivers.md) | `Mixer` API, OSC routing, snapshots (design) |
 | [hardware-assumptions.md](hardware-assumptions.md) | USB/OSC assumptions — **verify on real gear** |
+| [mixer-icons.md](mixer-icons.md) | Scribble icon ids 1–74 — Mixing Station + FLOW 8 tables with artwork |
 | [technical-risks.md](technical-risks.md) | Known risks and mitigations |
 
 ### Operations & release

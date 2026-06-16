@@ -65,7 +65,7 @@ strip (type 3). Hardware capture `03 04` on both Ch1 and Ch4 demonstrates this.
 
 | Type | Native constant | Flow Mix picker category | Drawable range (APK v1.9) |
 | ---- | --------------- | ------------------------ | ------------------------- |
-| 0 | `InputTypeDynamicMic` | Dynamic / wired mics | `input_icon_000` … `input_icon_015` (16) |
+| 0 | `InputTypeDynamicMic` | Dynamic / wired mics | `input_icon_000` … `input_icon_014` (15) |
 | 1 | `InputTypeCondensorMic` | Condenser mics | `input_icon_100` … `input_icon_110` (11) |
 | 2 | `InputTypeGuitarOrBass` | Guitar / bass | `input_icon_200` … `input_icon_217` (18) |
 | 3 | `InputTypeLineInstrument` | Line instruments | `input_icon_300` … `input_icon_317` (18) |
@@ -329,6 +329,9 @@ Three related numbering schemes:
 | Flow drawable key | `input_icon_004` | APK picker asset for type 0, preset 4 |
 | Flow UI label | `Wired Mic` | On-screen picker text (not sent over BLE) |
 
+**Full icon tables** (labels, ids, embedded artwork for Mixing Station and FLOW 8):
+[`../mixer-icons.md`](../mixer-icons.md).
+
 To render from a resolved MS icon ID (e.g. in OpenMultiTrack):
 
 ```
@@ -338,9 +341,8 @@ icon_svg = "icon_%02d.svg" % ms_id
 # Or emoji stand-ins — MixingStationIcons.kt / mixing_station_icons.py
 ```
 
-Community SVG packs: [Patrick-Gilles Maillot / behringer-icons](https://github.com/pmaillot/Behringer-X32-Icons).
-
-The full MS ID → label table is in [Appendix A](#appendix-a-mixing-station-scribble-icon-ids-174).
+Community SVG packs: [behringer-icons](https://github.com/mamarguerat/behringer-icons)
+(Patrick-Gilles Maillot / [pmaillot/Behringer-X32-Icons](https://github.com/pmaillot/Behringer-X32-Icons)).
 
 ---
 
@@ -352,7 +354,8 @@ The full MS ID → label table is in [Appendix A](#appendix-a-mixing-station-scr
 | [`tools/extract_flow8_channels.py`](./tools/extract_flow8_channels.py) | Offline decode: names, icons, Flow UI labels, USB 1–10 scribble |
 | [`tools/flow8_icon_decode.py`](./tools/flow8_icon_decode.py) | Reference decoder: input type + preset → MS icon |
 | [`tools/mixing_station_icons.py`](./tools/mixing_station_icons.py) | MS icon id → label / constant / emoji |
-| [`tools/export_icon_tables.py`](./tools/export_icon_tables.py) | Print markdown icon tables (used to maintain this doc) |
+| [`tools/export_icon_tables.py`](./tools/export_icon_tables.py) | Generate [`../mixer-icons.md`](../mixer-icons.md) and stdout appendix tables |
+| [`tools/extract_icon_assets.py`](./tools/extract_icon_assets.py) | Extract SVG/PNG assets into `docs/mixer-icons/assets/` |
 
 ### Offline decode example
 
@@ -365,8 +368,9 @@ python3 ble_dump_names.py
 # Offline decode — requires BOTH dump and 0x80 payload
 python3 extract_flow8_channels.py flow8_dump.bin --icon-config icon_config.bin
 
-# Regenerate appendix tables
+# Regenerate appendix tables / full icon reference
 python3 export_icon_tables.py all
+python3 extract_icon_assets.py && python3 export_icon_tables.py doc
 ```
 
 ---
@@ -418,87 +422,15 @@ Fixtures: [`tools/flow8_dump.bin`](./tools/flow8_dump.bin),
 
 ## Appendix A: Mixing Station scribble icon IDs (1–74)
 
-Resolved icon values on the wire and in `getChannelIconId` use this
-X32 / X-Air / Mixing Station numbering. Flow Mix drawables map to the same ids.
+Moved to **[`../mixer-icons.md`](../mixer-icons.md)** — full table with display labels,
+slug ids, and embedded SVG artwork. Regenerate with:
 
-| MS ID | Label | Emoji |
-| ----- | ----- | ----- |
-| 1 | `blank` |  |
-| 2 | `kick-back` | 🥁 |
-| 3 | `kick-front` | 🥁 |
-| 4 | `snare-top` | 🪘 |
-| 5 | `snare-bottom` | 🪘 |
-| 6 | `tom-high` | 🥁 |
-| 7 | `tom-medium` | 🥁 |
-| 8 | `floor-tom` | 🥁 |
-| 9 | `hi-hat` | 🎩 |
-| 10 | `crash` | 🔔 |
-| 11 | `drum-kit` | 🥁 |
-| 12 | `cowbell` | 🔔 |
-| 13 | `bongos` | 🪘 |
-| 14 | `congas` | 🪘 |
-| 15 | `tambourine` | 🎵 |
-| 16 | `vibraphone` | 🎵 |
-| 17 | `electric-bass` | 🎸 |
-| 18 | `acoustic-bass` | 🎸 |
-| 19 | `contrabass` | 🎸 |
-| 20 | `les-paul` | 🎸 |
-| 21 | `ibanez` | 🎸 |
-| 22 | `washburn` | 🎸 |
-| 23 | `acoustic-guitar` | 🎸 |
-| 24 | `bass-amp` | 🔊 |
-| 25 | `guitar-amp` | 🔊 |
-| 26 | `amp-cabinet` | 🔊 |
-| 27 | `piano` | 🎹 |
-| 28 | `organ` | 🎹 |
-| 29 | `harpsichord` | 🎹 |
-| 30 | `keyboard` | 🎹 |
-| 31 | `synthesizer-1` | 🎹 |
-| 32 | `synthesizer-2` | 🎹 |
-| 33 | `synthesizer-3` | 🎹 |
-| 34 | `keytar` | 🎹 |
-| 35 | `trumpet` | 🎺 |
-| 36 | `trombone` | 🎺 |
-| 37 | `saxophone` | 🎷 |
-| 38 | `clarinet` | 🎷 |
-| 39 | `violin` | 🎻 |
-| 40 | `cello` | 🎻 |
-| 41 | `male-vocal` | 🎤 |
-| 42 | `female-vocal` | 🎤 |
-| 43 | `choir` | 👥 |
-| 44 | `hand-sign` | ✋ |
-| 45 | `talk-a` | 🗣 |
-| 46 | `talk-b` | 🗣 |
-| 47 | `large-diaphragm-mic` | 🎙 |
-| 48 | `condenser-mic-left` | 🎙 |
-| 49 | `condenser-mic-right` | 🎙 |
-| 50 | `handheld-mic` | 🎤 |
-| 51 | `wireless-mic` | 🎤 |
-| 52 | `podium-mic` | 🎤 |
-| 53 | `headset-mic` | 🎧 |
-| 54 | `xlr` | 🔌 |
-| 55 | `trs` | 🔌 |
-| 56 | `trs-left` | 🔌 |
-| 57 | `trs-right` | 🔌 |
-| 58 | `rca-left` | 🔌 |
-| 59 | `rca-right` | 🔌 |
-| 60 | `tape` | 📼 |
-| 61 | `fx` | ✨ |
-| 62 | `computer` | 💻 |
-| 63 | `wedge` | 🔊 |
-| 64 | `speaker-right` | 🔈 |
-| 65 | `speaker-left` | 🔉 |
-| 66 | `speaker-array` | 🔊 |
-| 67 | `speaker-on-pole` | 🔊 |
-| 68 | `amp-rack` | 🎛 |
-| 69 | `controls` | 🎛 |
-| 70 | `fader` | 🎚 |
-| 71 | `mix-bus` | 🔀 |
-| 72 | `matrix` | 🔀 |
-| 73 | `routing` | 🔀 |
-| 74 | `smiley` | 😊 |
+```bash
+cd docs/flow8-reverse-engineering/tools
+python3 extract_icon_assets.py && python3 export_icon_tables.py doc
+```
 
-*Source: `mixing_station_icons.py` / [behringer-icons](https://github.com/pmaillot/Behringer-X32-Icons). Regenerate with `python3 tools/export_icon_tables.py ms`.*
+*Slug ids: `mixing_station_icons.py` / `MixingStationIcons.kt`. Display labels: [behringer-icons](https://github.com/mamarguerat/behringer-icons).*
 
 ## Appendix C: Hardware-validated preset → icon mapping
 

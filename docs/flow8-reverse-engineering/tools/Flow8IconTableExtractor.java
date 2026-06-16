@@ -17,7 +17,10 @@ public final class Flow8IconTableExtractor {
         java.lang.reflect.Method getIcon =
                 clientClass.getMethod("getInputChannelPresetIconIdAtIndex", int.class, int.class);
 
-        System.out.println("# (input_type, preset) -> ms_icon_id");
+        java.lang.reflect.Method getLabel =
+                clientClass.getMethod("getInputChannelPresetLabelBytesAtIndex", int.class, int.class);
+
+        System.out.println("# (input_type, preset) -> ms_icon_id, label");
         for (int type = 0; type <= 6; type++) {
             int count;
             try {
@@ -31,7 +34,8 @@ public final class Flow8IconTableExtractor {
             System.out.println("# type " + type + " count " + count);
             for (int preset = 0; preset < count; preset++) {
                 int icon = (int) getIcon.invoke(client, type, preset);
-                System.out.println(type + "," + preset + "," + icon);
+                String label = new String((byte[]) getLabel.invoke(client, type, preset), "UTF-8");
+                System.out.println(type + "," + preset + "," + icon + "," + label);
             }
         }
     }
