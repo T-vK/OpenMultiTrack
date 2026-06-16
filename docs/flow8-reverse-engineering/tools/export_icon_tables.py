@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate docs/mixer-icons.md with embedded icon tables."""
+"""Generate icon reference tables for doc 06 and docs/mixer-icons.md."""
 
 from __future__ import annotations
 
@@ -16,17 +16,17 @@ from flow8_icon_decode import (
     INPUT_TYPE_GUITAR_PAGE,
     INPUT_TYPE_LINE_INSTRUMENT,
     INPUT_TYPE_PLAYBACK,
-    PRESET_ICON_TABLES,
+    PRESET_TO_MS_ICON,
     resolve_preset_icon,
 )
-from mixing_station_display_labels import DISPLAY_LABELS, display_label
+from mixing_station_display_labels import display_label
 from mixing_station_icons import ICON_LABELS
 
 TOOLS_DIR = Path(__file__).resolve().parent
-DOCS_DIR = TOOLS_DIR.parent.parent
-REPO_ROOT = DOCS_DIR.parent
-ASSETS_DIR = DOCS_DIR / "mixer-icons" / "assets"
+FLOW8_DIR = TOOLS_DIR.parent
+DOCS_DIR = FLOW8_DIR.parent
 OUTPUT = DOCS_DIR / "mixer-icons.md"
+DOC06 = FLOW8_DIR / "06-channel-icons-and-stereo-link.md"
 
 INPUT_TYPE_NAMES = {
     INPUT_TYPE_DYNAMIC_MIC: "Dynamic mic",
@@ -46,22 +46,25 @@ PRESET_COUNTS = {
     INPUT_TYPE_PLAYBACK: 12,
 }
 
-IMG = 32  # markdown table icon width (px)
+DOC06_ASSETS = "../mixer-icons/assets"
+STANDALONE_ASSETS = "mixer-icons/assets"
 
 
 def flow_drawable(input_type: int, preset: int) -> str:
     return f"input_icon_{input_type * 100 + preset:03d}"
 
 
-def ms_icon_img(icon_id: int) -> str:
-    rel = f"mixer-icons/assets/mixing-station/{icon_id}.svg"
+def md_img(assets_prefix: str, subpath: str, alt: str) -> str:
+    return f"![{alt}]({assets_prefix}/{subpath})"
+
+
+def ms_icon_img(icon_id: int, assets_prefix: str) -> str:
     label = display_label(icon_id) or ICON_LABELS[icon_id]
-    return f'<img src="{rel}" alt="{label}" width="{IMG}" />'
+    return md_img(assets_prefix, f"mixing-station/{icon_id}.png", label)
 
 
-def flow_icon_img(drawable: str, alt: str) -> str:
-    rel = f"mixer-icons/assets/flow8/{drawable}.png"
-    return f'<img src="{rel}" alt="{alt}" width="{IMG}" />'
+def flow_icon_img(drawable: str, alt: str, assets_prefix: str) -> str:
+    return md_img(assets_prefix, f"flow8/{drawable}.png", alt)
 
 
 def flow_preset_label(input_type: int, preset: int, ms_id: int | None) -> str:
@@ -96,66 +99,37 @@ def flow_preset_rows() -> list[dict]:
     return rows
 
 
-def write_doc(path: Path) -> None:
-    lines: list[str] = [
-        "# Mixer scribble icon reference",
+def appendix_a_ms(assets_prefix: str) -> list[str]:
+    lines = [
+        "## Appendix A: Mixing Station scribble icon IDs (1–74)",
         "",
-        "Channel scribble icons on Behringer X32 / X-Air consoles, **Mixing Station**, and",
-        "**FLOW 8** share a common numeric id space (**1–74**). OpenMultiTrack resolves FLOW 8",
-        "BLE/USB state to those ids before rendering strip glyphs.",
+        "Resolved icon values on the wire and in `getChannelIconId` use this",
+        "X32 / X-Air / Mixing Station numbering. Icons below are the original X32 BMP",
+        "artwork (Patrick-Gilles Maillot / [behringer-icons](https://github.com/mamarguerat/behringer-icons)),",
+        "converted to PNG — the same pictures Mixing Station shows for scribble ids.",
         "",
-        "> **Assets:** Mixing Station / X32 artwork is from the community",
-        "> [behringer-icons](https://github.com/mamarguerat/behringer-icons) SVG pack (same",
-        "> numbering as the desk). FLOW 8 picker PNGs are extracted from `Flowmix_v1.9.apk`",
-        "> (`res/drawable-*/input_icon_NNN`). Regenerate with the commands below.",
-        "",
-        "## Regenerating",
-        "",
-        "```bash",
-        "cd docs/flow8-reverse-engineering/tools",
-        "python3 extract_icon_assets.py      # download SVGs + extract Flow PNGs",
-        "python3 export_icon_tables.py doc   # rewrite this file",
-        "```",
-        "",
-        "To refresh FLOW UI labels from a device with Flow Mix installed, extend and run",
-        "`Flow8IconTableExtractor` (see `tools/Flow8IconTableExtractor.java`).",
-        "",
-        "---",
-        "",
-        "## Mixing Station / X32 icons (ids 1–74)",
-        "",
-        "Labels are the original names from the [behringer-icons](https://github.com/mamarguerat/behringer-icons)",
-        "pack. Slug ids (`kick-back`, …) match OSC / `MixingStationIcons.kt`.",
-        "",
-        "| Display label | Slug | ID | Icon |",
-        "| ------------- | ---- | -- | ---- |",
+        "| Label | Slug | ID | Icon |",
+        "| ----- | ---- | -- | ---- |",
     ]
-
     for icon_id in range(1, 75):
         slug = ICON_LABELS[icon_id]
         name = display_label(icon_id) or slug
-        lines.append(f"| {name} | `{slug}` | {icon_id} | {ms_icon_img(icon_id)} |")
+        lines.append(f"| {name} | `{slug}` | {icon_id} | {ms_icon_img(icon_id, assets_prefix)} |")
+    lines.append("")
+    return lines
 
-    lines.extend(
-        [
-            "",
-            "---",
-            "",
-            "## FLOW 8 picker icons",
-            "",
-            "FLOW 8 does not send Mixing Station ids directly. The official app stores an",
-            "**input type** (0–5) and **preset index**; native code maps that pair to an MS id.",
-            "Drawable assets are named `input_icon_{type×100+preset:03d}`.",
-            "",
-            "**Labels:** rows marked *(validated)* were read from the Flow Mix UI on hardware",
-            "(firmware v11749). Other labels are inferred from the resolved MS id and the",
-            "behringer-icons display name until a full native label dump is available.",
-            "",
-            "| Flow label | Input type | Preset | Drawable | MS ID | MS slug | Icon |",
-            "| ---------- | ---------- | ------ | -------- | ----- | ------- | ---- |",
-        ]
-    )
 
+def appendix_b_flow(assets_prefix: str) -> list[str]:
+    lines = [
+        "## Appendix B: FLOW 8 picker icons",
+        "",
+        "Drawable assets from `Flowmix_v1.9.apk` (`res/drawable-*/input_icon_NNN`).",
+        "Labels marked *(validated)* were read from the Flow Mix UI on hardware (firmware v11749);",
+        "others are inferred from the resolved Mixing Station id.",
+        "",
+        "| Label | Input type | Preset | Drawable | MS ID | MS slug | Icon |",
+        "| ----- | ---------- | ------ | -------- | ----- | ------- | ---- |",
+    ]
     for row in flow_preset_rows():
         label = row["label"]
         if row["validated_label"]:
@@ -163,28 +137,60 @@ def write_doc(path: Path) -> None:
         ms_id = row["ms_id"]
         ms_slug = f"`{row['ms_slug']}`" if row["ms_slug"] else "—"
         ms_id_cell = str(ms_id) if ms_id is not None else "—"
-        icon = flow_icon_img(row["drawable"], row["label"])
+        icon = flow_icon_img(row["drawable"], row["label"], assets_prefix)
         lines.append(
             f"| {label} | {row['input_type']} ({row['type_name']}) | {row['preset']} "
             f"| `{row['drawable']}` | {ms_id_cell} | {ms_slug} | {icon} |"
         )
+    lines.append("")
+    return lines
 
+
+def appendix_c_validated() -> list[str]:
+    lines = [
+        "## Appendix C: Hardware-validated preset → icon mapping",
+        "",
+        "Firmware **v11749**, capture 2026-06-08. Other `(input_type, preset)` pairs must",
+        "be resolved via `getInputChannelPresetIconIdAtIndex` in the native library.",
+        "",
+        "| Input type | Preset | Flow drawable | Flow UI label | MS ID | MS label |",
+        "| ---------- | ------ | ------------- | ------------- | ----- | -------- |",
+    ]
+    for key in sorted(PRESET_TO_MS_ICON.keys()):
+        input_type, preset = key
+        ms_id = PRESET_TO_MS_ICON[key]
+        flow_label = FLOW_UI_LABELS.get(key, "")
+        drawable = flow_drawable(input_type, preset)
+        ms_slug = ICON_LABELS[ms_id]
+        type_name = INPUT_TYPE_NAMES.get(input_type, str(input_type))
+        lines.append(
+            f"| {input_type} ({type_name}) | {preset} | `{drawable}` | {flow_label} "
+            f"| {ms_id} | `{ms_slug}` |"
+        )
     lines.extend(
         [
             "",
-            "---",
+            "Drawable key formula: `type × 100 + preset`, zero-padded to three digits",
+            "(`input_icon_{key:03d}`).",
             "",
-            "## Combined reference (by Mixing Station id)",
+            "*Maintained in `tools/flow8_icon_decode.py` (`PRESET_TO_MS_ICON`, `FLOW_UI_LABELS`).*",
             "",
-            "One MS id may appear in several FLOW picker slots (e.g. multiple mic presets →",
-            "Handheld Mic). FLOW columns list every `(drawable → Flow label)` pair that",
-            "resolves to the id.",
-            "",
-            "| MS display label | MS slug | MS ID | MS icon | FLOW drawables | FLOW icons |",
-            "| ---------------- | ------- | ----- | ------- | -------------- | ---------- |",
         ]
     )
+    return lines
 
+
+def appendix_d_combined(assets_prefix: str) -> list[str]:
+    lines = [
+        "## Appendix D: Combined reference (by Mixing Station id)",
+        "",
+        "Cross-reference of Mixing Station ids with every FLOW picker slot that resolves to",
+        "the same id. **Icon (MS)** uses the X32 BMP artwork; **Icon (FLOW)** is from the",
+        "Flow Mix APK drawable named in the FLOW drawable column.",
+        "",
+        "| Label (MS) | MS slug | MS ID | Icon (MS) | FLOW drawable(s) | Icon (FLOW) |",
+        "| ---------- | ------- | ----- | --------- | ---------------- | ----------- |",
+    ]
     by_ms: dict[int, list[dict]] = defaultdict(list)
     for row in flow_preset_rows():
         if row["ms_id"] is not None:
@@ -196,48 +202,85 @@ def write_doc(path: Path) -> None:
         flow_rows = by_ms.get(icon_id, [])
         if flow_rows:
             drawables = ", ".join(f"`{r['drawable']}`" for r in flow_rows)
-            flow_labels = "; ".join(
-                r["label"] + (" *" if r["validated_label"] else "") for r in flow_rows
+            flow_imgs = " ".join(
+                flow_icon_img(r["drawable"], r["label"], assets_prefix) for r in flow_rows[:3]
             )
-            flow_imgs = " ".join(flow_icon_img(r["drawable"], r["label"]) for r in flow_rows[:4])
-            if len(flow_rows) > 4:
-                flow_imgs += f" +{len(flow_rows) - 4}"
+            if len(flow_rows) > 3:
+                flow_imgs += f" … +{len(flow_rows) - 3}"
         else:
             drawables = "—"
-            flow_labels = "—"
             flow_imgs = "—"
         lines.append(
-            f"| {name} | `{slug}` | {icon_id} | {ms_icon_img(icon_id)} "
+            f"| {name} | `{slug}` | {icon_id} | {ms_icon_img(icon_id, assets_prefix)} "
             f"| {drawables} | {flow_imgs} |"
         )
+    lines.append("")
+    return lines
 
+
+def icon_appendices(assets_prefix: str) -> str:
+    parts: list[str] = []
+    parts.extend(appendix_a_ms(assets_prefix))
+    parts.extend(appendix_b_flow(assets_prefix))
+    parts.extend(appendix_c_validated())
+    parts.extend(appendix_d_combined(assets_prefix))
+    return "\n".join(parts)
+
+
+def patch_doc06() -> None:
+    text = DOC06.read_text(encoding="utf-8")
+    start = text.find("## Appendix A:")
+    end = text.find("\n---\n\n## Related documents")
+    if start < 0 or end < 0:
+        raise SystemExit("Could not find appendix block in doc 06")
+    new_block = icon_appendices(DOC06_ASSETS)
+    updated = text[:start] + new_block + text[end + 1 :]
+    DOC06.write_text(updated, encoding="utf-8")
+    print(f"Patched {DOC06}")
+
+
+def write_standalone_doc(path: Path) -> None:
+    lines = [
+        "# Mixer scribble icon reference",
+        "",
+        "Channel scribble icons on Behringer X32 / X-Air consoles, **Mixing Station**, and",
+        "**FLOW 8** share a common numeric id space (**1–74**).",
+        "",
+        "The full tables (with embedded icons) also live in",
+        "[flow8-reverse-engineering/06-channel-icons-and-stereo-link.md](flow8-reverse-engineering/06-channel-icons-and-stereo-link.md)",
+        "appendices A–D.",
+        "",
+        "## Regenerating",
+        "",
+        "```bash",
+        "cd docs/flow8-reverse-engineering/tools",
+        "python3 extract_icon_assets.py",
+        "python3 export_icon_tables.py all",
+        "```",
+        "",
+        "---",
+        "",
+    ]
+    lines.append(icon_appendices(STANDALONE_ASSETS))
     lines.extend(
         [
-            "",
             "---",
             "",
             "## Related",
             "",
-            "- [flow8-reverse-engineering/06-channel-icons-and-stereo-link.md](flow8-reverse-engineering/06-channel-icons-and-stereo-link.md) — BLE/USB decode",
-            "- `mixer-behringer/.../MixingStationIcons.kt` — strip glyph rendering",
-            "- `mixer-behringer/.../Flow8IconPresets.kt` — `(input_type, preset)` tables",
+            "- `mixer-behringer/.../MixingStationIcons.kt`",
+            "- `mixer-behringer/.../Flow8IconPresets.kt`",
             "",
         ]
     )
-
     path.write_text("\n".join(lines), encoding="utf-8")
     print(f"Wrote {path}")
 
 
-def ms_table() -> None:
+def ms_table_stdout(assets_prefix: str) -> None:
     print("## Mixing Station scribble icon IDs (1–74)\n")
-    print("| MS ID | Slug | Display label | Icon |")
-    print("| ----- | ---- | ------------- | ---- |")
-    for icon_id in range(1, 75):
-        slug = ICON_LABELS[icon_id]
-        name = display_label(icon_id) or slug
-        print(f"| {icon_id} | `{slug}` | {name} | {ms_icon_img(icon_id)} |")
-    print()
+    for line in appendix_a_ms(assets_prefix)[4:]:
+        print(line)
 
 
 def flow_input_types() -> None:
@@ -253,31 +296,18 @@ def flow_input_types() -> None:
 
 
 def validated_preset_map() -> None:
-    print("## Hardware-validated `(input_type, preset)` → icon mapping\n")
-    from flow8_icon_decode import PRESET_TO_MS_ICON
-
-    print("| Input type | Preset | Flow drawable | Flow UI label | MS ID | MS slug |")
-    print("| ---------- | ------ | ------------- | ------------- | ----- | ------- |")
-    for key in sorted(PRESET_TO_MS_ICON.keys()):
-        input_type, preset = key
-        ms_id = PRESET_TO_MS_ICON[key]
-        flow_label = FLOW_UI_LABELS.get(key, "")
-        drawable = flow_drawable(input_type, preset)
-        ms_slug = ICON_LABELS[ms_id]
-        type_name = INPUT_TYPE_NAMES.get(input_type, str(input_type))
-        print(
-            f"| {input_type} ({type_name}) | {preset} | `{drawable}` | {flow_label} "
-            f"| {ms_id} | `{ms_slug}` |"
-        )
-    print()
+    for line in appendix_c_validated():
+        print(line)
 
 
 def main() -> None:
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
     if which in ("all", "doc"):
-        write_doc(OUTPUT)
+        write_standalone_doc(OUTPUT)
+    if which in ("all", "doc06"):
+        patch_doc06()
     if which in ("all", "ms"):
-        ms_table()
+        ms_table_stdout(STANDALONE_ASSETS)
     if which in ("all", "types"):
         flow_input_types()
     if which in ("all", "presets"):
