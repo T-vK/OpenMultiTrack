@@ -3,7 +3,7 @@
 Maps the **original product specification** to what exists in the repo today.  
 Update this file when milestones advance.
 
-**Last reviewed:** 2026-06-10 · **App version:** see `gradle/version.properties`
+**Last reviewed:** 2026-06-15 · **App version:** see `gradle/version.properties`
 
 **Documentation:** [docs/README.md](README.md) (developer hub)
 
@@ -22,7 +22,9 @@ Update this file when milestones advance.
 | USB dropout → silence + resume | ✅ |
 | Scribble strip (XR18 OSC, Flow 8 BLE/USB) | ✅ |
 | LAN Android remote (Host/Remote) | ✅ |
-| OSC routing snapshots | 🟡 Stubs in `X32Mixer` / `Xr18Mixer` |
+| XR18 per-channel routing automation | ✅ | `RoutingOverrideCoordinator`, settings UI, E2E |
+| `Mixer` API snapshots (`applySnapshot`) | 🟡 | Stub on `X32Mixer`/`Xr18Mixer`; per-channel routing is separate path |
+| Mixer health + connectivity UI | ✅ |
 | Browser web remote (Ktor) | ❌ Superseded by Android LAN sync |
 | F-Droid official inclusion | 🟡 Self-hosted repo live; `fdroiddata` draft stale |
 
@@ -43,7 +45,7 @@ Update this file when milestones advance.
 | Buffer overrun handling | 🟡 | Native drop counter; limited UI surfacing |
 | USB disconnect handling | ✅ | Silence insertion + debounced resume |
 | Long sessions (multi-hour) | 🟡 | No RF64; per-channel files mitigate size |
-| Disk space monitoring | ❌ | Not implemented |
+| Disk space monitoring | 🟡 | Free-space + time estimate in toolbar; **no auto-stop** |
 | FLAC / BWF | ❌ | Not implemented |
 
 ### 2. Virtual soundcheck (playback)
@@ -65,16 +67,17 @@ Update this file when milestones advance.
 | X32 / XR18 drivers | 🟡 | `connect()` + OSC send; snapshots **stub** |
 | USB audio path | ✅ | Generic UAC2, not driver-specific |
 | OSC UDP | 🟡 | Encode/send; feedback parser partial |
-| Routing via OSC | ❌ | `applySnapshot` not implemented |
-| Wired into app UI | 🟡 | Scribble import yes; snapshot UI no |
+| Routing via OSC | ✅ | Per-channel automation via `RoutingOverrideCoordinator` |
+| Wired into app UI | ✅ | Scribble import, routing automation settings, input-source screen |
 
 ### 4. Snapshot / mode toggling
 
 | Requirement | Status | Notes |
 |-------------|--------|-------|
-| Record / soundcheck routing snapshots | ❌ | Designed in [mixer-drivers.md](mixer-drivers.md) |
-| Named storable snapshots | ❌ | `MixerSnapshot` type exists |
-| One-tap mode switch | ❌ | App modes exist; OSC routing not automated |
+| Record / soundcheck routing (per-channel) | ✅ | `RoutingAutomationHooksImpl` + restore policy |
+| Soundcheck capture-only before USB | ✅ | OSC deferred until playback route open |
+| Named `MixerSnapshot` slot recall | 🟡 | Snapshot **slot** recall in automation settings; full `Mixer` API still stub |
+| One-tap mode switch | 🟡 | Transport-triggered automation; pre-apply on arm still open |
 
 ### 5. Remote control
 
@@ -92,12 +95,12 @@ Update this file when milestones advance.
 
 | Module | Implemented | Gaps |
 |--------|-------------|------|
-| **app** | DAW UI, service, multi-mixer, remote wiring, scribble | Mixer IP connect UI, snapshot recall |
-| **domain** | Models, `Mixer`, `AppMode`, remote constants | Full transport state machine |
-| **usb-audio** | Enum, probe, router, Behringer IDs | Verified PID table expansion |
+| **app** | DAW UI, service, multi-mixer, remote wiring, scribble, routing automation, health UI | Transport step UI, session v2, Flow 8 return matrix |
+| **domain** | Models, `Mixer`, `AppMode`, remote constants, `MixerHealth` | Full transport state machine |
+| **usb-audio** | Enum, probe, router, Behringer IDs, permission queue | Verified PID table expansion |
 | **audio-engine** | Oboe + UAC2, record/play/monitor, rings | Native playback seek hardening |
-| **session-io** | Per-channel WAV, metadata, waveforms, cues | RF64, FLAC, BWF |
-| **mixer-behringer** | OSC, scribble, Flow 8 decoders | Snapshot apply/capture |
+| **session-io** | Per-channel WAV, metadata, waveforms, cues | RF64, FLAC, BWF, session v2 naming |
+| **mixer-behringer** | OSC, scribble, Flow 8 decoders, XR18 routing OSC | `Mixer.applySnapshot` / `captureSnapshot` |
 | **remote-server** | Host, client, discovery, codec | Protocol v2 if breaking changes |
 
 ---
@@ -146,11 +149,14 @@ See [development/testing.md](development/testing.md).
 - [ ] Disk space monitor
 - [ ] RF64 or export formats for very long shows
 
-### M4 — Mixer OSC integration
+### M4 — Mixer OSC integration 🔄
 
-- [ ] `applySnapshot` / `captureSnapshot` on real X32/XR18
-- [ ] Mixer connection UI, snapshot storage
-- [ ] Feedback parser for verify paths
+- [x] Per-channel record/soundcheck routing automation (XR18/X-Air)
+- [x] Routing automation settings UI + restore policy
+- [x] Soundcheck capture-only routing (OSC after USB playback)
+- [ ] `Mixer.applySnapshot` / `captureSnapshot` on `X32Mixer`/`Xr18Mixer` (legacy API)
+- [ ] Pre-apply routing on arm / `routingReady` flags (see transport latency doc)
+- [ ] Flow 8 USB return matrix settings
 
 ### M5 — Remote ✅ (Android LAN)
 
@@ -168,12 +174,12 @@ See [development/testing.md](development/testing.md).
 1. **Hardware assumptions unverified** on all target mixers — [hardware-assumptions.md](hardware-assumptions.md)
 2. **`fdroiddata` recipe stale**
 3. **Pre-0.2.2 APK signatures** — one-time uninstall for pinned key users
-4. **OSC snapshots stubbed** despite scribble/routing research docs
+4. **`Mixer` snapshot API stubbed** — per-channel routing automation is the working path
 5. **Debug-only CI publishes** — release signing deferred
-6. **Documentation was stale** — addressed by 2026-06 docs restructure; keep [README.md](README.md) updated with code
+6. **Flow 8 full icon preset table** — inferred in `Flow8IconPresets`; native extraction tool not automated
 
 ---
 
 ## Honest assessment
 
-OpenMultiTrack has moved well beyond the initial USB-probe vertical slice: it is a **usable DAW-style recorder** with per-channel sessions, soundcheck playback, scribble labels, USB dropout recovery, and **LAN remote control**. The main gaps versus the original vision are **OSC routing snapshots** (automated record ↔ soundcheck mixer routing), **disk space safety**, and **official F-Droid source inclusion**. Treat M4 (OSC snapshots) as the next differentiator for hands-free mixer mode switching.
+OpenMultiTrack is a **usable DAW-style recorder** with per-channel sessions, soundcheck playback, scribble labels, USB dropout recovery, LAN remote control, **XR18 per-channel routing automation**, and **mixer connectivity health UI**. Main gaps: **transport step visibility**, **session format v2**, **Flow 8 return-matrix UI**, **pre-apply routing on arm** (for sub-200 ms transport), **disk auto-stop**, and **official F-Droid source inclusion**.

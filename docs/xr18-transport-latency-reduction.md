@@ -78,15 +78,11 @@ Expert toggle: fire writes without blocking verify on arm. Default remains verif
 
 ## Play (~200 ms)
 
-### 1. Fix soundcheck pre-USB full apply (quick win)
+### 1. Fix soundcheck pre-USB full apply — **done**
 
-**Bug:** AUTO `peekApply` may call `applyInternal` immediately, so `beforeSoundcheckApply` returns `Applied` before USB opens (~2.8 s on Play in the report).
+Implemented: `beforeSoundcheckApply` uses `captureOverrideOnly` (no OSC); `afterSoundcheckPlaybackStarted` calls `reapplyOverrideOnly` after USB playback opens.
 
-**Fix:** `peekApply` for soundcheck must **not** apply OSC — only `ReadyToApply` or capture-only. Full apply runs once after `ensurePlaybackLocked`.
-
-**Saves:** ~2.8 s on Play immediately.
-
-### 2. Pre-apply soundcheck routing when session loads
+### 2. Pre-apply soundcheck routing when session loads — **partial**
 
 **When:** `selectSoundcheckSession` + `warmPlaybackRoute`.
 
@@ -109,8 +105,8 @@ Keep async after session load — off the Play path.
 | Priority | Item | Effort | Impact (est.) |
 |----------|------|--------|----------------|
 | P0 | **Removed USB quiesce before OSC** | Done | Record −0–5 s |
-| P0 | Fix soundcheck `peekApply` / capture-only before USB | Small | Play −2.8 s |
-| P0 | Apply soundcheck routing in `warmPlaybackRoute` / session select | Medium | Play −0.3 s; enables skip on press |
+| P0 | Fix soundcheck capture-only before USB | **Done** | Play −2.8 s |
+| P0 | Apply soundcheck routing in `warmPlaybackRoute` / session select | Partial | USB warmup only; OSC still on Play press |
 | P1 | Pre-apply record routing on arm (debounced) | Medium | Record −2.6 s |
 | P1 | Cancel duplicate 82-path OSC on transport path | Small–medium | Record −0–2.6 s |
 | P2 | Keep capture hot between record sessions | Medium | Record −0.1 s |
@@ -124,9 +120,8 @@ Keep async after session load — off the Play path.
 - [ ] Routing applied **before** Record/Play (arm or session select)
 - [ ] USB stream already open (capture or playback route warmed)
 - [x] **No** USB quiesce / monitor teardown before OSC on press
+- [x] No duplicate soundcheck **OSC** apply before USB (capture-only + post-playback reapply)
 - [ ] At most a **tiny** verify (0–3 OSC paths) on press, or trust `routingReady`
-- [ ] No `readAllChannelInputs` on press
-- [ ] No duplicate soundcheck apply before and after USB
 
 ---
 

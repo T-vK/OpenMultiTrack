@@ -413,11 +413,7 @@ Fixtures: [`tools/flow8_dump.bin`](./tools/flow8_dump.bin),
 
 - **Do not** treat `0x80` byte 0 (`0x03`) or byte 1 alone as an MS icon ID.
   Always combine with the per-strip input type from the `0x38` buffer.
-- The Kotlin decoder in `Flow8StateDecoder.kt` still uses an older marker/code
-  mapping and should be updated to match `flow8_icon_decode.py`.
-- Only a subset of `(input_type, preset)` pairs is validated on hardware
-  ([Appendix C](#appendix-c-hardware-validated-preset--icon-mapping)); the full
-  picker table lives in the native library.
+- The Kotlin decoder in `Flow8StateDecoder.kt` uses `Flow8IconPresets` (aligned with `flow8_icon_decode.py`). Only a subset of `(input_type, preset)` pairs is hardware-validated; the full picker table lives in the native library (`Flow8IconTableExtractionTest`, manual).
 - BLE compact offsets differ from the USB SysEx `0x0554` table; auto-detect by
   buffer size in `Flow8StateDecoder` / `extract_flow8_channels.py`.
 - ParamQuery types `0x26` / `0x25` are observed at the GATT layer; the native

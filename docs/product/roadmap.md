@@ -27,10 +27,12 @@ Professional **multitrack recording and virtual soundcheck** on Android tablets:
 
 | Area | Work remaining |
 |------|----------------|
-| **Transport UX** | Sample-aligned seek refinement, position display, scrubbing coalescing |
-| **OSC snapshots** | `applySnapshot` / `captureSnapshot` for record ↔ soundcheck routing |
-| **Mixer UI** | Connect X32/XR18 by IP, snapshot recall in app |
-| **Disk space** | Pre-stop when storage low |
+| **Transport UX** | Transport step UI in info bar; pre-apply routing on arm; sample-aligned seek refinement |
+| **XR18 routing** | Pre-apply on arm / `routingReady` flags for sub-200 ms transport (see transport latency doc) |
+| **Flow 8** | USB return matrix settings UI; 10× play/stop hardware gate |
+| **Mixer UI** | Legacy `Mixer.applySnapshot` API; optional colorful licensed strip icons |
+| **Disk space** | Auto-stop when storage critically low (estimate UI exists) |
+| **Session format v2** | `01. Mic 1.wav`, WAV `omt` chunk, retire new `session.cue` |
 | **Hardware validation** | XR18 18ch, X32 32ch on production tablets |
 | **F-Droid official** | Refresh `fdroiddata` recipe, release/reproducible build story |
 
@@ -84,7 +86,7 @@ Auto-import on mixer add / after probe; manual refresh in menu. **Never write** 
 
 | Phase | Description |
 |-------|-------------|
-| **OSC routing snapshots** | One-tap record vs soundcheck mixer routing |
+| **OSC routing snapshots** | Legacy `MixerSnapshot` API on `X32Mixer`/`Xr18Mixer` (per-channel automation already shipped) |
 | **W64 / RF64 / FLAC** | Large sessions and export formats |
 | **Browser web remote** | Only if product revisits Ktor/HTML approach ([control-api.md](../control-api.md) draft) |
 | **Additional consoles** | Midas M32, other OSC maps — after abstraction proven |

@@ -1,6 +1,6 @@
 # Mixer connectivity, transport UX, routing model, and session format v2
 
-**Status:** Living plan — partially implemented (updated 2026-06-11)  
+**Status:** Living plan — partially implemented (updated 2026-06-15)  
 **Audience:** Contributors implementing the next major UX and session-format milestones  
 **Related:** [xr18-routing-automation.md](xr18-routing-automation.md), [xr18-transport-latency-reduction.md](xr18-transport-latency-reduction.md), [product/session-format.md](product/session-format.md), [flow8-reverse-engineering/](flow8-reverse-engineering/)
 
@@ -21,24 +21,27 @@ Each phase is independently shippable.
 
 ---
 
-## Implementation status (2026-06-11)
+## Implementation status (2026-06-15)
 
 | Area | Status | Notes |
 |------|--------|-------|
-| USB permission queue | **Done** | `UsbPermissionQueue` in `usb-audio`; `MainActivity` drains one device at a time |
-| Stable USB device id | **Done** | `UsbPermissionCoordinator.stableKeyForParts()`; grant debounce probes only granted mixer |
-| Flow 8 playback profile | **Done** | `Flow8UsbPlaybackProfile` — 2/4ch playback, capture release before play, post-stop delays |
-| Flow 8 torture test | **Open** | Instrumented 10× play/stop gate not yet in CI |
-| USB quiesce before OSC | **Removed (obsolete)** | Was ~5 s monitor/capture teardown misattributed as “needed for OSC”; OSC works while USB streams |
-| Routing automation UI | **Done** | Per-mixer LAN routing in mixer settings; restore policy (`NONE` / recall snapshot / slot) |
+| USB permission queue | **Done** | `UsbPermissionQueue` + JVM tests in `usb-audio` |
+| Stable USB device id | **Done** | `UsbPermissionCoordinator.stableKeyForParts()`; grant debounce |
+| Flow 8 playback profile | **Done** | `Flow8UsbPlaybackProfile` — capture release before play, post-stop delays |
+| Flow 8 torture test | **Open** | No 10× play/stop gate in CI; single-play instrumented tests exist |
+| USB quiesce before OSC | **Removed (obsolete)** | OSC works while USB streams |
+| XR18 per-channel routing automation | **Done** | `RoutingOverrideCoordinator`, settings UI, restore policy, E2E tests |
+| Soundcheck capture-only routing | **Done** | `beforeSoundcheckApply` → `captureOverrideOnly`; OSC after USB via `afterSoundcheckPlaybackStarted` |
 | Transport activity info bar | **Done** | `SessionActivityStatus` with spinner/progress during record/play/load |
-| `MixerHealthSnapshot` | **Done** | USB, OSC, audio transport, issues in `domain/.../MixerHealth.kt` |
-| `MixerHealthCollector` | **Done** | Populates snapshot from session + USB enumerator |
-| Mixer connectivity screen | **Done** | `MixerConnectivityScreen` — drawer + tap info bar |
+| `MixerHealthSnapshot` | **Done** | `MixerHealthCollector`, connectivity screen, info-bar icon summary |
+| Mixer connectivity screen | **Done** | Drawer + tap info bar; BLE shown as on-demand in checklist |
 | Transport step UI (`n/N`) | **Open** | `TransportTraceHub` still logcat-only |
-| Session format v2 | **Open** | `01. Mic 1.wav`, WAV metadata, retire new `.cue` |
-| Flow 8 USB return matrix UI | **Open** | Config mirrors official app toggles |
-| Label sync prefs | **Open** | OSC auto on, Flow 8 BLE on-demand |
+| Session format v2 | **Open** | Still `channel01.wav`; `session.cue` still written |
+| Flow 8 USB return matrix UI | **Open** | No Flow-8-specific return-matrix settings (XR18 routing UI exists) |
+| Label sync prefs | **Partial** | Behavior matches plan defaults (OSC auto, Flow 8 on-demand); no explicit settings keys |
+| Storage estimate UI | **Partial** | Free-space + record-time estimate in toolbar; no auto-stop on low disk |
+| Strip / settings icons | **Done** | Text glyphs (`MixingStationIcons`); settings category icons |
+| Licensed colorful strip bitmaps | **Deferred** | MS artwork removed; product decision pending |
 
 ---
 
@@ -146,50 +149,34 @@ flowchart LR
 
 **Remaining:** 10× play/stop soundcheck torture on hardware; confirm no sine-wave lockup without power cycle.
 
-### 0.3 Soundcheck routing `peekApply` latency — **open**
+### 0.3 Soundcheck routing `peekApply` latency — **done**
 
-Documented in [xr18-transport-latency-reduction.md](xr18-transport-latency-reduction.md): soundcheck must not full-apply OSC before USB when `peekApply` should be capture-only. Independent quick win for Play responsiveness.
+Implemented in `RoutingAutomationHooksImpl`: `beforeSoundcheckApply` calls `captureOverrideOnly` (no OSC writes); `afterSoundcheckPlaybackStarted` calls `reapplyOverrideOnly` after USB playback opens. See `RoutingOverrideCoordinator.captureOverrideOnly` / `reapplyOverrideOnly`.
+
+Remaining transport latency work is in [xr18-transport-latency-reduction.md](xr18-transport-latency-reduction.md) (pre-apply on arm, `routingReady` flags).
 
 ---
 
-## Phase 1 — Mixer Health and connectivity UI — **in progress**
-
-### 1.1 Domain model — **done**
-
-```kotlin
-data class MixerHealthSnapshot(
-    val mixerId: String,
-    val updatedAtMs: Long,
-    val overall: HealthLevel,
-    val usb: UsbHealth,
-    val osc: OscHealth?,              // null when mixer has no OSC
-    val audio: AudioTransportHealth?, // capture/playback/monitor/degraded
-    val issues: List<HealthIssue>,
-)
-```
-
-Producer: `MixerHealthCollector.collect()` from USB enumerator, session state, OSC support flag.
+## Phase 1 — Mixer Health and connectivity UI — **mostly done**
 
 ### 1.2 UI surfaces
 
 **A. Mixer connectivity screen — done**
 
-Sections: Overview, USB, LAN/OSC, Audio transport, Issues, App permissions. Open from navigation drawer (“Mixer connectivity”) or tap session info bar.
-
-**B. Info bar — partial**
+**B. Info bar — mostly done**
 
 - Activity status during transport: **done**
-- Health issues when no activity: **done**
-- Collapsed OK summary (“USB ready · OSC configured”): **open**
+- Health issues when no activity: **done** (USB/OSC icon summary via `MixerConnectivitySummaryIcons`)
+- Collapsed OK **text** summary (“USB ready · OSC configured”): **open** (icons-only when healthy)
 - Tap → connectivity screen: **done**
 
 **C. Toasts — partial**
 
-Routing/permission errors should migrate from toasts to health issues over time.
+Some routing/permission errors still use toasts; migrate to health issues over time.
 
-### 1.3 Flow 8 Bluetooth in Health UI — **open**
+### 1.3 Flow 8 Bluetooth in Health UI — **done**
 
-Display BLE as “Available for label sync”, not “Connected”. Settings: `flow8AutoLabelSync = false`, `oscAutoLabelSync = true`.
+Connectivity checklist shows BLE as on-demand label sync, not a persistent connection.
 
 ---
 
@@ -211,16 +198,18 @@ Example record-start steps:
 
 ## Phase 3 — Routing topology and channel identity
 
-Unchanged intent: record vs soundcheck channel names, input source badges, Flow 8 USB return matrix config. See prior sections in git history for full model; implementation still open.
+**Partial.** XR18 per-channel routing automation, input-source screen, and IN/OUT routing badges on strips are shipped. Still open: Flow 8 USB return matrix settings UI and fuller record-vs-soundcheck label semantics per routing topology.
 
 ---
 
 ## Phase 4 — Label sync policy
 
-| Mixer type | Default | Mechanism |
-|------------|---------|-----------|
-| XR18, X32, X-Air OSC | On | `Xr18ScribbleImporter` background |
-| Flow 8 | Off | `Flow8BleScribbleImporter` on-demand |
+| Mixer type | Default | Mechanism | Status |
+|------------|---------|-----------|--------|
+| XR18, X32, X-Air OSC | On | `maybeBackgroundRefreshOscScribble` | **Done** (hardcoded) |
+| Flow 8 | Off | Pairing dialog / manual sync in mixer picker | **Done** (hardcoded) |
+
+Explicit settings keys (`oscAutoLabelSync`, `flow8AutoLabelSync`) not added yet.
 
 ---
 
@@ -267,12 +256,13 @@ flowchart TD
 
 | Area | Test type | Status |
 |------|-----------|--------|
-| USB permission queue | JVM `UsbPermissionQueueTest` | Open |
+| USB permission queue | JVM `UsbPermissionQueueTest` | **Done** (basic queue tests) |
 | MixerHealthCollector | JVM | **Done** |
-| Connectivity screen | Manual / screenshot | New |
-| Flow 8 playback teardown | Instrumented, hardware-gated | Partial |
-| Transport step mapping | JVM | Open |
-| Session v1 compatibility | Golden fixture | Open |
+| Connectivity screen | Manual / screenshot | Done |
+| XR18 routing automation | Instrumented E2E | **Done** (`Xr18RoutingAppE2eTest`) |
+| Flow 8 playback teardown | Instrumented, hardware-gated | **Partial** (single play/stop; no 10× gate) |
+| Transport step mapping | JVM | **Open** |
+| Session v1 compatibility | Golden fixture | **Open** |
 
 Manual scripts in `docs/development/testing.md`: dual-mixer permission count, Flow 8 10× play/stop, record → soundcheck labels.
 
@@ -287,15 +277,19 @@ Manual scripts in `docs/development/testing.md`: dual-mixer permission count, Fl
 - [x] Mixer connectivity screen + info bar navigation
 - [x] Transport activity status in info bar
 - [x] Per-mixer routing automation settings + restore policy
-- [x] Phase 0.1: grant debounce + queue tests — probe only granted mixer on grant
+- [x] XR18 per-channel routing automation (`RoutingOverrideCoordinator`)
+- [x] Phase 0.1: grant debounce + queue tests
+- [x] Phase 0.3: soundcheck capture-only routing + post-USB reapply
+- [x] Phase 1: health icon summary in info bar; BLE on-demand in connectivity UI
+- [x] Settings category icons; strip text glyphs (`MixingStationIcons`)
 - [ ] Phase 0.2: Flow 8 10× play/stop torture — no brick
-- [ ] Phase 0.3: soundcheck `peekApply` capture-only fix
-- [ ] Phase 1: collapsed OK summary in info bar; reduce permission toasts
+- [ ] Phase 1 polish: collapsed OK **text** in info bar; fewer permission toasts
 - [ ] Phase 2: `TransportStep` UI bound to `TransportTraceHub`
-- [ ] Phase 3: Record vs soundcheck channel labels + input source badges
 - [ ] Phase 3: Flow 8 USB return matrix settings
-- [ ] Phase 4: OSC auto-sync on, Flow 8 auto-sync off
-- [ ] Phase 5: `01. Mic 1.wav` + WAV metadata + retire new `.cue`
+- [ ] Phase 3 polish: record vs soundcheck channel label semantics
+- [ ] Phase 4: explicit label-sync settings keys (optional; behavior already correct)
+- [ ] Phase 5: `01. Mic 1.wav` + WAV `omt` metadata + retire new `.cue`
 - [ ] Phase 6: SAF default storage + full access optional
+- [ ] Licensed colorful strip icon pack (product decision; MS bitmaps removed)
 
 This plan sequences **remaining bugs**, then **visibility polish**, then **routing correctness**, then **on-disk format** — without reintroducing USB quiesce or blocking OSC on active USB streams.
